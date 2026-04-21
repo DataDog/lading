@@ -107,7 +107,6 @@ pub struct TcpRr {
     config: Config,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
-    sample_period: Duration,
 }
 
 enum ServerState {
@@ -120,12 +119,7 @@ const LISTENER_TOKEN: Token = Token(0);
 impl TcpRr {
     /// Create a new [`TcpRr`] blackhole instance.
     #[must_use]
-    pub fn new(
-        general: General,
-        config: &Config,
-        shutdown: lading_signal::Watcher,
-        sample_period: Duration,
-    ) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "tcp_rr".to_string()),
@@ -137,7 +131,6 @@ impl TcpRr {
             config: *config,
             metric_labels,
             shutdown,
-            sample_period,
         }
     }
 
@@ -164,10 +157,9 @@ impl TcpRr {
         let metrics_handle = {
             let tm = Arc::clone(&thread_metrics);
             let labels = self.metric_labels.clone();
-            let interval = self.sample_period;
             let flag = Arc::clone(&shutdown_flag);
             thread::spawn_named("tcp_rr-bh-metrics", move || {
-                metrics::run_metrics_thread(&tm, &labels, interval, &flag);
+                metrics::run_metrics_thread(&tm, &labels, &flag);
             })
         };
 

@@ -118,16 +118,16 @@ impl MetricsSnapshot {
 pub(crate) fn run_metrics_thread(
     thread_metrics: &[ThreadMetrics],
     labels: &[(String, String)],
-    sample_period: Duration,
     shutdown: &AtomicBool,
 ) {
     let mut snapshot = MetricsSnapshot::new(thread_metrics.len());
 
+    let interval = Duration::from_secs(5);
     let mut total_snapshot_ns: u64 = 0;
     let mut snapshot_count: u64 = 0;
 
     while !shutdown.load(Relaxed) {
-        std::thread::sleep(sample_period);
+        std::thread::sleep(interval);
         let start = Instant::now();
         snapshot.snapshot_and_submit(thread_metrics, labels);
         total_snapshot_ns += u64::from(start.elapsed().subsec_nanos());

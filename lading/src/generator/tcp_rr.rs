@@ -99,7 +99,6 @@ pub struct TcpRr {
     config: Config,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
-    sample_period: Duration,
 }
 
 enum ClientState {
@@ -110,18 +109,12 @@ enum ClientState {
 impl TcpRr {
     /// Create a new [`TcpRr`] generator instance.
     #[must_use]
-    pub fn new(
-        general: General,
-        config: &Config,
-        shutdown: lading_signal::Watcher,
-        sample_period: Duration,
-    ) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let metric_labels = MetricsBuilder::new("tcp_rr").with_id(general.id).build();
         Self {
             config: config.clone(),
             metric_labels,
             shutdown,
-            sample_period,
         }
     }
 
@@ -195,10 +188,9 @@ impl TcpRr {
         let metrics_handle = {
             let tm = Arc::clone(&thread_metrics);
             let labels = self.metric_labels.clone();
-            let interval = self.sample_period;
             let flag = Arc::clone(&shutdown_flag);
             thread::spawn_named("tcp_rr-metrics", move || {
-                metrics::run_metrics_thread(&tm, &labels, interval, &flag);
+                metrics::run_metrics_thread(&tm, &labels, &flag);
             })
         };
 

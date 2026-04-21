@@ -543,11 +543,9 @@ async fn inner_main(
     //
     // GENERATOR
     //
-    let sample_period = Duration::from_millis(config.sample_period_milliseconds);
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server =
-            generator::Server::new(cfg, shutdown_watcher.clone(), sample_period)?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone())?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -566,8 +564,7 @@ async fn inner_main(
     // BLACKHOLE
     //
     for cfg in config.blackhole {
-        let blackhole_server =
-            blackhole::Server::new(cfg, shutdown_watcher.clone(), sample_period)?;
+        let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
         let _bsrv = tokio::spawn(async {
             match blackhole_server.run().await {
                 Ok(()) => debug!("blackhole shut down successfully"),
