@@ -16,7 +16,7 @@
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::num::{NonZeroU16, NonZeroUsize};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
@@ -50,6 +50,10 @@ fn default_data_port() -> u16 {
     12867
 }
 
+fn default_backlog() -> i32 {
+    1024
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -79,6 +83,10 @@ pub struct Config {
     /// Whether to set `TCP_NODELAY` on accepted connections. Default true.
     #[serde(default = "default_true")]
     pub no_delay: bool,
+    /// Listener backlog (pending-connection queue length) passed to `listen(2)`.
+    /// Default 1024.
+    #[serde(default = "default_backlog")]
+    pub backlog: i32,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -169,7 +177,7 @@ impl TcpRr {
         // or panics, it propagates as an error directly from this task.
         let binding_addr = SocketAddr::new(self.config.addr, self.config.data_port);
         let thread0_listener = if num_threads > 1 {
-            Some(create_listener(0, num_threads, binding_addr))
+            Some(create_listener(0, num_threads, binding_addr, self.config.backlog))
         } else {
             None
         };
@@ -186,6 +194,7 @@ impl TcpRr {
             let request_size = self.config.request_size.get();
             let response_size = self.config.response_size.get();
             let no_delay = self.config.no_delay;
+            let backlog = self.config.backlog;
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
             let prebuilt = if i == 0 {
@@ -200,6 +209,7 @@ impl TcpRr {
                     num_threads,
                     binding_addr,
                     prebuilt,
+                    backlog,
                     request_size,
                     response_size,
                     no_delay,
@@ -284,37 +294,32 @@ impl TcpRr {
 
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
 /// and (for thread 0) attaches the reuseport eBPF program.
-#[allow(clippy::cast_possible_truncation)]
 fn create_listener(
     thread_index: u16,
     num_threads: u16,
     binding_addr: SocketAddr,
+    backlog: i32,
 ) -> std::net::TcpListener {
-    // Create socket manually to set SO_REUSEPORT before bind.
     let domain = if binding_addr.is_ipv4() {
-        libc::AF_INET
+        socket2::Domain::IPV4
     } else {
-        libc::AF_INET6
+        socket2::Domain::IPV6
     };
-    let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM, 0) };
-    assert!(fd >= 0, "failed to create socket");
-
-    // Set nonblocking (SOCK_NONBLOCK is Linux-only).
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-
-    // Close-on-exec to prevent fd leaks to child processes.
-    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-
-    set_sock_opt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1);
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
+        .expect("failed to create socket");
+    socket.set_nonblocking(true).expect("failed to set nonblocking");
+    socket.set_cloexec(true).expect("failed to set close-on-exec");
+    socket.set_reuse_address(true).expect("failed to set SO_REUSEADDR");
 
     if num_threads > 1 {
-        set_sock_opt(fd, libc::SOL_SOCKET, libc::SO_REUSEPORT, 1);
+        socket
+            .set_reuse_port(true)
+            .expect("failed to set SO_REUSEPORT");
 
         if thread_index == 0 {
             match bpf::load_reuseport_ebpf(u32::from(num_threads)) {
                 Ok(prog) => {
-                    if let Err(e) = bpf::attach_reuseport_ebpf(fd, &prog) {
+                    if let Err(e) = bpf::attach_reuseport_ebpf(socket.as_raw_fd(), &prog) {
                         warn!("failed to attach reuseport eBPF: {e}, falling back to kernel hash");
                     }
                 }
@@ -325,63 +330,12 @@ fn create_listener(
         }
     }
 
-    let (sockaddr, socklen) = socket_addr_to_raw(&binding_addr);
-    let ret = unsafe { libc::bind(fd, (&raw const sockaddr).cast::<libc::sockaddr>(), socklen) };
-    assert!(
-        ret == 0,
-        "failed to bind to {binding_addr}: {}",
-        std::io::Error::last_os_error()
-    );
+    socket
+        .bind(&binding_addr.into())
+        .unwrap_or_else(|e| panic!("failed to bind to {binding_addr}: {e}"));
+    socket.listen(backlog).expect("failed to listen");
 
-    let ret = unsafe { libc::listen(fd, 1024) };
-    assert!(
-        ret == 0,
-        "failed to listen: {}",
-        std::io::Error::last_os_error()
-    );
-
-    unsafe { std::net::TcpListener::from_raw_fd(fd) }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn set_sock_opt(fd: libc::c_int, level: libc::c_int, optname: libc::c_int, val: libc::c_int) {
-    unsafe {
-        libc::setsockopt(
-            fd,
-            level,
-            optname,
-            (&raw const val).cast::<libc::c_void>(),
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-    }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn socket_addr_to_raw(addr: &SocketAddr) -> (libc::sockaddr_storage, libc::socklen_t) {
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let len = match addr {
-        SocketAddr::V4(a) => {
-            let sin = unsafe { &mut *(&raw mut storage).cast::<libc::sockaddr_in>() };
-            sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port = a.port().to_be();
-            sin.sin_addr = libc::in_addr {
-                s_addr: u32::from_ne_bytes(a.ip().octets()),
-            };
-            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
-        }
-        SocketAddr::V6(a) => {
-            let sin6 = unsafe { &mut *(&raw mut storage).cast::<libc::sockaddr_in6>() };
-            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port = a.port().to_be();
-            sin6.sin6_addr = libc::in6_addr {
-                s6_addr: a.ip().octets(),
-            };
-            sin6.sin6_flowinfo = a.flowinfo();
-            sin6.sin6_scope_id = a.scope_id();
-            std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
-        }
-    };
-    (storage, len)
+    socket.into()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -390,6 +344,7 @@ fn server_thread_main(
     num_threads: u16,
     binding_addr: SocketAddr,
     prebuilt_listener: Option<std::net::TcpListener>,
+    backlog: i32,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
@@ -400,7 +355,7 @@ fn server_thread_main(
     // Thread 0 uses the pre-built listener (with BPF already attached);
     // others bind their own sockets that join the existing reuseport group.
     let std_listener = prebuilt_listener
-        .unwrap_or_else(|| create_listener(thread_index, num_threads, binding_addr));
+        .unwrap_or_else(|| create_listener(thread_index, num_threads, binding_addr, backlog));
 
     // Signal that this thread's listener is bound and ready. If this send
     // fails the receiver has gone away (blackhole is shutting down).
@@ -463,15 +418,12 @@ fn server_thread_main(
     }
 }
 
-/// Set `TCP_NODELAY` on a mio [`TcpStream`] using the raw fd.
+/// Set `TCP_NODELAY` on a mio [`TcpStream`] via a borrowed `socket2::SockRef`.
 fn set_nodelay_mio(stream: &TcpStream, no_delay: bool) {
-    let fd = stream.as_raw_fd();
-    set_sock_opt(
-        fd,
-        libc::IPPROTO_TCP,
-        libc::TCP_NODELAY,
-        i32::from(no_delay),
-    );
+    let sock = socket2::SockRef::from(stream);
+    if let Err(e) = sock.set_tcp_nodelay(no_delay) {
+        trace!("failed to set TCP_NODELAY: {e}");
+    }
 }
 
 fn handle_server_event(
