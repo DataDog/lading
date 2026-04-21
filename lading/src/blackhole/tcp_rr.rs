@@ -188,7 +188,11 @@ impl TcpRr {
             let no_delay = self.config.no_delay;
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
-            let prebuilt = if i == 0 { thread0_listener.take() } else { None };
+            let prebuilt = if i == 0 {
+                thread0_listener.take()
+            } else {
+                None
+            };
             let tx = ready_tx.clone();
             let handle = thread::spawn_named(&format!("tcp_rr-server-{i}"), move || {
                 server_thread_main(
