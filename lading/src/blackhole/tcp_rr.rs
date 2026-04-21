@@ -171,10 +171,11 @@ impl TcpRr {
             None
         };
 
-        // Ready barrier: all data threads + this async task wait here.
-        // Once all threads have bound their listeners, the async task
-        // opens the control port to signal readiness to the generator.
-        let ready_barrier = Arc::new(Barrier::new(num_threads as usize + 1));
+        // Each thread sends a ready signal via this channel after binding.
+        // If a thread panics before signaling, its sender drops; once all
+        // senders are gone, recv() returns None and we detect the failure
+        // instead of hanging forever.
+        let (ready_tx, mut ready_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
         let mut handles = Vec::with_capacity(num_threads as usize);
         for i in 0..num_threads {
@@ -185,7 +186,7 @@ impl TcpRr {
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
             let bpf_barrier = bpf_barrier.clone();
-            let ready_barrier = Arc::clone(&ready_barrier);
+            let tx = ready_tx.clone();
             let handle = thread::spawn_named(&format!("tcp_rr-server-{i}"), move || {
                 server_thread_main(
                     i,
@@ -197,18 +198,23 @@ impl TcpRr {
                     &flag,
                     &tm[i as usize],
                     bpf_barrier.as_deref(),
-                    &ready_barrier,
+                    tx,
                 );
             });
             handles.push(handle);
         }
+        // Drop our own copy so the channel closes when all worker threads exit.
+        drop(ready_tx);
 
-        // Wait for all data threads to finish binding.
-        // Use spawn_blocking so we don't block the tokio runtime.
-        let rb = Arc::clone(&ready_barrier);
-        tokio::task::spawn_blocking(move || rb.wait())
-            .await
-            .expect("ready barrier join failed");
+        // Wait for each thread to signal ready. If a sender drops without
+        // signaling (thread panicked), recv() eventually returns None.
+        for _ in 0..num_threads {
+            if ready_rx.recv().await.is_none() {
+                shutdown_flag.store(true, Relaxed);
+                thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+                return Err(Error::ThreadPanicked);
+            }
+        }
 
         // All data listeners are up. Open control port so the generator
         // can connect and know we're ready.
@@ -382,7 +388,7 @@ fn server_thread_main(
     shutdown_flag: &std::sync::atomic::AtomicBool,
     metrics: &ThreadMetrics,
     bpf_barrier: Option<&Barrier>,
-    ready_barrier: &Barrier,
+    ready_tx: tokio::sync::mpsc::UnboundedSender<()>,
 ) {
     // Thread 0 must bind first (to attach BPF before others join the
     // reuseport group). Non-zero threads wait at the BPF barrier first.
@@ -401,8 +407,10 @@ fn server_thread_main(
         barrier.wait();
     }
 
-    // Signal that this thread's listener is bound and ready.
-    ready_barrier.wait();
+    // Signal that this thread's listener is bound and ready. If this send
+    // fails the receiver has gone away (blackhole is shutting down).
+    let _ = ready_tx.send(());
+    drop(ready_tx);
 
     let mut listener = mio::net::TcpListener::from_std(std_listener);
     let mut poll = Poll::new().expect("failed to create mio::Poll");
