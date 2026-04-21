@@ -17,8 +17,8 @@ use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
 use mio::net::TcpStream;
@@ -163,10 +163,13 @@ impl TcpRr {
             })
         };
 
-        // BPF barrier: thread 0 must bind first to attach BPF before other
-        // threads join the SO_REUSEPORT group.
-        let bpf_barrier = if num_threads > 1 {
-            Some(Arc::new(Barrier::new(num_threads as usize)))
+        // Pre-build thread 0's listener here so the BPF program is attached
+        // to the reuseport group before any other thread calls bind(). This
+        // removes the need for a cross-thread BPF barrier — if the bind fails
+        // or panics, it propagates as an error directly from this task.
+        let binding_addr = SocketAddr::new(self.config.addr, self.config.data_port);
+        let thread0_listener = if num_threads > 1 {
+            Some(create_listener(0, num_threads, binding_addr))
         } else {
             None
         };
@@ -178,26 +181,26 @@ impl TcpRr {
         let (ready_tx, mut ready_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
         let mut handles = Vec::with_capacity(num_threads as usize);
+        let mut thread0_listener = thread0_listener;
         for i in 0..num_threads {
-            let binding_addr = SocketAddr::new(self.config.addr, self.config.data_port);
             let request_size = self.config.request_size.get();
             let response_size = self.config.response_size.get();
             let no_delay = self.config.no_delay;
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
-            let bpf_barrier = bpf_barrier.clone();
+            let prebuilt = if i == 0 { thread0_listener.take() } else { None };
             let tx = ready_tx.clone();
             let handle = thread::spawn_named(&format!("tcp_rr-server-{i}"), move || {
                 server_thread_main(
                     i,
                     num_threads,
                     binding_addr,
+                    prebuilt,
                     request_size,
                     response_size,
                     no_delay,
                     &flag,
                     &tm[i as usize],
-                    bpf_barrier.as_deref(),
                     tx,
                 );
             });
@@ -382,30 +385,18 @@ fn server_thread_main(
     thread_index: u16,
     num_threads: u16,
     binding_addr: SocketAddr,
+    prebuilt_listener: Option<std::net::TcpListener>,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
     shutdown_flag: &std::sync::atomic::AtomicBool,
     metrics: &ThreadMetrics,
-    bpf_barrier: Option<&Barrier>,
     ready_tx: tokio::sync::mpsc::UnboundedSender<()>,
 ) {
-    // Thread 0 must bind first (to attach BPF before others join the
-    // reuseport group). Non-zero threads wait at the BPF barrier first.
-    if let Some(barrier) = bpf_barrier
-        && thread_index != 0
-    {
-        barrier.wait();
-    }
-
-    let std_listener = create_listener(thread_index, num_threads, binding_addr);
-
-    // Thread 0 signals the BPF barrier after binding so others can proceed.
-    if let Some(barrier) = bpf_barrier
-        && thread_index == 0
-    {
-        barrier.wait();
-    }
+    // Thread 0 uses the pre-built listener (with BPF already attached);
+    // others bind their own sockets that join the existing reuseport group.
+    let std_listener = prebuilt_listener
+        .unwrap_or_else(|| create_listener(thread_index, num_threads, binding_addr));
 
     // Signal that this thread's listener is bound and ready. If this send
     // fails the receiver has gone away (blackhole is shutting down).
