@@ -17,6 +17,14 @@
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum Error {
+    #[error("bpf load failed: {reason}")]
+    Load { reason: String },
+    #[error("bpf attach failed: {reason}")]
+    Attach { reason: String },
+}
+
 // eBPF instruction encoding: { code:u8, dst_reg:4|src_reg:4, off:i16, imm:i32 }
 #[repr(C)]
 struct BpfInsn {
@@ -81,7 +89,7 @@ struct BpfAttrProgLoad {
 ///
 /// Returns an error if the `bpf()` syscall fails (e.g. missing permissions,
 /// kernel too old).
-pub(crate) fn load_reuseport_ebpf(num_sockets: u32) -> io::Result<OwnedFd> {
+pub(crate) fn load_reuseport_ebpf(num_sockets: u32) -> Result<OwnedFd, Error> {
     let imm = num_sockets as i32;
     let prog = [
         BpfInsn::new(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_GET_PRANDOM_U32),
@@ -113,7 +121,17 @@ pub(crate) fn load_reuseport_ebpf(num_sockets: u32) -> io::Result<OwnedFd> {
     };
 
     if fd < 0 {
-        return Err(io::Error::last_os_error());
+        let os_err = io::Error::last_os_error();
+        // Extract the verifier log (null-terminated string written by the kernel).
+        let log = std::ffi::CStr::from_bytes_until_nul(&log_buf)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let reason = if log.trim().is_empty() {
+            os_err.to_string()
+        } else {
+            format!("{os_err}: {}", log.trim())
+        };
+        return Err(Error::Load { reason });
     }
 
     Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
@@ -127,7 +145,7 @@ pub(crate) fn load_reuseport_ebpf(num_sockets: u32) -> io::Result<OwnedFd> {
 /// # Errors
 ///
 /// Returns an error if `setsockopt` fails.
-pub(crate) fn attach_reuseport_ebpf(socket_fd: RawFd, prog: &OwnedFd) -> io::Result<()> {
+pub(crate) fn attach_reuseport_ebpf(socket_fd: RawFd, prog: &OwnedFd) -> Result<(), Error> {
     let prog_fd: libc::c_int = prog.as_raw_fd();
     let ret = unsafe {
         libc::setsockopt(
@@ -139,7 +157,9 @@ pub(crate) fn attach_reuseport_ebpf(socket_fd: RawFd, prog: &OwnedFd) -> io::Res
         )
     };
     if ret < 0 {
-        return Err(io::Error::last_os_error());
+        return Err(Error::Attach {
+            reason: io::Error::last_os_error().to_string(),
+        });
     }
     Ok(())
 }
