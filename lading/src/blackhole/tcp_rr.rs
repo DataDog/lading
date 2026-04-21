@@ -175,7 +175,12 @@ impl TcpRr {
         // or panics, it propagates as an error directly from this task.
         let binding_addr = SocketAddr::new(self.config.addr, self.config.data_port);
         let thread0_listener = if num_threads > 1 {
-            Some(create_listener(0, num_threads, binding_addr, self.config.backlog))
+            Some(create_listener(
+                0,
+                num_threads,
+                binding_addr,
+                self.config.backlog,
+            ))
         } else {
             None
         };
@@ -305,9 +310,15 @@ fn create_listener(
     };
     let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
         .expect("failed to create socket");
-    socket.set_nonblocking(true).expect("failed to set nonblocking");
-    socket.set_cloexec(true).expect("failed to set close-on-exec");
-    socket.set_reuse_address(true).expect("failed to set SO_REUSEADDR");
+    socket
+        .set_nonblocking(true)
+        .expect("failed to set nonblocking");
+    socket
+        .set_cloexec(true)
+        .expect("failed to set close-on-exec");
+    socket
+        .set_reuse_address(true)
+        .expect("failed to set SO_REUSEADDR");
 
     if num_threads > 1 {
         socket
