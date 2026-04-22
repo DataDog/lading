@@ -272,7 +272,7 @@ impl TcpRr {
                     break;
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(100));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(e) => {
                     return Err(Error::Bind {
