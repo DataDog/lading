@@ -9,6 +9,7 @@ mod string_list_pool;
 pub(crate) use random_string_pool::{
     RandomStringPool, random_strings_with_length, random_strings_with_length_range,
 };
+pub use string_list_pool::Error;
 pub(crate) use string_list_pool::StringListPool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
