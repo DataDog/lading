@@ -13,15 +13,16 @@
 //! `bytes_received`: Request bytes read
 //! `bytes_written`: Response bytes sent
 
-use std::io::{Read, Write};
-use std::net::SocketAddr;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{self, IpAddr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
-use mio::net::TcpStream;
+use mio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use mio::{Events, Interest, Poll, Token};
 use serde::{Deserialize, Serialize};
 use tracing::{info, trace, warn};
@@ -61,7 +62,7 @@ const fn default_true() -> bool {
 /// Configuration for the `tcp_rr` blackhole.
 pub struct Config {
     /// IP address to bind on.
-    pub addr: std::net::IpAddr,
+    pub addr: IpAddr,
     /// Data port for flow connections. Default 12867.
     #[serde(default = "default_data_port")]
     pub data_port: u16,
@@ -189,7 +190,7 @@ impl TcpRr {
         // If a thread panics before signaling, its sender drops; once all
         // senders are gone, recv() returns None and we detect the failure
         // instead of hanging forever.
-        let (ready_tx, mut ready_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (ready_tx, mut ready_rx) = mpsc::unbounded_channel::<()>();
 
         let mut handles = Vec::with_capacity(num_threads as usize);
         let mut thread0_listener = thread0_listener;
@@ -240,7 +241,7 @@ impl TcpRr {
         // can connect and know we're ready.
         let control_addr = SocketAddr::new(self.config.addr, self.config.control_port);
         let control_listener =
-            std::net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
+            net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
                 addr: control_addr,
                 source: Box::new(source),
             })?;
@@ -270,7 +271,7 @@ impl TcpRr {
                     generator_connected = true;
                     break;
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 Err(e) => {
@@ -302,7 +303,7 @@ fn create_listener(
     num_threads: u16,
     binding_addr: SocketAddr,
     backlog: i32,
-) -> std::net::TcpListener {
+) -> net::TcpListener {
     let domain = if binding_addr.is_ipv4() {
         socket2::Domain::IPV4
     } else {
@@ -352,14 +353,14 @@ fn server_thread_main(
     thread_index: u16,
     num_threads: u16,
     binding_addr: SocketAddr,
-    prebuilt_listener: Option<std::net::TcpListener>,
+    prebuilt_listener: Option<net::TcpListener>,
     backlog: i32,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
-    shutdown_flag: &std::sync::atomic::AtomicBool,
+    shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
-    ready_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    ready_tx: mpsc::UnboundedSender<()>,
 ) {
     // Thread 0 uses the pre-built listener (with BPF already attached);
     // others bind their own sockets that join the existing reuseport group.
@@ -371,7 +372,7 @@ fn server_thread_main(
     let _ = ready_tx.send(());
     drop(ready_tx);
 
-    let mut listener = mio::net::TcpListener::from_std(std_listener);
+    let mut listener = TcpListener::from_std(std_listener);
     let mut poll = Poll::new().expect("failed to create mio::Poll");
     let mut events = Events::with_capacity(256);
 
@@ -409,7 +410,7 @@ fn server_thread_main(
                             });
                             metrics.connections_accepted.add(1);
                         }
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
                         Err(e) => {
                             trace!("accept error: {e}");
                         }
@@ -458,7 +459,7 @@ fn handle_server_event(
                         Action::Continue
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
                     Action::Remove
@@ -480,7 +481,7 @@ fn handle_server_event(
                         Action::Continue
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
                     Action::Remove

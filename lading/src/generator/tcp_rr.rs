@@ -13,12 +13,12 @@
 //! `bytes_read`: Response bytes received
 //! `connections_failed`: Failed connection attempts
 
-use std::io::{Read, Write};
-use std::net::SocketAddr;
+use std::io::{self, ErrorKind, Read, Write};
+use std::net::{self, IpAddr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::time::{Duration, Instant};
 
 use mio::net::TcpStream;
 use mio::{Events, Interest, Poll, Token};
@@ -126,7 +126,7 @@ impl TcpRr {
     ///
     /// Panics if `addr` cannot be resolved to a socket address.
     pub async fn spin(self) -> Result<(), Error> {
-        let ip: std::net::IpAddr = self.config.addr.parse().expect("invalid addr");
+        let ip: IpAddr = self.config.addr.parse().expect("invalid addr");
         let data_addr = SocketAddr::new(ip, self.config.data_port);
         let control_addr = SocketAddr::new(ip, self.config.control_port);
 
@@ -134,7 +134,7 @@ impl TcpRr {
 
         // Wait for the blackhole to be ready by connecting to its control port.
         info!("waiting for blackhole control port at {control_addr}");
-        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        let deadline = Instant::now() + Duration::from_secs(300);
         {
             let flag = Arc::clone(&shutdown_flag);
             let shutdown = self.shutdown.clone();
@@ -145,22 +145,22 @@ impl TcpRr {
         }
         loop {
             if shutdown_flag.load(Relaxed) {
-                return Err(Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
+                return Err(Error::Io(io::Error::new(
+                    ErrorKind::ConnectionRefused,
                     format!(
                         "shutdown before blackhole control port {control_addr} became reachable"
                     ),
                 )));
             }
-            match std::net::TcpStream::connect(control_addr) {
+            match net::TcpStream::connect(control_addr) {
                 Ok(_conn) => {
                     info!("blackhole ready, starting flows");
                     break;
                 }
                 Err(e) => {
-                    if std::time::Instant::now() >= deadline {
-                        return Err(Error::Io(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
+                    if Instant::now() >= deadline {
+                        return Err(Error::Io(io::Error::new(
+                            ErrorKind::TimedOut,
                             format!(
                                 "blackhole control port {control_addr} not reachable after 5 minutes: {e}"
                             ),
@@ -229,7 +229,7 @@ fn client_thread_main(
     request_size: usize,
     response_size: usize,
     no_delay: bool,
-    shutdown_flag: &std::sync::atomic::AtomicBool,
+    shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
 ) {
     let mut poll = Poll::new().expect("failed to create mio::Poll");
@@ -240,7 +240,7 @@ fn client_thread_main(
     let mut next_token: usize = 0;
 
     for _ in 0..num_flows {
-        match std::net::TcpStream::connect(addr) {
+        match net::TcpStream::connect(addr) {
             Ok(std_stream) => {
                 let _ = std_stream.set_nodelay(no_delay);
                 std_stream
@@ -304,7 +304,7 @@ fn handle_client_event(
                         Action::Continue
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
                     Action::Remove
@@ -327,7 +327,7 @@ fn handle_client_event(
                         Action::Continue
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
                     Action::Remove

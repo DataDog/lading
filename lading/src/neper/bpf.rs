@@ -14,6 +14,7 @@
     clippy::cast_sign_loss
 )]
 
+use std::ffi::CStr;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
@@ -123,7 +124,7 @@ pub(crate) fn load_reuseport_ebpf(num_sockets: u32) -> Result<OwnedFd, Error> {
     if fd < 0 {
         let os_err = io::Error::last_os_error();
         // Extract the verifier log (null-terminated string written by the kernel).
-        let log = std::ffi::CStr::from_bytes_until_nul(&log_buf)
+        let log = CStr::from_bytes_until_nul(&log_buf)
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let reason = if log.trim().is_empty() {
