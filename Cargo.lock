@@ -124,7 +124,7 @@ dependencies = [
  "arrow-data",
  "arrow-ord",
  "arrow-row",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
  "arrow-string",
 ]
@@ -138,7 +138,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "chrono",
  "num-traits",
 ]
@@ -152,7 +152,7 @@ dependencies = [
  "ahash 0.8.12",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "chrono",
  "half",
  "hashbrown 0.16.1",
@@ -183,7 +183,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-data",
  "arrow-ord",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
  "atoi",
  "base64",
@@ -201,7 +201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fdd994a9d28e6365aa78e15da3f3950c0fdcea6b963a12fa1c391afb637b304"
 dependencies = [
  "arrow-buffer",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "half",
  "num-integer",
  "num-traits",
@@ -216,7 +216,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
  "flatbuffers",
 ]
@@ -230,7 +230,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
 ]
 
@@ -243,7 +243,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "half",
 ]
 
@@ -252,6 +252,12 @@ name = "arrow-schema"
 version = "57.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c872d36b7bf2a6a6a2b40de9156265f0242910791db366a2c17476ba8330d68"
+
+[[package]]
+name = "arrow-schema"
+version = "58.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c30a1365d7a7dc50cc847e54154e6af49e4c4b0fddc9f607b687f29212082743"
 
 [[package]]
 name = "arrow-select"
@@ -263,7 +269,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "num-traits",
 ]
 
@@ -276,7 +282,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
  "memchr",
  "num-traits",
@@ -1891,7 +1897,7 @@ version = "0.32.0"
 dependencies = [
  "anyhow",
  "arrow-array",
- "arrow-schema",
+ "arrow-schema 58.1.0",
  "async-compression",
  "async-pidfd",
  "bollard",
@@ -1965,7 +1971,7 @@ dependencies = [
  "arrow",
  "arrow-array",
  "arrow-buffer",
- "arrow-schema",
+ "arrow-schema 58.1.0",
  "bytes",
  "datadog-protos",
  "ddsketch-agent",
@@ -1993,7 +1999,7 @@ dependencies = [
 name = "lading-capture-schema"
 version = "0.1.0"
 dependencies = [
- "arrow-schema",
+ "arrow-schema 58.1.0",
 ]
 
 [[package]]
@@ -2595,7 +2601,7 @@ dependencies = [
  "arrow-cast",
  "arrow-data",
  "arrow-ipc",
- "arrow-schema",
+ "arrow-schema 57.3.0",
  "arrow-select",
  "base64",
  "bytes",
