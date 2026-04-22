@@ -89,6 +89,9 @@ pub enum Error {
     /// Worker thread panicked
     #[error("Worker thread panicked")]
     ThreadPanicked,
+    /// Invalid configuration.
+    #[error("invalid config: {0}")]
+    Config(String),
 }
 
 #[derive(Debug)]
@@ -126,6 +129,13 @@ impl TcpRr {
     ///
     /// Panics if `addr` cannot be resolved to a socket address.
     pub async fn spin(self) -> Result<(), Error> {
+        if self.config.threads > self.config.flows {
+            return Err(Error::Config(format!(
+                "threads ({}) must be <= flows ({})",
+                self.config.threads, self.config.flows
+            )));
+        }
+
         let ip: IpAddr = self.config.addr.parse().expect("invalid addr");
         let data_addr = SocketAddr::new(ip, self.config.data_port);
         let control_addr = SocketAddr::new(ip, self.config.control_port);
