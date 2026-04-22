@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static log file and groups each second's worth of lines into a single block.
   In conjunction with block-based throttling, this enables realistic load
   patterns that replay the original log file's timing.
+- Added new generator/blackhole pair for tcp request-response workload.
 
 ## [0.31.2]
 ## Changed
