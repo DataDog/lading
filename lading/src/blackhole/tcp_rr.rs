@@ -22,9 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
 use mio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
 use mio::{Events, Interest, Poll, Token};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tracing::{info, trace, warn};
 
 use super::General;
