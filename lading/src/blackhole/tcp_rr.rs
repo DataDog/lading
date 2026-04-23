@@ -390,6 +390,8 @@ fn server_thread_main(
         if shutdown_flag.load(Relaxed) {
             break;
         }
+
+        let mut attempts = 0;
         for event in &events {
             if event.token() == LISTENER_TOKEN {
                 loop {
@@ -412,7 +414,12 @@ fn server_thread_main(
                         }
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
                         Err(e) => {
-                            trace!("accept error: {e}");
+                            if attempts > 2 {
+                                break;
+                            }
+                            warn!("accept error: {e}");
+                            attempts += 1;
+                            std::thread::sleep(Duration::from_millis(1000));
                         }
                     }
                 }
