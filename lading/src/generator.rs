@@ -27,6 +27,7 @@ pub mod process_tree;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod tcp;
+pub mod tcp_rr;
 pub mod trace_agent;
 pub mod udp;
 pub mod unix_datagram;
@@ -38,6 +39,9 @@ pub enum Error {
     /// See [`crate::generator::tcp::Error`] for details.
     #[error(transparent)]
     Tcp(#[from] tcp::Error),
+    /// See [`crate::generator::tcp_rr::Error`] for details.
+    #[error(transparent)]
+    TcpRr(#[from] tcp_rr::Error),
     /// See [`crate::generator::udp::Error`] for details.
     #[error(transparent)]
     Udp(#[from] udp::Error),
@@ -111,6 +115,8 @@ pub struct General {
 pub enum Inner {
     /// See [`crate::generator::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::generator::tcp_rr::Config`] for details.
+    TcpRr(tcp_rr::Config),
     /// See [`crate::generator::udp::Config`] for details.
     Udp(udp::Config),
     /// See [`crate::generator::http::Config`] for details.
@@ -150,6 +156,8 @@ pub enum Inner {
 pub enum Server {
     /// See [`crate::generator::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::generator::tcp_rr::TcpRr`] for details.
+    TcpRr(tcp_rr::TcpRr),
     /// See [`crate::generator::udp::Udp`] for details.
     Udp(udp::Udp),
     /// See [`crate::generator::http::Http`] for details.
@@ -193,6 +201,7 @@ impl Server {
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let srv = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
+            Inner::TcpRr(conf) => Self::TcpRr(tcp_rr::TcpRr::new(config.general, &conf, shutdown)),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
             Inner::Http(conf) => Self::Http(http::Http::new(config.general, conf, shutdown)?),
             Inner::SplunkHec(conf) => {
@@ -267,6 +276,7 @@ impl Server {
 
         match self {
             Server::Tcp(inner) => inner.spin().await?,
+            Server::TcpRr(inner) => inner.spin().await?,
             Server::Udp(inner) => inner.spin().await?,
             Server::Http(inner) => inner.spin().await?,
             Server::SplunkHec(inner) => inner.spin().await?,

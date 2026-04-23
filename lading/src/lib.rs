@@ -17,6 +17,7 @@ mod common;
 pub mod config;
 pub mod generator;
 pub mod inspector;
+mod neper;
 pub mod observer;
 pub(crate) mod proto;
 pub mod target;

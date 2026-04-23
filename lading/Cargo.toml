@@ -51,7 +51,10 @@ kube-core = { version = "2.0.0" }
 k8s-openapi = { version = "0.26.0", default-features = false, features = [
   "latest",
 ] }
+libc = "0.2"
+socket2 = "0.6"
 metrics = { workspace = true }
+mio = { version = "1", features = ["os-poll", "net"] }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
 nix = { version = "0.30", features = ["fs", "signal"] }

@@ -486,6 +486,12 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             }
             unimplemented!("Kubernetes not supported")
         }
+        generator::Inner::TcpRr(_) => {
+            if args.fingerprint {
+                return Ok(None);
+            }
+            unimplemented!("TcpRr not supported")
+        }
         generator::Inner::TraceAgent(g) => {
             let total_bytes =
                 generator::trace_agent::validate_cache_size(g.maximum_prebuild_cache_size_bytes)

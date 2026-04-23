@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expanded lazily in breadth-first order across all configured templates, capped
   at 15,000 entries. This avoids enumerating large value sets in config while
   preventing memory exhaustion from combinatorial explosions.
+- Added new generator/blackhole pair for tcp request-response workload.
 
 ## [0.31.2]
 ## Changed
