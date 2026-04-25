@@ -49,7 +49,7 @@ use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
 use crate::SizedGenerator;
-use crate::opentelemetry::common::templates::PoolError;
+use crate::opentelemetry::common::{overhead, templates::PoolError};
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -263,11 +263,46 @@ fn metric_identity_hash(
     hasher.finish()
 }
 
-fn point_series_id(metric_identity: u64, point_index: usize, attributes: &[KeyValue]) -> u64 {
+fn point_series_hasher(
+    metric_identity: u64,
+    point_index: usize,
+    attributes: &[KeyValue],
+) -> DefaultHasher {
     let mut hasher = DefaultHasher::new();
     metric_identity.hash(&mut hasher);
     point_index.hash(&mut hasher);
     hash_key_values(attributes, &mut hasher);
+    hasher
+}
+
+fn point_series_id(metric_identity: u64, point_index: usize, attributes: &[KeyValue]) -> u64 {
+    let hasher = point_series_hasher(metric_identity, point_index, attributes);
+    hasher.finish()
+}
+
+fn histogram_point_series_id(
+    metric_identity: u64,
+    point_index: usize,
+    attributes: &[KeyValue],
+    explicit_bounds: &[f64],
+) -> u64 {
+    let mut hasher = point_series_hasher(metric_identity, point_index, attributes);
+    for bound in explicit_bounds {
+        bound.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn exponential_histogram_point_series_id(
+    metric_identity: u64,
+    point_index: usize,
+    attributes: &[KeyValue],
+    scale: i32,
+    zero_threshold: f64,
+) -> u64 {
+    let mut hasher = point_series_hasher(metric_identity, point_index, attributes);
+    scale.hash(&mut hasher);
+    zero_threshold.to_bits().hash(&mut hasher);
     hasher.finish()
 }
 
@@ -547,6 +582,12 @@ fn trim_one_data_point(resource_metrics: &mut ResourceMetrics) -> bool {
     }
 
     false
+}
+
+fn resource_metrics_budget(bytes_remaining: usize) -> Option<usize> {
+    (1..=bytes_remaining)
+        .rev()
+        .find(|budget| overhead(*budget) <= bytes_remaining)
 }
 
 fn total_data_points(resource_metrics: &ResourceMetrics) -> u64 {
@@ -973,13 +1014,19 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
                             for (point_index, point) in histogram.data_points.iter_mut().enumerate()
                             {
-                                let series_id = point_series_id(
+                                let point_id = point_series_id(
                                     metric_identity,
                                     point_index,
                                     &point.attributes,
                                 );
+                                let series_id = histogram_point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                    &point.explicit_bounds,
+                                );
                                 let bucket_count = point.explicit_bounds.len() + 1;
-                                let profile = templates::point_profile(series_id);
+                                let profile = templates::point_profile(point_id);
 
                                 let state =
                                     self.histogram_series.entry(series_id).or_insert_with(|| {
@@ -1043,12 +1090,19 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
                             for (point_index, point) in histogram.data_points.iter_mut().enumerate()
                             {
-                                let series_id = point_series_id(
+                                let point_id = point_series_id(
                                     metric_identity,
                                     point_index,
                                     &point.attributes,
                                 );
-                                let profile = templates::point_profile(series_id);
+                                let series_id = exponential_histogram_point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                    point.scale,
+                                    point.zero_threshold,
+                                );
+                                let profile = templates::point_profile(point_id);
                                 let state = self
                                     .exponential_histogram_series
                                     .entry(series_id)
@@ -1174,6 +1228,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
         while tpl.encoded_len() > budget_before_fetch {
             if !trim_one_data_point(&mut tpl) {
+                *budget = budget_before_fetch;
                 debug!(
                     budget_before_fetch,
                     actual_size = tpl.encoded_len(),
@@ -1183,7 +1238,18 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             }
         }
 
-        self.data_points_per_resource = total_data_points(&tpl);
+        let data_points_per_resource = total_data_points(&tpl);
+        if data_points_per_resource == 0 {
+            *budget = budget_before_fetch;
+            debug!(
+                budget_before_fetch,
+                actual_size = tpl.encoded_len(),
+                "metric payload was trimmed to zero data points"
+            );
+            Err(PoolError::EmptyChoice)?;
+        }
+
+        self.data_points_per_resource = data_points_per_resource;
         self.last_collection_time_unix_nano = current_time_unix_nano;
 
         // The pool deducted the template's stored encoded size from budget, but
@@ -1213,33 +1279,8 @@ impl crate::Serialize for OpentelemetryMetrics {
         let mut total_data_points = 0;
         let loop_id: u32 = rng.random();
 
-        // Build up the request by adding ResourceMetrics one by one until we
-        // would exceed max_bytes.
-        //
-        // Example: max_bytes = 1000
-        //
-        // - Request with 0 ResourceMetrics: encoded size = 100 bytes
-        // - Add ResourceMetrics #1: encoded size = 400 bytes (still under 1000,
-        //   continue)
-        // - Add ResourceMetrics #2: encoded size = 700 bytes (still under 1000,
-        //   continue)
-        // - Add ResourceMetrics #3: encoded size = 1050 bytes (over 1000!)
-        // - Code detects overflow, pops #3, breaks the loop
-        // - Request now has #1 and #2, encoded size = 700 bytes
-        //
-        // When we call generate we pass bytes_remaining as the budget. After
-        // adding ResourceMetrics #2, we set bytes_remaining = 1000 - 700 =
-        // 300. So when generating #3, we tell it "you have 300 bytes to work
-        // with". The generate method might return something that encodes to 250
-        // bytes on its own.
-        //
-        // But, protobuf encoding isn't strictly additive. When we add that 250
-        // byte ResourceMetrics to a request that's already 700 bytes, the
-        // combined encoding might be > 1000 bytes (not 950) due to additional
-        // framing, length prefixes, field tags or whatever.  We handle this by
-        // checking after adding and removing the item if it exceeds the budget.
-        while bytes_remaining >= SMALLEST_PROTOBUF {
-            if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
+        while let Some(mut resource_budget) = resource_metrics_budget(bytes_remaining) {
+            if let Ok(rm) = self.generate(&mut rng, &mut resource_budget) {
                 total_data_points += self.data_points_per_resource;
                 request.resource_metrics.push(rm);
 
@@ -1252,20 +1293,9 @@ impl crate::Serialize for OpentelemetryMetrics {
                     ?SMALLEST_PROTOBUF,
                     "to_bytes inner loop"
                 );
-                if required_bytes > max_bytes {
-                    total_data_points -= self.data_points_per_resource;
-                    drop(request.resource_metrics.pop());
-                    break;
-                }
+                debug_assert!(required_bytes <= max_bytes);
                 bytes_remaining = max_bytes.saturating_sub(required_bytes);
             } else {
-                // Belt with suspenders time: verify no templates could possibly
-                // fit. If we pass this assertion, break as no template will
-                // ever fit the requested max_bytes.
-                assert!(
-                    !self.pool.template_fits(bytes_remaining),
-                    "Pool claims template fits {bytes_remaining} bytes but generate() failed, indicative of a logic error",
-                );
                 break;
             }
         }
