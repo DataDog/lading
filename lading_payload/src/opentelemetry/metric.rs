@@ -460,7 +460,7 @@ fn merge_bucket_counts(target: &mut [u64], update: &[u64]) {
     debug_assert_eq!(
         target.len(),
         update.len(),
-        "bucket count mismatch — template bounds changed mid-stream"
+        "bucket count mismatch - template bounds changed mid-stream"
     );
     for (target, update) in target.iter_mut().zip(update.iter().copied()) {
         *target += update;
