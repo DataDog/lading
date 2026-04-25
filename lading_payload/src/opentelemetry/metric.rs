@@ -30,7 +30,7 @@
 // * Sum -- `Gauge` with the addition of monotonic flag, aggregation metadata
 // * Histogram -- explicit-bound bucket counts, sums, min/max, and exemplars
 // * ExponentialHistogram -- scale-based positive, negative, and zero buckets
-// * Summary -- cumulative count/sum with configured quantile values
+// * Summary -- interval count/sum with configured quantile values
 //
 // The `NumberDataPoint` used by Gauge and Sum is a
 //
@@ -73,8 +73,6 @@ const TIME_INCREMENT_NANOS: u64 = 100_000_000;
 const BASE_TIME_UNIX_NANOS: u64 = 1_700_000_000_000_000_000;
 const DELTA_TEMPORALITY: i32 = 1;
 const CUMULATIVE_TEMPORALITY: i32 = 2;
-const SUMMARY_RESERVOIR_CAP: usize = 512;
-
 #[derive(Clone, Debug)]
 struct SeriesClock {
     stream_start_time_unix_nano: u64,
@@ -131,18 +129,12 @@ impl HistogramPointState {
 #[derive(Clone, Debug)]
 struct SummaryPointState {
     clock: SeriesClock,
-    cumulative_count: u64,
-    cumulative_sum: f64,
-    retained_observations: Vec<f64>,
 }
 
 impl SummaryPointState {
     fn new(current_time_unix_nano: u64, previous_time_unix_nano: u64) -> Self {
         Self {
             clock: SeriesClock::new(current_time_unix_nano, previous_time_unix_nano),
-            cumulative_count: 0,
-            cumulative_sum: 0.0,
-            retained_observations: Vec::new(),
         }
     }
 }
@@ -504,14 +496,6 @@ fn dense_exponential_buckets(
     exponential_histogram_data_point::Buckets {
         offset: *first_index,
         bucket_counts,
-    }
-}
-
-fn extend_summary_reservoir(reservoir: &mut Vec<f64>, observations: &[f64]) {
-    reservoir.extend_from_slice(observations);
-    if reservoir.len() > SUMMARY_RESERVOIR_CAP {
-        let overflow = reservoir.len() - SUMMARY_RESERVOIR_CAP;
-        reservoir.drain(0..overflow);
     }
 }
 
@@ -1199,25 +1183,18 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 let interval_population =
                                     non_negative_population(profile, state.clock.emissions, rng);
 
-                                point.start_time_unix_nano =
-                                    state.clock.stream_start_time_unix_nano;
+                                point.start_time_unix_nano = state.clock.last_time_unix_nano;
                                 point.time_unix_nano = current_time_unix_nano;
-                                state.cumulative_count += interval_population.count;
-                                state.cumulative_sum += interval_population.sum;
-                                extend_summary_reservoir(
-                                    &mut state.retained_observations,
-                                    &interval_population.observations,
-                                );
 
-                                let mut sorted_observations = state.retained_observations.clone();
+                                let mut sorted_observations = interval_population.observations;
                                 sorted_observations.sort_by(f64::total_cmp);
                                 for quantile in &mut point.quantile_values {
                                     quantile.value =
                                         quantile_value(&sorted_observations, quantile.quantile);
                                 }
 
-                                point.count = state.cumulative_count;
-                                point.sum = state.cumulative_sum;
+                                point.count = interval_population.count;
+                                point.sum = interval_population.sum;
                                 state.clock.note_emission(current_time_unix_nano);
                             }
                         }
