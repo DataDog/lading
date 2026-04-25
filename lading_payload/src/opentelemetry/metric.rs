@@ -224,6 +224,23 @@ fn metric_identity_hash(
     scope_attributes: Option<&[KeyValue]>,
     metric: &Metric,
 ) -> u64 {
+    metric_hash(resource_attributes, scope_attributes, metric, false)
+}
+
+fn metric_profile_hash(
+    resource_attributes: Option<&[KeyValue]>,
+    scope_attributes: Option<&[KeyValue]>,
+    metric: &Metric,
+) -> u64 {
+    metric_hash(resource_attributes, scope_attributes, metric, true)
+}
+
+fn metric_hash(
+    resource_attributes: Option<&[KeyValue]>,
+    scope_attributes: Option<&[KeyValue]>,
+    metric: &Metric,
+    include_metadata: bool,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
     if let Some(resource_attributes) = resource_attributes {
         hash_key_values(resource_attributes, &mut hasher);
@@ -232,9 +249,14 @@ fn metric_identity_hash(
         hash_key_values(scope_attributes, &mut hasher);
     }
     metric.name.hash(&mut hasher);
-    metric.description.hash(&mut hasher);
     metric.unit.hash(&mut hasher);
-    hash_key_values(&metric.metadata, &mut hasher);
+    if include_metadata {
+        // Profile seeding uses the full template shape for value diversity.
+        // Cumulative state keys exclude these fields because the OTLP spec
+        // marks description and metadata as non-identifying.
+        metric.description.hash(&mut hasher);
+        hash_key_values(&metric.metadata, &mut hasher);
+    }
 
     if let Some(data) = &metric.data {
         match data {
@@ -266,6 +288,10 @@ fn point_series_hasher(
 ) -> DefaultHasher {
     let mut hasher = DefaultHasher::new();
     metric_identity.hash(&mut hasher);
+    // Hashing point_index as usize ensures distinct series for Sum points,
+    // whose attributes are empty. For Histogram/Summary/ExponentialHistogram
+    // points the `lading.point_index` string attribute also distinguishes
+    // them, so the usize is redundant there but harmless.
     point_index.hash(&mut hasher);
     hash_key_values(attributes, &mut hasher);
     hasher
@@ -431,6 +457,11 @@ fn histogram_bucket_counts(observations: &[f64], explicit_bounds: &[f64]) -> Vec
 }
 
 fn merge_bucket_counts(target: &mut [u64], update: &[u64]) {
+    debug_assert_eq!(
+        target.len(),
+        update.len(),
+        "bucket count mismatch — template bounds changed mid-stream"
+    );
     for (target, update) in target.iter_mut().zip(update.iter().copied()) {
         *target += update;
     }
@@ -483,6 +514,9 @@ fn dense_exponential_buckets(
 ) -> exponential_histogram_data_point::Buckets {
     let (Some(first_index), Some(last_index)) = (counts.keys().next(), counts.keys().next_back())
     else {
+        // Empty counts means all observations fell in the zero range; no
+        // positive/negative buckets to report. offset=0 with empty
+        // bucket_counts is the correct OTLP encoding for "no buckets".
         return exponential_histogram_data_point::Buckets {
             offset: 0,
             bucket_counts: Vec::new(),
@@ -932,6 +966,8 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             for metric in &mut scope_metrics.metrics {
                 let metric_identity =
                     metric_identity_hash(resource_attributes, scope_attributes, metric);
+                let metric_profile_identity =
+                    metric_profile_hash(resource_attributes, scope_attributes, metric);
 
                 if let Some(data) = &mut metric.data {
                     match data {
@@ -1003,7 +1039,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             for (point_index, point) in histogram.data_points.iter_mut().enumerate()
                             {
                                 let point_id = point_series_id(
-                                    metric_identity,
+                                    metric_profile_identity,
                                     point_index,
                                     &point.attributes,
                                 );
@@ -1079,7 +1115,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             for (point_index, point) in histogram.data_points.iter_mut().enumerate()
                             {
                                 let point_id = point_series_id(
-                                    metric_identity,
+                                    metric_profile_identity,
                                     point_index,
                                     &point.attributes,
                                 );
@@ -1183,10 +1219,17 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                             previous_time_unix_nano,
                                         )
                                     });
-                                let profile = templates::point_profile(series_id);
+                                let profile_id = point_series_id(
+                                    metric_profile_identity,
+                                    point_index,
+                                    &point.attributes,
+                                );
+                                let profile = templates::point_profile(profile_id);
                                 let interval_population =
                                     non_negative_population(profile, state.clock.emissions, rng);
 
+                                // Summary has no aggregation_temporality field in the OTLP
+                                // proto; it is always semantically cumulative from stream start.
                                 point.start_time_unix_nano =
                                     state.clock.stream_start_time_unix_nano;
                                 point.time_unix_nano = current_time_unix_nano;
