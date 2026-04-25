@@ -41,6 +41,8 @@
 pub(crate) mod templates;
 pub(crate) mod unit;
 
+use std::collections::BTreeMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
@@ -49,7 +51,11 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
+use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value};
+use opentelemetry_proto::tonic::metrics::v1::{
+    Exemplar, Metric, ResourceMetrics, exemplar, exponential_histogram_data_point, metric::Data,
+    number_data_point,
+};
 use prost::Message;
 use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
@@ -60,8 +66,496 @@ use unit::UnitGenerator;
 /// `smallest_protobuf` test.
 pub const SMALLEST_PROTOBUF: usize = 31;
 
-/// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
-const TIME_INCREMENT_NANOS: u64 = 1_000_000;
+/// Advance collection timestamps by 100 milliseconds per synthetic tick.
+const TIME_INCREMENT_NANOS: u64 = 100_000_000;
+const BASE_TIME_UNIX_NANOS: u64 = 1_700_000_000_000_000_000;
+const DELTA_TEMPORALITY: i32 = 1;
+const CUMULATIVE_TEMPORALITY: i32 = 2;
+const SUMMARY_RESERVOIR_CAP: usize = 512;
+
+#[derive(Clone, Debug)]
+struct SeriesClock {
+    stream_start_time_unix_nano: u64,
+    last_time_unix_nano: u64,
+    emissions: u64,
+}
+
+impl SeriesClock {
+    fn new(current_time_unix_nano: u64, previous_time_unix_nano: u64) -> Self {
+        Self {
+            stream_start_time_unix_nano: current_time_unix_nano,
+            last_time_unix_nano: previous_time_unix_nano,
+            emissions: 0,
+        }
+    }
+
+    fn start_time_for_temporality(&self, temporality: i32) -> u64 {
+        if temporality == DELTA_TEMPORALITY {
+            self.last_time_unix_nano
+        } else {
+            self.stream_start_time_unix_nano
+        }
+    }
+
+    fn note_emission(&mut self, current_time_unix_nano: u64) {
+        self.last_time_unix_nano = current_time_unix_nano;
+        self.emissions += 1;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HistogramPointState {
+    clock: SeriesClock,
+    cumulative_bucket_counts: Vec<u64>,
+    cumulative_count: u64,
+    cumulative_sum: f64,
+    cumulative_min: Option<f64>,
+    cumulative_max: Option<f64>,
+}
+
+impl HistogramPointState {
+    fn new(current_time_unix_nano: u64, previous_time_unix_nano: u64, bucket_count: usize) -> Self {
+        Self {
+            clock: SeriesClock::new(current_time_unix_nano, previous_time_unix_nano),
+            cumulative_bucket_counts: vec![0; bucket_count],
+            cumulative_count: 0,
+            cumulative_sum: 0.0,
+            cumulative_min: None,
+            cumulative_max: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SummaryPointState {
+    clock: SeriesClock,
+    cumulative_count: u64,
+    cumulative_sum: f64,
+    retained_observations: Vec<f64>,
+}
+
+impl SummaryPointState {
+    fn new(current_time_unix_nano: u64, previous_time_unix_nano: u64) -> Self {
+        Self {
+            clock: SeriesClock::new(current_time_unix_nano, previous_time_unix_nano),
+            cumulative_count: 0,
+            cumulative_sum: 0.0,
+            retained_observations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ExponentialHistogramPointState {
+    clock: SeriesClock,
+    cumulative_positive: BTreeMap<i32, u64>,
+    cumulative_negative: BTreeMap<i32, u64>,
+    cumulative_zero_count: u64,
+    cumulative_count: u64,
+    cumulative_sum: f64,
+    cumulative_min: Option<f64>,
+    cumulative_max: Option<f64>,
+}
+
+impl ExponentialHistogramPointState {
+    fn new(current_time_unix_nano: u64, previous_time_unix_nano: u64) -> Self {
+        Self {
+            clock: SeriesClock::new(current_time_unix_nano, previous_time_unix_nano),
+            cumulative_positive: BTreeMap::new(),
+            cumulative_negative: BTreeMap::new(),
+            cumulative_zero_count: 0,
+            cumulative_count: 0,
+            cumulative_sum: 0.0,
+            cumulative_min: None,
+            cumulative_max: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PopulationStats {
+    observations: Vec<f64>,
+    count: u64,
+    sum: f64,
+    min: Option<f64>,
+    max: Option<f64>,
+}
+
+fn tick_time_unix_nano(tick: u64) -> u64 {
+    BASE_TIME_UNIX_NANOS + tick.saturating_mul(TIME_INCREMENT_NANOS)
+}
+
+fn hash_any_value(value: &any_value::Value, hasher: &mut DefaultHasher) {
+    match value {
+        any_value::Value::StringValue(v) => {
+            "string".hash(hasher);
+            v.hash(hasher);
+        }
+        any_value::Value::BoolValue(v) => {
+            "bool".hash(hasher);
+            v.hash(hasher);
+        }
+        any_value::Value::IntValue(v) => {
+            "int".hash(hasher);
+            v.hash(hasher);
+        }
+        any_value::Value::DoubleValue(v) => {
+            "double".hash(hasher);
+            v.to_bits().hash(hasher);
+        }
+        // ArrayValue / KvlistValue / BytesValue are never produced by this
+        // generator; hashing the discriminant keeps identity stable if that
+        // ever changes.
+        other => std::mem::discriminant(other).hash(hasher),
+    }
+}
+
+fn hash_key_values(values: &[KeyValue], hasher: &mut DefaultHasher) {
+    for value in values {
+        value.key.hash(hasher);
+        if let Some(any_value) = &value.value
+            && let Some(inner) = &any_value.value
+        {
+            hash_any_value(inner, hasher);
+        }
+    }
+}
+
+fn metric_identity_hash(
+    resource_attributes: Option<&[KeyValue]>,
+    scope_attributes: Option<&[KeyValue]>,
+    metric: &Metric,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    if let Some(resource_attributes) = resource_attributes {
+        hash_key_values(resource_attributes, &mut hasher);
+    }
+    if let Some(scope_attributes) = scope_attributes {
+        hash_key_values(scope_attributes, &mut hasher);
+    }
+    metric.name.hash(&mut hasher);
+    metric.description.hash(&mut hasher);
+    metric.unit.hash(&mut hasher);
+    hash_key_values(&metric.metadata, &mut hasher);
+
+    if let Some(data) = &metric.data {
+        match data {
+            Data::Gauge(_) => "gauge".hash(&mut hasher),
+            Data::Sum(sum) => {
+                "sum".hash(&mut hasher);
+                sum.aggregation_temporality.hash(&mut hasher);
+                sum.is_monotonic.hash(&mut hasher);
+            }
+            Data::Histogram(histogram) => {
+                "histogram".hash(&mut hasher);
+                histogram.aggregation_temporality.hash(&mut hasher);
+            }
+            Data::ExponentialHistogram(histogram) => {
+                "exponential_histogram".hash(&mut hasher);
+                histogram.aggregation_temporality.hash(&mut hasher);
+            }
+            Data::Summary(_) => "summary".hash(&mut hasher),
+        }
+    }
+
+    hasher.finish()
+}
+
+fn point_series_id(metric_identity: u64, point_index: usize, attributes: &[KeyValue]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    metric_identity.hash(&mut hasher);
+    point_index.hash(&mut hasher);
+    hash_key_values(attributes, &mut hasher);
+    hasher.finish()
+}
+
+fn update_min(current: Option<f64>, candidate: Option<f64>) -> Option<f64> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.min(candidate)),
+        (None, Some(candidate)) => Some(candidate),
+        (Some(current), None) => Some(current),
+        (None, None) => None,
+    }
+}
+
+fn update_max(current: Option<f64>, candidate: Option<f64>) -> Option<f64> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.max(candidate)),
+        (None, Some(candidate)) => Some(candidate),
+        (Some(current), None) => Some(current),
+        (None, None) => None,
+    }
+}
+
+fn population_stats(observations: Vec<f64>) -> PopulationStats {
+    let mut sum = 0.0;
+    let mut min = None;
+    let mut max = None;
+
+    for observation in &observations {
+        sum += observation;
+        min = update_min(min, Some(*observation));
+        max = update_max(max, Some(*observation));
+    }
+
+    PopulationStats {
+        count: observations.len() as u64,
+        sum,
+        min,
+        max,
+        observations,
+    }
+}
+
+fn random_exemplars<R>(
+    current_time_unix_nano: u64,
+    min: Option<f64>,
+    max: Option<f64>,
+    rng: &mut R,
+) -> Vec<Exemplar>
+where
+    R: rand::Rng + ?Sized,
+{
+    let min = min.unwrap_or(0.0);
+    let max = max.unwrap_or(min).max(min);
+    let exemplar_count = rng.random_range(2_usize..=4);
+    let mut exemplars = Vec::with_capacity(exemplar_count);
+
+    for _ in 0..exemplar_count {
+        let trace_id: [u8; 16] = rng.random();
+        let span_id: [u8; 8] = rng.random();
+        exemplars.push(Exemplar {
+            filtered_attributes: Vec::new(),
+            time_unix_nano: current_time_unix_nano,
+            span_id: span_id.to_vec(),
+            trace_id: trace_id.to_vec(),
+            value: Some(exemplar::Value::AsDouble(rng.random_range(min..=max))),
+        });
+    }
+
+    exemplars
+}
+
+fn non_negative_population<R>(
+    profile: templates::PointProfile,
+    emissions: u64,
+    rng: &mut R,
+) -> PopulationStats
+where
+    R: rand::Rng + ?Sized,
+{
+    let count = rng.random_range(8_usize..=48);
+    let center = profile.sample + profile.jitter * emissions as f64;
+    let spread = profile.spread.max(1.0);
+    let mut observations = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let deterministic_offset = ((index as f64 + 1.0) / count as f64) * spread;
+        let lower = (center - spread).max(0.0);
+        let upper = center + deterministic_offset + profile.jitter;
+        observations.push(rng.random_range(lower..=upper.max(lower)));
+    }
+
+    population_stats(observations)
+}
+
+fn signed_population<R>(
+    profile: templates::PointProfile,
+    zero_threshold: f64,
+    emissions: u64,
+    rng: &mut R,
+) -> PopulationStats
+where
+    R: rand::Rng + ?Sized,
+{
+    let count = rng.random_range(12_usize..=64);
+    let spread = (profile.spread / 4.0).max(1.0);
+    let drift = profile.jitter * emissions as f64 / 8.0;
+    let magnitude_base = (profile.sample / 16.0).max(1.0) + drift;
+    let mut observations = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let value = match rng.random_range(0_u8..=9) {
+            0 => rng.random_range(-zero_threshold..=zero_threshold),
+            1..=4 => magnitude_base + rng.random_range(0.0..=spread) + index as f64 * 0.25,
+            _ => -(magnitude_base + rng.random_range(0.0..=spread) + index as f64 * 0.25),
+        };
+        observations.push(value);
+    }
+
+    population_stats(observations)
+}
+
+fn histogram_bucket_counts(observations: &[f64], explicit_bounds: &[f64]) -> Vec<u64> {
+    let mut bucket_counts = vec![0; explicit_bounds.len() + 1];
+    for observation in observations {
+        let bucket_index = explicit_bounds.partition_point(|bound| *bound < *observation);
+        if let Some(bucket_count) = bucket_counts.get_mut(bucket_index) {
+            *bucket_count += 1;
+        }
+    }
+    bucket_counts
+}
+
+fn merge_bucket_counts(target: &mut [u64], update: &[u64]) {
+    for (target, update) in target.iter_mut().zip(update.iter().copied()) {
+        *target += update;
+    }
+}
+
+// OTLP defines bucket indices as sint32; the truncating cast is intentional.
+#[allow(clippy::cast_possible_truncation)]
+fn exponential_histogram_bucket_index(value: f64, scale: i32) -> i32 {
+    if value <= 0.0 {
+        return 0;
+    }
+
+    let scale_factor = 2_f64.powi(scale);
+    (value.log2() * scale_factor).floor() as i32
+}
+
+/// Bucket `observations` into positive/negative/zero maps under the given
+/// scale and `zero_threshold`. Returns `(zero_count, positive, negative)`.
+fn exponential_histogram_buckets(
+    observations: &[f64],
+    scale: i32,
+    zero_threshold: f64,
+) -> (u64, BTreeMap<i32, u64>, BTreeMap<i32, u64>) {
+    let mut zero_count = 0_u64;
+    let mut positive = BTreeMap::new();
+    let mut negative = BTreeMap::new();
+
+    for observation in observations {
+        if observation.abs() <= zero_threshold {
+            zero_count += 1;
+            continue;
+        }
+
+        let bucket_index = exponential_histogram_bucket_index(observation.abs(), scale);
+        if *observation > 0.0 {
+            *positive.entry(bucket_index).or_insert(0) += 1;
+        } else {
+            *negative.entry(bucket_index).or_insert(0) += 1;
+        }
+    }
+
+    (zero_count, positive, negative)
+}
+
+// first_index/last_index come from an ordered BTreeMap and bucket_index is
+// always >= first_index, so the differences are non-negative.
+#[allow(clippy::cast_sign_loss)]
+fn dense_exponential_buckets(
+    counts: &BTreeMap<i32, u64>,
+) -> exponential_histogram_data_point::Buckets {
+    let (Some(first_index), Some(last_index)) = (counts.keys().next(), counts.keys().next_back())
+    else {
+        return exponential_histogram_data_point::Buckets {
+            offset: 0,
+            bucket_counts: Vec::new(),
+        };
+    };
+
+    let mut bucket_counts = vec![0; (*last_index - *first_index + 1) as usize];
+    for (bucket_index, count) in counts {
+        let dense_index = (*bucket_index - *first_index) as usize;
+        if let Some(bucket_count) = bucket_counts.get_mut(dense_index) {
+            *bucket_count = *count;
+        }
+    }
+
+    exponential_histogram_data_point::Buckets {
+        offset: *first_index,
+        bucket_counts,
+    }
+}
+
+fn extend_summary_reservoir(reservoir: &mut Vec<f64>, observations: &[f64]) {
+    reservoir.extend_from_slice(observations);
+    if reservoir.len() > SUMMARY_RESERVOIR_CAP {
+        let overflow = reservoir.len() - SUMMARY_RESERVOIR_CAP;
+        reservoir.drain(0..overflow);
+    }
+}
+
+// quantile is clamped to [0, 1] and the result lies in [0, len-1] as a
+// non-negative finite float, so the usize cast is safe.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn quantile_value(sorted_observations: &[f64], quantile: f64) -> f64 {
+    if sorted_observations.is_empty() {
+        return 0.0;
+    }
+
+    let quantile = quantile.clamp(0.0, 1.0);
+    let index = ((sorted_observations.len() - 1) as f64 * quantile).round() as usize;
+    sorted_observations[index]
+}
+
+fn metric_data_points_total(metric: &Metric) -> usize {
+    match &metric.data {
+        Some(Data::Gauge(gauge)) => gauge.data_points.len(),
+        Some(Data::Sum(sum)) => sum.data_points.len(),
+        Some(Data::Histogram(histogram)) => histogram.data_points.len(),
+        Some(Data::ExponentialHistogram(histogram)) => histogram.data_points.len(),
+        Some(Data::Summary(summary)) => summary.data_points.len(),
+        None => 0,
+    }
+}
+
+fn trim_one_data_point(resource_metrics: &mut ResourceMetrics) -> bool {
+    for scope_idx in (0..resource_metrics.scope_metrics.len()).rev() {
+        let mut trimmed = false;
+        let mut remove_metric_idx = None;
+        let remove_scope;
+
+        {
+            let scope_metrics = &mut resource_metrics.scope_metrics[scope_idx];
+            for metric_idx in (0..scope_metrics.metrics.len()).rev() {
+                let metric = &mut scope_metrics.metrics[metric_idx];
+                let did_trim = match &mut metric.data {
+                    Some(Data::Gauge(gauge)) => gauge.data_points.pop().is_some(),
+                    Some(Data::Sum(sum)) => sum.data_points.pop().is_some(),
+                    Some(Data::Histogram(histogram)) => histogram.data_points.pop().is_some(),
+                    Some(Data::ExponentialHistogram(histogram)) => {
+                        histogram.data_points.pop().is_some()
+                    }
+                    Some(Data::Summary(summary)) => summary.data_points.pop().is_some(),
+                    None => false,
+                };
+                if did_trim {
+                    trimmed = true;
+                    if metric_data_points_total(metric) == 0 {
+                        remove_metric_idx = Some(metric_idx);
+                    }
+                    break;
+                }
+            }
+            if let Some(metric_idx) = remove_metric_idx {
+                scope_metrics.metrics.remove(metric_idx);
+            }
+            remove_scope = scope_metrics.metrics.is_empty();
+        }
+
+        if trimmed {
+            if remove_scope {
+                resource_metrics.scope_metrics.remove(scope_idx);
+            }
+            return true;
+        }
+    }
+
+    false
+}
+
+fn total_data_points(resource_metrics: &ResourceMetrics) -> u64 {
+    let mut total = 0_u64;
+    for scope_metrics in &resource_metrics.scope_metrics {
+        for metric in &scope_metrics.metrics {
+            total += metric_data_points_total(metric) as u64;
+        }
+    }
+    total
+}
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -109,14 +603,23 @@ pub struct MetricWeights {
     pub sum_delta: u8,
     /// The relative probability of generating a sum cumulative metric.
     pub sum_cumulative: u8,
+    /// The relative probability of generating a histogram metric.
+    pub histogram: u8,
+    /// The relative probability of generating an exponential histogram metric.
+    pub exponential_histogram: u8,
+    /// The relative probability of generating a summary metric.
+    pub summary: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50,          // 50%
-            sum_delta: 25,      // 25%
-            sum_cumulative: 25, // 25%
+            gauge: 40,                // 40%
+            sum_delta: 25,            // 20%
+            sum_cumulative: 25,       // 20%
+            histogram: 15,            //15%
+            exponential_histogram: 3, // 3%
+            summary: 2,               //2%
         }
     }
 }
@@ -144,6 +647,9 @@ impl Config {
         if self.metric_weights.gauge == 0
             || self.metric_weights.sum_delta == 0
             || self.metric_weights.sum_cumulative == 0
+            || self.metric_weights.summary == 0
+            || self.metric_weights.histogram == 0
+            || self.metric_weights.exponential_histogram == 0
         {
             return Err("Metric weights cannot be 0".to_string());
         }
@@ -293,10 +799,20 @@ pub struct OpentelemetryMetrics {
     scratch: RefCell<BytesMut>,
     /// Current tick count for monotonic timing (starts at 0)
     tick: u64,
+    /// Most recent collection timestamp emitted by this generator.
+    last_collection_time_unix_nano: u64,
     /// Accumulating sum increment, floating point
     incr_f: f64,
     /// Accumulating sum increment, integer
     incr_i: i64,
+    /// Per-series time tracking for sums.
+    sum_clocks: BTreeMap<u64, SeriesClock>,
+    /// Per-series state for explicit histograms.
+    histogram_series: BTreeMap<u64, HistogramPointState>,
+    /// Per-series state for exponential histograms.
+    exponential_histogram_series: BTreeMap<u64, ExponentialHistogramPointState>,
+    /// Per-series state for summaries.
+    summary_series: BTreeMap<u64, SummaryPointState>,
     /// Number of data points in the most recent `ResourceMetrics` (set by
     /// `generate`).
     data_points_per_resource: u64,
@@ -323,8 +839,13 @@ impl OpentelemetryMetrics {
             pool: Pool::new(context_cap, max_overhead_bytes, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
             tick: 0,
+            last_collection_time_unix_nano: BASE_TIME_UNIX_NANOS,
             incr_f: 0.0,
             incr_i: 0,
+            sum_clocks: BTreeMap::new(),
+            histogram_series: BTreeMap::new(),
+            exponential_histogram_series: BTreeMap::new(),
+            summary_series: BTreeMap::new(),
             data_points_per_resource: 0,
             data_points_per_block: 0,
         })
@@ -340,8 +861,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     /// * Monotonic sums are truly monotonic, incrementing by a random amount
     ///   each tick
     /// * Timestamps advance monotonically based on internal tick counter
-    ///   starting at epoch
+    ///   starting from a fixed non-zero base timestamp
     /// * Each call advances the tick counter by a random amount (1-60)
+    #[allow(clippy::too_many_lines)]
     fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
@@ -349,7 +871,10 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.tick += rng.random_range(1..=60);
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
+        let current_time_unix_nano = tick_time_unix_nano(self.tick);
+        let previous_time_unix_nano = self.last_collection_time_unix_nano;
 
+        let budget_before_fetch = *budget;
         let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
@@ -359,19 +884,29 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             Err(e) => Err(e)?,
         };
 
-        // Update data points in each metric. For gauges we use random values,
-        // for accumulating sums we increment by a fixed amount per tick.
-        // All timestamps are updated based on the current tick.
-        let mut data_points_count = 0;
+        let resource_attributes = tpl
+            .resource
+            .as_ref()
+            .map(|resource| resource.attributes.as_slice());
 
+        // Update data points in each metric using per-series state so identity
+        // attributes, timestamps, and cumulative aggregates stay coherent
+        // across repeated emissions of the same template.
         for scope_metrics in &mut tpl.scope_metrics {
+            let scope_attributes = scope_metrics
+                .scope
+                .as_ref()
+                .map(|scope| scope.attributes.as_slice());
+
             for metric in &mut scope_metrics.metrics {
+                let metric_identity =
+                    metric_identity_hash(resource_attributes, scope_attributes, metric);
+
                 if let Some(data) = &mut metric.data {
                     match data {
                         Data::Gauge(gauge) => {
-                            data_points_count += gauge.data_points.len() as u64;
                             for point in &mut gauge.data_points {
-                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                point.time_unix_nano = current_time_unix_nano;
                                 if let Some(value) = &mut point.value {
                                     match value {
                                         number_data_point::Value::AsDouble(v) => {
@@ -385,13 +920,27 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             }
                         }
                         Data::Sum(sum) => {
-                            data_points_count += sum.data_points.len() as u64;
                             let is_accumulating = sum.is_monotonic;
-                            for point in &mut sum.data_points {
-                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            let aggregation_temporality = sum.aggregation_temporality;
+
+                            for (point_index, point) in sum.data_points.iter_mut().enumerate() {
+                                let series_id = point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                );
+                                let clock = self.sum_clocks.entry(series_id).or_insert_with(|| {
+                                    SeriesClock::new(
+                                        current_time_unix_nano,
+                                        previous_time_unix_nano,
+                                    )
+                                });
+
+                                point.start_time_unix_nano =
+                                    clock.start_time_for_temporality(aggregation_temporality);
+                                point.time_unix_nano = current_time_unix_nano;
+
                                 if is_accumulating {
-                                    // For accumulating sums, monotonically
-                                    // increase by some factor of `tick_diff`
                                     if let Some(value) = &mut point.value {
                                         match value {
                                             number_data_point::Value::AsDouble(v) => {
@@ -403,29 +952,243 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                             }
                                         }
                                     }
-                                } else {
-                                    // For non-accumulating sums, use random
-                                    // values
-                                    if let Some(value) = &mut point.value {
-                                        match value {
-                                            number_data_point::Value::AsDouble(v) => {
-                                                *v = rng.random();
-                                            }
-                                            number_data_point::Value::AsInt(v) => {
-                                                *v = rng.random();
-                                            }
+                                } else if let Some(value) = &mut point.value {
+                                    match value {
+                                        number_data_point::Value::AsDouble(v) => {
+                                            *v = rng.random();
+                                        }
+                                        number_data_point::Value::AsInt(v) => {
+                                            *v = rng.random();
                                         }
                                     }
                                 }
+
+                                clock.note_emission(current_time_unix_nano);
                             }
                         }
-                        _ => unimplemented!(),
+                        Data::Histogram(histogram) => {
+                            let aggregation_temporality = histogram.aggregation_temporality;
+
+                            for (point_index, point) in histogram.data_points.iter_mut().enumerate()
+                            {
+                                let series_id = point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                );
+                                let bucket_count = point.explicit_bounds.len() + 1;
+                                let profile = templates::point_profile(series_id);
+
+                                let state =
+                                    self.histogram_series.entry(series_id).or_insert_with(|| {
+                                        HistogramPointState::new(
+                                            current_time_unix_nano,
+                                            previous_time_unix_nano,
+                                            bucket_count,
+                                        )
+                                    });
+
+                                let interval_population =
+                                    non_negative_population(profile, state.clock.emissions, rng);
+                                let interval_bucket_counts = histogram_bucket_counts(
+                                    &interval_population.observations,
+                                    &point.explicit_bounds,
+                                );
+
+                                point.start_time_unix_nano = state
+                                    .clock
+                                    .start_time_for_temporality(aggregation_temporality);
+                                point.time_unix_nano = current_time_unix_nano;
+
+                                if aggregation_temporality == CUMULATIVE_TEMPORALITY {
+                                    merge_bucket_counts(
+                                        &mut state.cumulative_bucket_counts,
+                                        &interval_bucket_counts,
+                                    );
+                                    state.cumulative_count += interval_population.count;
+                                    state.cumulative_sum += interval_population.sum;
+                                    state.cumulative_min =
+                                        update_min(state.cumulative_min, interval_population.min);
+                                    state.cumulative_max =
+                                        update_max(state.cumulative_max, interval_population.max);
+
+                                    point
+                                        .bucket_counts
+                                        .clone_from(&state.cumulative_bucket_counts);
+                                    point.count = state.cumulative_count;
+                                    point.sum = Some(state.cumulative_sum);
+                                    point.min = state.cumulative_min;
+                                    point.max = state.cumulative_max;
+                                } else {
+                                    point.bucket_counts = interval_bucket_counts;
+                                    point.count = interval_population.count;
+                                    point.sum = Some(interval_population.sum);
+                                    point.min = interval_population.min;
+                                    point.max = interval_population.max;
+                                }
+                                point.exemplars = random_exemplars(
+                                    current_time_unix_nano,
+                                    point.min,
+                                    point.max,
+                                    rng,
+                                );
+
+                                state.clock.note_emission(current_time_unix_nano);
+                            }
+                        }
+                        Data::ExponentialHistogram(histogram) => {
+                            let aggregation_temporality = histogram.aggregation_temporality;
+
+                            for (point_index, point) in histogram.data_points.iter_mut().enumerate()
+                            {
+                                let series_id = point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                );
+                                let profile = templates::point_profile(series_id);
+                                let state = self
+                                    .exponential_histogram_series
+                                    .entry(series_id)
+                                    .or_insert_with(|| {
+                                        ExponentialHistogramPointState::new(
+                                            current_time_unix_nano,
+                                            previous_time_unix_nano,
+                                        )
+                                    });
+                                let interval_population = signed_population(
+                                    profile,
+                                    point.zero_threshold,
+                                    state.clock.emissions,
+                                    rng,
+                                );
+                                let (interval_zero_count, interval_positive, interval_negative) =
+                                    exponential_histogram_buckets(
+                                        &interval_population.observations,
+                                        point.scale,
+                                        point.zero_threshold,
+                                    );
+
+                                point.start_time_unix_nano = state
+                                    .clock
+                                    .start_time_for_temporality(aggregation_temporality);
+                                point.time_unix_nano = current_time_unix_nano;
+
+                                if aggregation_temporality == CUMULATIVE_TEMPORALITY {
+                                    for (bucket_index, count) in &interval_positive {
+                                        *state
+                                            .cumulative_positive
+                                            .entry(*bucket_index)
+                                            .or_insert(0) += *count;
+                                    }
+                                    for (bucket_index, count) in &interval_negative {
+                                        *state
+                                            .cumulative_negative
+                                            .entry(*bucket_index)
+                                            .or_insert(0) += *count;
+                                    }
+                                    state.cumulative_zero_count += interval_zero_count;
+                                    state.cumulative_count += interval_population.count;
+                                    state.cumulative_sum += interval_population.sum;
+                                    state.cumulative_min =
+                                        update_min(state.cumulative_min, interval_population.min);
+                                    state.cumulative_max =
+                                        update_max(state.cumulative_max, interval_population.max);
+
+                                    point.positive =
+                                        Some(dense_exponential_buckets(&state.cumulative_positive));
+                                    point.negative =
+                                        Some(dense_exponential_buckets(&state.cumulative_negative));
+                                    point.zero_count = state.cumulative_zero_count;
+                                    point.count = state.cumulative_count;
+                                    point.sum = Some(state.cumulative_sum);
+                                    point.min = state.cumulative_min;
+                                    point.max = state.cumulative_max;
+                                } else {
+                                    point.positive =
+                                        Some(dense_exponential_buckets(&interval_positive));
+                                    point.negative =
+                                        Some(dense_exponential_buckets(&interval_negative));
+                                    point.zero_count = interval_zero_count;
+                                    point.count = interval_population.count;
+                                    point.sum = Some(interval_population.sum);
+                                    point.min = interval_population.min;
+                                    point.max = interval_population.max;
+                                }
+                                point.exemplars = random_exemplars(
+                                    current_time_unix_nano,
+                                    point.min,
+                                    point.max,
+                                    rng,
+                                );
+
+                                state.clock.note_emission(current_time_unix_nano);
+                            }
+                        }
+                        Data::Summary(summary) => {
+                            for (point_index, point) in summary.data_points.iter_mut().enumerate() {
+                                let series_id = point_series_id(
+                                    metric_identity,
+                                    point_index,
+                                    &point.attributes,
+                                );
+                                let state =
+                                    self.summary_series.entry(series_id).or_insert_with(|| {
+                                        SummaryPointState::new(
+                                            current_time_unix_nano,
+                                            previous_time_unix_nano,
+                                        )
+                                    });
+                                let profile = templates::point_profile(series_id);
+                                let interval_population =
+                                    non_negative_population(profile, state.clock.emissions, rng);
+
+                                point.start_time_unix_nano =
+                                    state.clock.stream_start_time_unix_nano;
+                                point.time_unix_nano = current_time_unix_nano;
+                                state.cumulative_count += interval_population.count;
+                                state.cumulative_sum += interval_population.sum;
+                                extend_summary_reservoir(
+                                    &mut state.retained_observations,
+                                    &interval_population.observations,
+                                );
+
+                                let mut sorted_observations = state.retained_observations.clone();
+                                sorted_observations.sort_by(f64::total_cmp);
+                                for quantile in &mut point.quantile_values {
+                                    quantile.value =
+                                        quantile_value(&sorted_observations, quantile.quantile);
+                                }
+
+                                point.count = state.cumulative_count;
+                                point.sum = state.cumulative_sum;
+                                state.clock.note_emission(current_time_unix_nano);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        self.data_points_per_resource = data_points_count;
+        while tpl.encoded_len() > budget_before_fetch {
+            if !trim_one_data_point(&mut tpl) {
+                debug!(
+                    budget_before_fetch,
+                    actual_size = tpl.encoded_len(),
+                    "metric payload could not be trimmed to fit budget"
+                );
+                Err(PoolError::EmptyChoice)?;
+            }
+        }
+
+        self.data_points_per_resource = total_data_points(&tpl);
+        self.last_collection_time_unix_nano = current_time_unix_nano;
+
+        // The pool deducted the template's stored encoded size from budget, but
+        // mutations (timestamp, values, bucket counts) may change varint sizes.
+        // Correct the budget so it reflects the actual bytes the caller will
+        // consume.
+        *budget = budget_before_fetch.saturating_sub(tpl.encoded_len());
 
         Ok(tpl)
     }
@@ -893,8 +1656,15 @@ mod test {
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
                         }
-                        // Add other metric types as needed
-                        _ => "unknown".hash(&mut hasher),
+                        Data::Histogram(h) => {
+                            "histogram".hash(&mut hasher);
+                            h.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::ExponentialHistogram(eh) => {
+                            "exponential_histogram".hash(&mut hasher);
+                            eh.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::Summary(_) => "summary".hash(&mut hasher),
                     }
                 }
             }
@@ -1006,7 +1776,30 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    _ => {},
+                                    Data::Histogram(histogram) => {
+                                        for point in &histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::ExponentialHistogram(eh) => {
+                                        for point in &eh.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::Summary(summary) => {
+                                        for point in &summary.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -1059,6 +1852,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1099,6 +1895,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1344,6 +2143,9 @@ mod test {
                 gauge: 0,
                 sum_delta: 25,
                 sum_cumulative: 25,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
@@ -1354,16 +2156,35 @@ mod test {
                 gauge: 50,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
+
+        let zero_sum_cumulative_weight = Config {
+            metric_weights: super::MetricWeights {
+                gauge: 50,
+                sum_delta: 25,
+                sum_cumulative: 0,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
+            },
+            ..valid_config
+        };
+        assert!(zero_sum_cumulative_weight.valid().is_err());
 
         let zero_weights = Config {
             metric_weights: super::MetricWeights {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 0,
+                exponential_histogram: 0,
+                summary: 0,
             },
             ..valid_config
         };
