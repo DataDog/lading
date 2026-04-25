@@ -28,9 +28,11 @@
 //
 // * Gauge -- a collection of `NumberDataPoint`, values sampled at specific times
 // * Sum -- `Gauge` with the addition of monotonic flag, aggregation metadata
+// * Histogram -- explicit-bound bucket counts, sums, min/max, and exemplars
+// * ExponentialHistogram -- scale-based positive, negative, and zero buckets
+// * Summary -- cumulative count/sum with configured quantile values
 //
-// We omit Histogram / ExponentialHistogram / Summary in this current version
-// but will introduce them in the near-term. The `NumberDataPoint` is a
+// The `NumberDataPoint` used by Gauge and Sum is a
 //
 // * attributes: Vec<KeyValue> -- tags
 // * start_time_unix_nano: u64 -- represents the first possible moment a measurement could be recorded, optional

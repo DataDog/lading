@@ -1,7 +1,7 @@
 use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
-    common::v1::{InstrumentationScope, KeyValue},
+    common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
     metrics::{
         self,
         v1::{
@@ -24,6 +24,8 @@ use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATI
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
 pub(crate) type Pool = templates::Pool<ResourceMetrics, ResourceTemplateGenerator>;
+
+const POINT_INDEX_ATTRIBUTE_KEY: &str = "lading.point_index";
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PointProfile {
@@ -109,8 +111,16 @@ fn scaled_unit(seed: u64, shift: u32, min: f64, max: f64) -> f64 {
     min + value * (max - min)
 }
 
-fn point_attributes(metadata: &[KeyValue]) -> Vec<KeyValue> {
-    metadata.iter().take(2).cloned().collect()
+fn point_attributes(metadata: &[KeyValue], point_index: usize) -> Vec<KeyValue> {
+    let mut attributes = Vec::with_capacity(metadata.len().min(2) + 1);
+    attributes.extend(metadata.iter().take(2).cloned());
+    attributes.push(KeyValue {
+        key: POINT_INDEX_ATTRIBUTE_KEY.to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(point_index.to_string())),
+        }),
+    });
+    attributes
 }
 
 struct Ndp(NumberDataPoint);
@@ -268,8 +278,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 is_monotonic,
             }),
             Kind::Summary => {
-                let data_points = (0..total_data_points)
-                    .map(|_| {
+                let data_points = (0..total_data_points as usize)
+                    .map(|point_index| {
                         let quantiles =
                             random_summary_quantiles(rng.random_range(2_usize..=8), rng);
                         let quantile_values = quantiles
@@ -280,7 +290,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                             })
                             .collect::<Vec<_>>();
                         SummaryDataPoint {
-                            attributes: point_attributes(&metadata),
+                            attributes: point_attributes(&metadata, point_index),
                             start_time_unix_nano: 0,
                             time_unix_nano: 0,
                             count: 0,
@@ -296,8 +306,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality,
             } => {
                 let data_points = (0..total_data_points as usize)
-                    .map(|_| {
-                        let attributes = point_attributes(&metadata);
+                    .map(|point_index| {
+                        let attributes = point_attributes(&metadata, point_index);
                         let profile = point_profile(rng.random());
                         let n_bounds = rng.random_range(4_usize..=16);
                         let bounds = histogram_bounds_from_profile(profile, n_bounds);
@@ -328,8 +338,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 scale,
             } => {
                 let data_points = (0..total_data_points as usize)
-                    .map(|_| {
-                        let attributes = point_attributes(&metadata);
+                    .map(|point_index| {
+                        let attributes = point_attributes(&metadata, point_index);
                         let profile = point_profile(rng.random());
 
                         ExponentialHistogramDataPoint {
