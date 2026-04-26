@@ -53,7 +53,7 @@ use crate::opentelemetry::common::{overhead, templates::PoolError};
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value};
+use opentelemetry_proto::tonic::common::v1::{InstrumentationScope, KeyValue, any_value};
 use opentelemetry_proto::tonic::metrics::v1::{
     Exemplar, Metric, ResourceMetrics, exemplar, exponential_histogram_data_point, metric::Data,
     number_data_point,
@@ -219,23 +219,23 @@ fn hash_key_values(values: &[KeyValue], hasher: &mut DefaultHasher) {
 
 fn metric_identity_hash(
     resource_attributes: Option<&[KeyValue]>,
-    scope_attributes: Option<&[KeyValue]>,
+    scope: Option<&InstrumentationScope>,
     metric: &Metric,
 ) -> u64 {
-    metric_hash(resource_attributes, scope_attributes, metric, false)
+    metric_hash(resource_attributes, scope, metric, false)
 }
 
 fn metric_profile_hash(
     resource_attributes: Option<&[KeyValue]>,
-    scope_attributes: Option<&[KeyValue]>,
+    scope: Option<&InstrumentationScope>,
     metric: &Metric,
 ) -> u64 {
-    metric_hash(resource_attributes, scope_attributes, metric, true)
+    metric_hash(resource_attributes, scope, metric, true)
 }
 
 fn metric_hash(
     resource_attributes: Option<&[KeyValue]>,
-    scope_attributes: Option<&[KeyValue]>,
+    scope: Option<&InstrumentationScope>,
     metric: &Metric,
     include_metadata: bool,
 ) -> u64 {
@@ -243,8 +243,10 @@ fn metric_hash(
     if let Some(resource_attributes) = resource_attributes {
         hash_key_values(resource_attributes, &mut hasher);
     }
-    if let Some(scope_attributes) = scope_attributes {
-        hash_key_values(scope_attributes, &mut hasher);
+    if let Some(scope) = scope {
+        scope.name.hash(&mut hasher);
+        scope.version.hash(&mut hasher);
+        hash_key_values(&scope.attributes, &mut hasher);
     }
     metric.name.hash(&mut hasher);
     metric.unit.hash(&mut hasher);
@@ -956,16 +958,12 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         // attributes, timestamps, and cumulative aggregates stay coherent
         // across repeated emissions of the same template.
         for scope_metrics in &mut tpl.scope_metrics {
-            let scope_attributes = scope_metrics
-                .scope
-                .as_ref()
-                .map(|scope| scope.attributes.as_slice());
+            let scope = scope_metrics.scope.as_ref();
 
             for metric in &mut scope_metrics.metrics {
-                let metric_identity =
-                    metric_identity_hash(resource_attributes, scope_attributes, metric);
+                let metric_identity = metric_identity_hash(resource_attributes, scope, metric);
                 let metric_profile_identity =
-                    metric_profile_hash(resource_attributes, scope_attributes, metric);
+                    metric_profile_hash(resource_attributes, scope, metric);
 
                 if let Some(data) = &mut metric.data {
                     match data {
@@ -1355,7 +1353,7 @@ impl crate::Serialize for OpentelemetryMetrics {
 mod test {
     use super::{Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF};
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
-    use opentelemetry_proto::tonic::common::v1::any_value;
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
     use opentelemetry_proto::tonic::metrics::v1::{
         Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
     };
@@ -1409,6 +1407,52 @@ mod test {
                 }
             }
         }
+    }
+
+    /// For all scopes a and b with equivalent attributes and distinct
+    /// name/version, metric state identity hashes differ.
+    #[test]
+    fn metric_identity_includes_scope_name_and_version() {
+        let metric = Metric {
+            name: "metric".to_string(),
+            description: String::new(),
+            unit: String::new(),
+            data: Some(Data::Gauge(Gauge {
+                data_points: Vec::new(),
+            })),
+            metadata: Vec::new(),
+        };
+        let base_scope = InstrumentationScope {
+            name: "scope-a".to_string(),
+            version: "1.0.0".to_string(),
+            attributes: Vec::new(),
+            dropped_attributes_count: 0,
+        };
+        let different_name = InstrumentationScope {
+            name: "scope-b".to_string(),
+            ..base_scope.clone()
+        };
+        let different_version = InstrumentationScope {
+            version: "2.0.0".to_string(),
+            ..base_scope.clone()
+        };
+
+        assert_ne!(
+            super::metric_identity_hash(None, Some(&base_scope), &metric),
+            super::metric_identity_hash(None, Some(&different_name), &metric)
+        );
+        assert_ne!(
+            super::metric_identity_hash(None, Some(&base_scope), &metric),
+            super::metric_identity_hash(None, Some(&different_version), &metric)
+        );
+        assert_ne!(
+            super::metric_profile_hash(None, Some(&base_scope), &metric),
+            super::metric_profile_hash(None, Some(&different_name), &metric)
+        );
+        assert_ne!(
+            super::metric_profile_hash(None, Some(&base_scope), &metric),
+            super::metric_profile_hash(None, Some(&different_version), &metric)
+        );
     }
 
     // Generation of metrics must be deterministic. In order to assert this
@@ -1660,35 +1704,23 @@ mod test {
     ///
     /// A context is defined by the unique combination of:
     /// - Resource attributes
-    /// - Scope attributes
+    /// - Scope name, version, and attributes
     /// - Metric name, attributes, data kind, and unit
     fn context_id(metric: &ResourceMetrics) -> u64 {
         let mut hasher = DefaultHasher::new();
 
         // Hash resource attributes
         if let Some(resource) = &metric.resource {
-            for attr in &resource.attributes {
-                attr.key.hash(&mut hasher);
-                if let Some(value) = &attr.value
-                    && let Some(any_value::Value::StringValue(s)) = &value.value
-                {
-                    s.hash(&mut hasher);
-                }
-            }
+            super::hash_key_values(&resource.attributes, &mut hasher);
         }
 
         // Hash each scope's context
         for scope_metrics in &metric.scope_metrics {
-            // Hash scope attributes
+            // Hash scope identity
             if let Some(scope) = &scope_metrics.scope {
-                for attr in &scope.attributes {
-                    attr.key.hash(&mut hasher);
-                    if let Some(value) = &attr.value
-                        && let Some(any_value::Value::StringValue(s)) = &value.value
-                    {
-                        s.hash(&mut hasher);
-                    }
-                }
+                scope.name.hash(&mut hasher);
+                scope.version.hash(&mut hasher);
+                super::hash_key_values(&scope.attributes, &mut hasher);
             }
 
             // Hash each metric's context
@@ -1697,14 +1729,7 @@ mod test {
                 metric.name.hash(&mut hasher);
 
                 // Hash metric attributes
-                for attr in &metric.metadata {
-                    attr.key.hash(&mut hasher);
-                    if let Some(value) = &attr.value
-                        && let Some(any_value::Value::StringValue(s)) = &value.value
-                    {
-                        s.hash(&mut hasher);
-                    }
-                }
+                super::hash_key_values(&metric.metadata, &mut hasher);
 
                 // Hash metric data kind and unit
                 metric.unit.hash(&mut hasher);
