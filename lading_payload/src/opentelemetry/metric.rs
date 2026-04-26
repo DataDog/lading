@@ -678,13 +678,14 @@ pub struct MetricWeights {
 
 impl Default for MetricWeights {
     fn default() -> Self {
+        // These are relative weights and do not need to sum to 100.
         Self {
-            gauge: 40,                // 40%
-            sum_delta: 25,            // 20%
-            sum_cumulative: 25,       // 20%
-            histogram: 15,            //15%
-            exponential_histogram: 3, // 3%
-            summary: 2,               //2%
+            gauge: 40,
+            sum_delta: 25,
+            sum_cumulative: 25,
+            histogram: 15,
+            exponential_histogram: 3,
+            summary: 2,
         }
     }
 }

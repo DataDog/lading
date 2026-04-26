@@ -11,12 +11,15 @@ generator:
         post:
           maximum_prebuild_cache_size_bytes: "1 GiB"
           variant:
-            # all numbers arbitraray
             opentelemetry_metrics:
+              # Relative weights; values do not need to sum to 100.
               metric_weights:
                 gauge: 50
                 sum_delta: 25
                 sum_cumulative: 25
+                histogram: 15
+                exponential_histogram: 3
+                summary: 2
               contexts:
                 total_contexts:
                   constant: 10000
