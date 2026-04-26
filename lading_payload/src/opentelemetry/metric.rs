@@ -150,7 +150,6 @@ struct ExponentialHistogramPointState {
     cumulative_negative: BTreeMap<i32, u64>,
     cumulative_zero_count: u64,
     cumulative_count: u64,
-    cumulative_sum: f64,
     cumulative_min: Option<f64>,
     cumulative_max: Option<f64>,
 }
@@ -163,7 +162,6 @@ impl ExponentialHistogramPointState {
             cumulative_negative: BTreeMap::new(),
             cumulative_zero_count: 0,
             cumulative_count: 0,
-            cumulative_sum: 0.0,
             cumulative_min: None,
             cumulative_max: None,
         }
@@ -1169,7 +1167,6 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     }
                                     state.cumulative_zero_count += interval_zero_count;
                                     state.cumulative_count += interval_population.count;
-                                    state.cumulative_sum += interval_population.sum;
                                     state.cumulative_min =
                                         update_min(state.cumulative_min, interval_population.min);
                                     state.cumulative_max =
@@ -1181,7 +1178,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                         Some(dense_exponential_buckets(&state.cumulative_negative));
                                     point.zero_count = state.cumulative_zero_count;
                                     point.count = state.cumulative_count;
-                                    point.sum = Some(state.cumulative_sum);
+                                    // signed_population can produce negative measurements;
+                                    // OTLP proto says sum SHOULD NOT be set in that case.
+                                    point.sum = None;
                                     point.min = state.cumulative_min;
                                     point.max = state.cumulative_max;
                                 } else {
@@ -1191,7 +1190,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                         Some(dense_exponential_buckets(&interval_negative));
                                     point.zero_count = interval_zero_count;
                                     point.count = interval_population.count;
-                                    point.sum = Some(interval_population.sum);
+                                    // signed_population can produce negative measurements;
+                                    // OTLP proto says sum SHOULD NOT be set in that case.
+                                    point.sum = None;
                                     point.min = interval_population.min;
                                     point.max = interval_population.max;
                                 }
