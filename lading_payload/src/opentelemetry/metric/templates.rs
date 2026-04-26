@@ -53,7 +53,7 @@ fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) 
 
     while current < max {
         if rng.random_bool(0.5) {
-            return rng.random_range(current..=current.min(max));
+            return rng.random_range(current..=current.saturating_add(step - 1).min(max));
         }
         current = (current + step).min(max);
         step *= 2;
