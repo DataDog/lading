@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RUSTSEC-2026-0398, RUSTSEC-2026-0403, and RUSTSEC-2026-0410.
 
 ### Added
+- The top-level `seed` config option now accepts a string in addition to the
+  existing 32-element byte array. String seeds are hashed with SHA-256 to
+  derive the 32 seed bytes, allowing memorable seeds like `"black cat"`.
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,
   and an exact `chunks_per_payload` batch size.
