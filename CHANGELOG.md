@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+## Added
+- The top-level `seed` config option now accepts a string in addition to the
+  existing 32-element byte array. String seeds are hashed with SHA-256 to
+  derive the 32 seed bytes, allowing memorable seeds like `"black cat"`.
 
 ## [0.32.0]
 ## Changed

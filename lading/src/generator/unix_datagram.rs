@@ -46,7 +46,7 @@ fn maximum_block_size() -> Byte {
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The path of the socket to write to.
     pub path: PathBuf,
     /// The payload variant
@@ -153,7 +153,7 @@ impl UnixDatagram {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
         let labels = MetricsBuilder::new("unix_datagram")
             .with_id(general.id)
             .build();

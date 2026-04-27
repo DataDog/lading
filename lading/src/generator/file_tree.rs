@@ -116,7 +116,7 @@ fn default_rename_per_name() -> NonZeroU32 {
 /// Configuration of [`FileTree`]
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The maximum depth of the file tree
     #[serde(default = "default_max_depth")]
     pub max_depth: NonZeroUsize,
@@ -167,7 +167,7 @@ impl FileTree {
     /// Creation will fail if the target file/folder cannot be opened for writing.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config)?;
 
         let _labels = [
