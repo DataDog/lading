@@ -40,7 +40,7 @@ const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 /// Configuration of [`FileGen`]
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// Total number of concurrent logs.
     concurrent_logs: u16,
     /// The maximum byte size of each log.
@@ -175,7 +175,7 @@ impl Server {
         config: Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = SmallRng::from_seed(config.seed);
+        let mut rng = SmallRng::from_seed(config.seed.into());
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
