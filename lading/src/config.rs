@@ -510,7 +510,7 @@ mod tests {
             inner: generator::Inner::Tcp(generator::tcp::Config {
                 seed: [0; 32],
                 addr: format!("127.0.0.1:{port}").parse().unwrap(),
-                variant: lading_payload::Config::Ascii,
+                variant: lading_payload::Config::Ascii(Default::default()),
                 bytes_per_second: None,
                 maximum_block_size: block::default_maximum_block_size(),
                 maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_u64_with_unit(
@@ -740,7 +740,8 @@ generator:
   - tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8080"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file = fs::File::create(&config_path)?;
@@ -763,7 +764,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8080"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file1 = fs::File::create(&config1_path)?;
@@ -777,7 +779,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8081"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file2 = fs::File::create(&config2_path)?;
@@ -810,7 +813,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8080"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file1 = fs::File::create(&config1_path)?;
@@ -824,7 +828,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8081"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut hidden_file = fs::File::create(&hidden_path)?;
@@ -943,7 +948,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8080"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file1 = fs::File::create(&config1_path)?;
@@ -956,7 +962,8 @@ generator:
     tcp:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       addr: "127.0.0.1:8081"
-      variant: "ascii"
+      variant:
+        ascii: {}
       maximum_prebuild_cache_size_bytes: "8 MiB"
 "#;
         let mut file2 = fs::File::create(&config2_path)?;

@@ -6,7 +6,8 @@ generator:
         maximum_bytes_per_log: "1 MiB"
         total_rotations: 3
         max_depth: 1
-        variant: ascii
+        variant:
+          ascii: {}
         maximum_prebuild_cache_size_bytes: "4 MiB"
         mount_point: /tmp/lading_mount
         load_profile:

@@ -1,7 +1,8 @@
 //! Model the internal logic of a logrotate filesystem.
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use lading_payload::block;
+use lading_payload::line_layout;
 use metrics::counter;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
@@ -385,6 +386,9 @@ pub(crate) struct State {
     now: Tick,
     initial_tick: Tick,
     block_cache: block::Cache,
+    /// Pre-computed cache-wide line layout for read-time slot rewriting.
+    /// `None` if the payload variant does not opt into per-line uniqueness.
+    cache_layout: Option<block::CacheLayout>,
     max_bytes_per_file: u64,
     max_rotations: u8,
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
@@ -478,6 +482,7 @@ impl State {
         );
 
         let total_cache_size = block_cache.total_size();
+        let cache_layout = block_cache.cache_layout();
 
         let mut state = State {
             nodes,
@@ -485,6 +490,7 @@ impl State {
             initial_tick,
             now: initial_tick,
             block_cache,
+            cache_layout,
             max_bytes_per_file,
             max_rotations,
             group_names: Vec::new(),
@@ -1119,6 +1125,26 @@ impl State {
 
                 file.read(to_read as u64, now);
 
+                // If the payload variant opted into per-line uniqueness,
+                // rewrite slot bytes in the returned buffer as a pure
+                // function of (inode, line_idx_within_file). See
+                // `lading_payload::line_layout` for the rewrite contract.
+                let data = if let Some(layout) = &self.cache_layout {
+                    let mut buf = BytesMut::from(data.as_ref());
+                    line_layout::rewrite_slots(
+                        &mut buf,
+                        &layout.entries,
+                        layout.lines_per_cache(),
+                        u64::from(layout.total_cycle_size),
+                        inode as u64,
+                        cache_read_offset,
+                        layout.microseconds_per_line,
+                    );
+                    buf.freeze()
+                } else {
+                    data
+                };
+
                 Some(data)
             }
             Some(Node::Directory { .. }) | None => None,
@@ -1310,7 +1336,7 @@ mod test {
                             &mut rng,
                             NonZeroU32::new(1_000_000).expect("zero value"),
                             10_000,
-                            &lading_payload::Config::Ascii,
+                            &lading_payload::Config::Ascii(Default::default()),
                             10_000,
                         )
                         .expect("block construction");

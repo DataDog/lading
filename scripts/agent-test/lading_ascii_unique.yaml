@@ -1,0 +1,49 @@
+generator:
+  - file_gen:
+      logrotate_fs:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        # Three files with overlapping cache_offset regions to exercise
+        # cross-file uniqueness. The slot mechanism must disambiguate
+        # bytes by inode so the analysis-side reconstruction matches the
+        # agent's bytes for every file.
+        concurrent_logs: 3
+        # 32 MiB max per file — well above what we'll read in 150s at
+        # 100 KiB/s (15 MiB), so no rotation.
+        maximum_bytes_per_log: "32 MiB"
+        total_rotations: 3
+        max_depth: 0
+        # Opt-in to per-line uniqueness via the slot mechanism.
+        # Both flavors (opaque_token and timestamp) have been verified to
+        # pass strict completeness/fabrication/duplication thresholds in
+        # this cache-wrap + cross-file scenario. opaque_token is the
+        # default here because timestamp-shaped slots interact with the
+        # agent's timestamp and multi-line detection heuristics, adding
+        # noise unrelated to the slot mechanism's correctness.
+        variant:
+          ascii:
+            unique:
+              flavor: opaque_token
+              # microseconds_per_line: 1000  # default — 1 ms per line
+        # Cache deliberately sized so that:
+        # - Three concurrent files's cache_offsets are virtually
+        #   guaranteed to overlap given the small cache, stressing the
+        #   cross-file uniqueness property the slot mechanism delivers.
+        # - At 100 KiB/s × ~150s (warmup + experiment + cooldown), each
+        #   file reads ~15 MiB. A 1 MiB cache forces ~15 wraps per file,
+        #   stressing the cache-wrap uniqueness property.
+        maximum_prebuild_cache_size_bytes: "1 MiB"
+        maximum_block_size: "256 KiB"
+        mount_point: /tmp/smp-shared
+        load_profile:
+          constant: "100 KiB"
+        read_capture_path: scratch/captures/fuse_reads.jsonl
+
+blackhole:
+  # Core agent check-in
+  - http:
+      binding_addr: "127.0.0.1:9091"
+  # Logs intake — this is where the agent sends log payloads
+  - http:
+      binding_addr: "127.0.0.1:9092"
+      capture_path: scratch/captures/blackhole.jsonl

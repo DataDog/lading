@@ -151,6 +151,32 @@ fn sha256(data: &[u8]) -> ContentHash {
     hasher.finalize().into()
 }
 
+/// Read from the block cache and, if a cache layout is present, apply the
+/// same read-time slot rewrite the generator applies. The resulting bytes
+/// match what the agent actually received for `(inode, offset, size)`.
+fn read_with_rewrite(
+    block_cache: &lading_payload::block::Cache,
+    layout: Option<&lading_payload::block::CacheLayout>,
+    inode: usize,
+    cache_read_offset: u64,
+    size: usize,
+) -> Vec<u8> {
+    let data = block_cache.read_at(cache_read_offset, size);
+    let mut buf = data.to_vec();
+    if let Some(layout) = layout {
+        lading_payload::line_layout::rewrite_slots(
+            &mut buf,
+            &layout.entries,
+            layout.lines_per_cache(),
+            u64::from(layout.total_cycle_size),
+            inode as u64,
+            cache_read_offset,
+            layout.microseconds_per_line,
+        );
+    }
+    buf
+}
+
 /// Extract the logrotate_fs config from the lading config file.
 fn extract_logrotate_config(lading_config_path: &Path) -> Result<LogrotateFsConfig, Error> {
     let contents = std::fs::read_to_string(lading_config_path)?;
@@ -193,6 +219,12 @@ pub fn reconstruct(
         &lr_config.variant,
         total_bytes.get() as usize,
     )?;
+
+    // Variants that opt into per-line uniqueness carry a cache-wide layout
+    // that the generator uses to rewrite slot bytes on every FUSE read.
+    // We must apply the same rewrite here so reconstructed input bytes
+    // match what the agent actually received.
+    let cache_layout = block_cache.cache_layout();
 
     // Parse FUSE capture JSONL
     let file = std::fs::File::open(fuse_capture_path)?;
@@ -249,7 +281,10 @@ pub fn reconstruct(
                 };
 
                 // Always collect raw reads
-                let data = block_cache.read_at(
+                let data = read_with_rewrite(
+                    &block_cache,
+                    cache_layout.as_ref(),
+                    *inode,
                     file_info.cache_offset + offset,
                     *size as usize,
                 );
@@ -280,40 +315,75 @@ pub fn reconstruct(
         events.push(event);
     }
 
-    let lines = reconstruct_lines(&block_cache, reads_by_inode);
+    let lines = reconstruct_lines(&block_cache, cache_layout.as_ref(), reads_by_inode);
 
     Ok((raw_reads, lines, events))
 }
 
 /// Reconstruct newline-delimited lines from per-file reads.
+///
+/// FUSE captures often contain **overlapping** reads — the kernel issues
+/// multiple read requests for adjacent or overlapping offset ranges (driven
+/// by readahead, separate page-cache fills, etc.). User-space sees a
+/// monotonic stream from offset 0 onwards, so we must dedupe overlapping
+/// byte ranges before stitching, otherwise the same line spans get
+/// emitted twice and lines crossing overlap boundaries can be
+/// mis-stitched.
+///
+/// We process reads in offset order and skip any prefix bytes whose offset
+/// has already been observed.
 fn reconstruct_lines(
     block_cache: &lading_payload::block::Cache,
+    cache_layout: Option<&lading_payload::block::CacheLayout>,
     reads_by_inode: FxHashMap<usize, Vec<ReadRecord>>,
 ) -> Vec<ReconstructedLine> {
     let mut all_lines: Vec<ReconstructedLine> = Vec::new();
 
-    for (_inode, mut reads) in reads_by_inode {
-        // Sort reads by offset for sequential replay
-        reads.sort_by_key(|r| r.offset);
+    for (inode, mut reads) in reads_by_inode {
+        // Sort reads by (offset, size) so that within the same offset the
+        // larger (more authoritative) read dominates the dedup logic.
+        reads.sort_by_key(|r| (r.offset, std::cmp::Reverse(r.size)));
 
         let group_id = reads.first().map_or(0, |r| r.group_id);
         let mut line_buffer: Vec<u8> = Vec::new();
         let mut contributions: Vec<ReadContribution> = Vec::new();
 
+        // Watermark of the highest absolute file offset we've already
+        // appended to the byte stream. Any read covering bytes at or below
+        // this watermark is overlapping with what we've already seen and
+        // must be skipped (or partially skipped, for partially overlapping
+        // reads).
+        let mut next_offset: u64 = 0;
+
         for read in &reads {
-            let data = block_cache.read_at(
+            let read_end = read.offset + read.size;
+            if read_end <= next_offset {
+                // Read is entirely contained in already-processed range;
+                // skip it.
+                continue;
+            }
+
+            // Compute the leading slice of this read that we've already
+            // processed via earlier reads, and skip it.
+            let skip = next_offset.saturating_sub(read.offset);
+            let data = read_with_rewrite(
+                block_cache,
+                cache_layout,
+                inode,
                 read.cache_offset + read.offset,
                 read.size as usize,
             );
+            let data = &data[skip as usize..];
+            let read_offset_after_skip = read.offset + skip;
 
             // Process byte by byte looking for newlines
-            let mut start = 0;
+            let mut start: usize = 0;
             for (i, &byte) in data.iter().enumerate() {
                 if byte == b'\n' {
                     // Complete line found
                     line_buffer.extend_from_slice(&data[start..i]);
                     contributions.push(ReadContribution {
-                        offset: read.offset + start as u64,
+                        offset: read_offset_after_skip + start as u64,
                         size: (i - start) as u64,
                         relative_ms: read.relative_ms,
                     });
@@ -335,11 +405,14 @@ fn reconstruct_lines(
             if start < data.len() {
                 line_buffer.extend_from_slice(&data[start..]);
                 contributions.push(ReadContribution {
-                    offset: read.offset + start as u64,
+                    offset: read_offset_after_skip + start as u64,
                     size: (data.len() - start) as u64,
                     relative_ms: read.relative_ms,
                 });
             }
+
+            // Advance the dedup watermark past this read.
+            next_offset = next_offset.max(read_end);
         }
 
         // Final partial line — discard (agent framer won't emit it)

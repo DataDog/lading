@@ -23,7 +23,8 @@ fn write_lading_config(dir: &std::path::Path) -> std::path::PathBuf {
         maximum_bytes_per_log: "10 MiB"
         total_rotations: 3
         max_depth: 0
-        variant: ascii
+        variant:
+          ascii: {{}}
         maximum_prebuild_cache_size_bytes: "4 MiB"
         mount_point: /tmp/unused
         load_profile:
@@ -54,7 +55,7 @@ fn rebuild_cache_and_extract() -> (Vec<String>, u64) {
         &mut rng,
         total_bytes,
         block::default_maximum_block_size().as_u128(),
-        &lading_payload::Config::Ascii,
+        &lading_payload::Config::Ascii(Default::default()),
         total_bytes.get() as usize,
     )
     .unwrap();

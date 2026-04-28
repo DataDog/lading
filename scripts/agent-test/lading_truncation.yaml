@@ -16,10 +16,13 @@ generator:
           truncation_test:
             format: simple
             categories:
-              # Most lines are small and fit well within the 900KB limit
+              # Most lines are small and fit well within the 900KB limit.
+              # Min size is bounded by the per-line uniqueness slot (see
+              # scratch/captures/README.md ADR-3): a 128-byte floor gives
+              # comfortable room for the header + slot + padding.
               - name: normal
                 weight: 85
-                size_range: [100, 500]
+                size_range: [200, 500]
               # Lines right at the 900KB boundary (both just under and just over)
               - name: at_boundary
                 weight: 5

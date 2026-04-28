@@ -1,0 +1,20 @@
+inputs:
+  fuse_capture: scratch/captures/fuse_reads.jsonl
+  blackhole_capture: scratch/captures/blackhole.jsonl
+  lading_config: scripts/agent-test/lading_apache_common_unique_timestamp.yaml
+
+output_dir: scratch/captures/analysis
+
+# Strict thresholds. This is the realism-faithful test — apache CLF
+# microsecond timestamps in the slot. If anything in the agent's apache
+# log parsing path interacts unexpectedly with our slot bytes, this is
+# where it will surface.
+checks:
+  - completeness:
+      min_ratio: 1.0
+  - fabrication:
+      max_count: 0
+  - duplication:
+      max_ratio: 0.0
+  - latency:
+      max_p99_ms: 10000

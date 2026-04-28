@@ -79,6 +79,9 @@ impl FileGen {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
+    // `gen_shutdown` and `epoch` are only consumed when the `logrotate_fs`
+    // feature is enabled; otherwise they appear unused.
+    #[cfg_attr(not(feature = "logrotate_fs"), allow(unused_variables))]
     pub fn new(
         general: General,
         config: Config,

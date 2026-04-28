@@ -182,6 +182,112 @@ batch cycles) is the minimum safe value.
 **Default behavior preserved:** With cooldown=0 (default), both signals fire
 back-to-back — identical to the previous single-signal shutdown.
 
+### ADR-3: Per-line uniqueness via read-time slot fill
+
+**Problem:** The block cache is cyclic and shared across files. Content-hash
+matching between inputs and outputs requires every reconstructed input line
+to be unique within a run, otherwise completeness/fabrication/duplication
+checks cannot disambiguate. Two behaviors break this:
+- **Cache wrap** — a long enough run serves the same cache bytes more than
+  once, producing identical lines.
+- **Cross-file overlap** — multiple files with overlapping `cache_offset`
+  regions serve identical bytes from shared cache positions.
+
+Before this ADR, we tolerated both by padding the cache well past
+`concurrent_logs × max_bytes_per_log`. That works only for short runs with
+few concurrent files, and scales poorly.
+
+**Decision:** Payload variants opt into a **side-table of per-line
+layouts** emitted alongside their bytes. Each line reserves a fixed-width
+**slot** at cache-build time; the bytes in the slot are a placeholder. At
+FUSE read time, the generator rewrites the slot bytes as a **pure function
+of `(inode, line_index_within_file)`** — no dependency on read timing or
+wall clock. The result:
+
+- The same agent query `(inode, offset, size)` returns the same bytes in
+  every run with the same seed + config. Determinism preserved; same-seed-
+  same-bytes holds.
+- `line_index_within_file` is monotonic across cache wraps, so two reads of
+  the same cache position in different wraps produce different slot bytes.
+  Wrap collisions eliminated.
+- `inode` disambiguates files with overlapping `cache_offset`s, so two
+  files reading the same cache position produce different slot bytes.
+  Cross-file collisions eliminated.
+
+**Scope:** opt-in per variant. Current adopters:
+- `truncation_test` — always on (slot is part of the structured header
+  used by the truncation correctness check). Slot flavor: `OpaqueToken`.
+- `ascii` — opt-in via the `unique: opaque_token | timestamp` config
+  field. When unset (default), `ascii` behaves exactly as before — plain
+  random alphanumeric lines, no slot. When set, lines are emitted as
+  `[<slot>] <random>\n`. `unique: timestamp` maps to `Iso8601` slot
+  flavor.
+- `apache_common` — opt-in via the same `unique: opaque_token | timestamp`
+  config field. Slot replaces the timestamp position in the apache CLF
+  format: `host - user [<slot>] "method path proto" status bytes`.
+  `unique: timestamp` maps to `ApacheCommonTimestamp` slot flavor (apache
+  CLF microsecond format, the variant's native shape).
+- `multiline_test` — planned, will adopt when it lands.
+
+Variants that don't implement the contract (`templated_json`, `syslog`,
+etc.) serve bytes verbatim from the cache as before. Reconstruction on
+the analysis side rebuilds the cache from seed and replays the same slot
+fill, so captured bytes match the reconstructed bytes exactly.
+
+**User-facing config (`UniqueConfig`)** carries two fields:
+
+- `flavor: UniqueFlavor` — `opaque_token` (no agent-side parser
+  interaction) or `timestamp` (the variant's native timestamp shape).
+  Each variant maps `UniqueFlavor` to whichever internal `SlotFlavor`
+  matches its native protocol.
+- `microseconds_per_line: u64` — the rate at which the simulated clock
+  in timestamp slots advances per line. Default `1000` (1 ms/line).
+  Allowing `0` is intentional: in a small file every line can share
+  the same simulated timestamp (cross-file uniqueness still holds via
+  the inode-derived offset). Ignored for opaque flavors.
+
+```yaml
+variant:
+  ascii:
+    unique:
+      flavor: timestamp
+      microseconds_per_line: 100000   # 100 ms/line ≈ 10 lines/sec
+```
+
+Today this is a single integer. Future work could extend it to a
+distribution (fixed stride + jitter, Poisson inter-arrivals, etc.) so
+the embedded timestamps look more like real-world bursty log timing
+patterns.
+
+**Internal slot flavors (`SlotFlavor`):**
+- `OpaqueToken` — `u=<24 hex chars>`. 26 bytes wide. Universal across
+  variants; doesn't look like anything the agent would parse.
+- `Iso8601` — `YYYY-MM-DDTHH:MM:SS.uuuuuuZ` (microsecond precision).
+  27 bytes wide. Used by variants without a native timestamp shape
+  (e.g. `ascii`).
+- `ApacheCommonTimestamp` — `DD/Mon/YYYY:HH:MM:SS.uuuuuu +ZZZZ`. 33 bytes
+  wide. Apache CLF format with microsecond precision (the
+  `mod_log_config` extended `%{%d/%b/%Y:%H:%M:%S.%f %z}t` directive).
+  Used by `apache_common`. Strict second-precision CLF (26 bytes) is
+  insufficient for our throughputs because many lines share the same
+  second; microseconds give 1M sub-second buckets.
+
+Microseconds rather than milliseconds across all timestamp formats:
+millisecond resolution gave only 1000 distinct buckets and produced
+cross-inode collisions in practice (`mix64(42) % 1000 ==
+mix64(43) % 1000 == 962`).
+
+**Key insight:** Read timing is non-deterministic (kernel readahead, agent
+scheduling), but same-query-same-answer is. As long as the fill is a pure
+function of structural coordinates `(inode, line_idx)`, determinism holds
+regardless of when or in what order the agent issues reads.
+
+**Key files:** `lading_payload/src/line_layout.rs` (slot types and fill
+function), `lading_payload/src/block.rs` (`Block::line_layout`,
+`Cache::cache_layout`), `lading/src/generator/file_gen/logrotate_fs/model.rs`
+(`State::read` applies the rewrite),
+`lading_analysis/src/input.rs` (reconstruction replays the rewrite).
+
 ## Known Limitations
 
 ### Blackhole capture throughput at high load
@@ -199,16 +305,24 @@ Options for high-throughput use:
    of decoded text. Much smaller per slot, and the offline validator can
    decompress later. Likely the best tradeoff.
 
-### Line uniqueness and cross-file overlap
+### Line uniqueness and cross-file overlap (resolved for opt-in variants)
 
-The block cache is cyclic — `read_at()` wraps offsets via modulo. Each file gets
-a random `cache_offset`. Two files can read from overlapping cache regions,
-producing identical lines. This means content-hash matching can over-count
-completeness (a line from File A matches output that came from File B).
+The block cache is cyclic — `read_at()` wraps offsets via modulo. Each
+file gets a random `cache_offset`. Two files can read from overlapping
+cache regions; without further intervention, content-hash matching would
+over-count completeness (a line from File A matches output that came
+from File B).
 
-**Mitigation:** use a cache much larger than `concurrent_logs × max_bytes_per_file`.
+ADR-3 (per-line uniqueness via read-time slot fill) resolves this for
+variants that opt in: each line carries a slot whose value is a pure
+function of `(inode, line_index_within_file)`, eliminating cross-file
+and cache-wrap content collisions while preserving same-seed-same-bytes
+determinism. Current adopters: `truncation_test` (mandatory),
+`ascii` (opt-in via `unique:`).
 
-**Long-term fix:** prepend per-line unique IDs in the generator (see Future Work).
+For variants that do not yet opt in, the historical mitigation still
+applies: use a cache much larger than
+`concurrent_logs × max_bytes_per_file`.
 
 ### Block cache determinism across builds
 
@@ -276,6 +390,20 @@ enables live-tailing.
 - **Shutdown flush behavior** — resolved by ADR-1 (freeze model, keep mount
   alive) + ADR-2 (cooldown period keeps blackhole alive for agent flush).
   Completeness reached 100% with 30s cooldown.
+- **Overlapping FUSE reads in input reconstruction** — the kernel issues
+  multiple read requests covering overlapping or adjacent offset ranges
+  (driven by readahead, page-cache fills). The original
+  `reconstruct_lines` sorted reads by offset and concatenated their
+  bytes, double-counting any overlapped region and corrupting line
+  stitching across overlap boundaries. Resolved by adding a
+  high-watermark dedup pass: bytes whose offset is at or below the
+  highest already-processed offset are skipped before stitching.
+  After this fix, ascii/truncation e2e tests both reach 100%
+  completeness with strict thresholds.
+- **Per-line uniqueness for cache-wrap and cross-file overlap** —
+  resolved by ADR-3 (read-time slot fill keyed on
+  `(inode, line_index_within_file)`). Adopted by `truncation_test`
+  (mandatory) and `ascii` (opt-in via `unique:`).
 
 ## Future Work
 
@@ -287,8 +415,6 @@ enables live-tailing.
   independently under a timeout with a lazy-unmount fallback.
 - **Performance validation** — run with and without capture to confirm overhead
   is negligible at target throughput.
-- **Per-line unique IDs** — add unique line identifiers to the payload to
-  eliminate content-hash ambiguity from block cache wrapping.
 - **Protobuf intake format** — extend the output parser to decode protobuf
   payloads in addition to JSON, for agents that use proto encoding.
 - **YAML-driven check discovery** — the `Check` trait and framework are
