@@ -1,0 +1,39 @@
+generator:
+  - file_gen:
+      logrotate_fs:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        # Same stress regime as the opaque variant, but with apache CLF
+        # microsecond timestamps in the slot. This is the
+        # realism-faithful variant — every line looks like a genuine
+        # apache common log entry, and any agent-side apache parser
+        # behavior will fire on these timestamps.
+        concurrent_logs: 3
+        maximum_bytes_per_log: "32 MiB"
+        total_rotations: 3
+        max_depth: 0
+        # Apache common log format with the apache CLF microsecond
+        # timestamp slot: `host - user [DD/Mon/YYYY:HH:MM:SS.uuuuuu +ZZZZ] "method path proto" status bytes`.
+        # This is the `%{%d/%b/%Y:%H:%M:%S.%f %z}t` extended format
+        # widely used in real apache deployments via mod_log_config.
+        variant:
+          apache_common:
+            unique:
+              flavor: timestamp
+              # microseconds_per_line: 1000  # default — 1 ms per line.
+              # Override e.g. `microseconds_per_line: 100000` for 100 ms/line
+              # (≈ 10 lines per simulated second), making the embedded
+              # apache CLF timestamps span a wider simulated window.
+        maximum_prebuild_cache_size_bytes: "1 MiB"
+        maximum_block_size: "256 KiB"
+        mount_point: /tmp/smp-shared
+        load_profile:
+          constant: "100 KiB"
+        read_capture_path: scratch/captures/fuse_reads.jsonl
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9091"
+  - http:
+      binding_addr: "127.0.0.1:9092"
+      capture_path: scratch/captures/blackhole.jsonl

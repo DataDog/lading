@@ -357,7 +357,8 @@ generator:
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
-            variant: "apache_common"
+            variant:
+              apache_common: {}
         "#,
         )?;
 
@@ -391,7 +392,8 @@ generator:
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
-            variant: "ascii"
+            variant:
+              ascii: {}
         "#,
         )?;
 
@@ -576,7 +578,8 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         addr: "127.0.0.1:{{port_number}}"
         bytes_per_second: "100 MiB"
-        variant: ascii
+        variant:
+          ascii: {}
         maximum_prebuild_cache_size_bytes: "8 MiB"
         "#,
         )?;

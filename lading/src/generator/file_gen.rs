@@ -79,10 +79,15 @@ impl FileGen {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
+    // `gen_shutdown` and `epoch` are only consumed when the `logrotate_fs`
+    // feature is enabled; otherwise they appear unused.
+    #[cfg_attr(not(feature = "logrotate_fs"), allow(unused_variables))]
     pub fn new(
         general: General,
         config: Config,
         shutdown: lading_signal::Watcher,
+        gen_shutdown: lading_signal::Watcher,
+        epoch: std::time::Instant,
     ) -> Result<Self, Error> {
         let srv = match config {
             Config::Traditional(c) => {
@@ -91,7 +96,7 @@ impl FileGen {
             Config::Logrotate(c) => Self::Logrotate(logrotate::Server::new(general, c, shutdown)?),
             #[cfg(feature = "logrotate_fs")]
             Config::LogrotateFs(c) => {
-                Self::LogrotateFs(logrotate_fs::Server::new(general, c, shutdown)?)
+                Self::LogrotateFs(logrotate_fs::Server::new(general, c, shutdown, gen_shutdown, epoch)?)
             }
         };
         Ok(srv)

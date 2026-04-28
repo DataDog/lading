@@ -15,6 +15,7 @@ use rand::{Rng, distr::weighted};
 use serde::Deserialize;
 
 pub mod block;
+pub mod line_layout;
 
 pub use apache_common::ApacheCommon;
 pub use ascii::Ascii;
@@ -31,6 +32,7 @@ pub use static_timestamped::StaticTimestamped;
 pub use statik::Static;
 pub use syslog::Syslog5424;
 pub use templated_json::TemplatedJson;
+pub use truncation_test::TruncationTest;
 
 pub mod apache_common;
 pub mod ascii;
@@ -48,6 +50,7 @@ pub mod statik;
 pub mod syslog;
 pub mod templated_json;
 pub mod trace_agent;
+pub mod truncation_test;
 
 /// Errors related to serialization
 #[derive(thiserror::Error, Debug)]
@@ -119,6 +122,32 @@ pub trait Serialize {
     fn data_points_generated(&self) -> Option<u64> {
         None
     }
+
+    /// Returns the per-line layout captured during the most recent call to
+    /// [`Serialize::to_bytes`], if this variant opts into per-line
+    /// uniqueness via read-time slot rewriting.
+    ///
+    /// Like [`Serialize::data_points_generated`], this is scoped to the
+    /// most recent `to_bytes` call and will be overwritten on subsequent
+    /// calls.
+    ///
+    /// If `None`, the variant does not participate in the slot-rewrite
+    /// mechanism and its bytes are served verbatim from the cache.
+    fn line_layout(&self) -> Option<&[line_layout::LineEntry]> {
+        None
+    }
+
+    /// Microseconds the simulated clock advances per line for this
+    /// variant. Returned alongside [`Serialize::line_layout`] so the
+    /// FUSE read path can pass it into
+    /// [`line_layout::rewrite_slots`].
+    ///
+    /// Variants that participate in the slot mechanism return
+    /// `Some(N)`. Variants that don't return `None`. The value is only
+    /// consumed by timestamp-shaped flavors; opaque flavor ignores it.
+    fn microseconds_per_line(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// Configuration for `Payload`
@@ -169,12 +198,17 @@ pub enum Config {
         #[serde(default)]
         start_line_index: Option<u64>,
     },
-    /// Generates a line of printable ascii characters
-    Ascii,
+    /// Generates a line of printable ascii characters. Optionally per-line
+    /// unique via the `unique` field on the inner config — see
+    /// [`ascii::Config`] and [`ascii::UniqueFlavor`].
+    Ascii(crate::ascii::Config),
     /// Generates a json encoded line
     Json,
-    /// Generates a Apache Common log lines
-    ApacheCommon,
+    /// Generates a Apache Common log lines. Optionally per-line unique
+    /// via the `unique` field on the inner config — see
+    /// [`apache_common::Config`] and
+    /// [`line_layout::UniqueFlavor`].
+    ApacheCommon(crate::apache_common::Config),
     /// Generates OpenTelemetry traces from a service topology graph
     OpentelemetryTraces(crate::opentelemetry::trace::Config),
     /// Generates OpenTelemetry logs
@@ -193,6 +227,11 @@ pub enum Config {
         /// startup and can be shared across multiple lading configs.
         template_path: PathBuf,
     },
+    /// Generates log lines for truncation testing with configurable size
+    /// categories. Each line embeds metadata (category, id, size) in a
+    /// structured header so the offline analysis tool can verify that the
+    /// downstream system's truncation behavior is correct.
+    TruncationTest(truncation_test::Config),
 }
 
 /// Unified payload type for all serializers

@@ -97,6 +97,14 @@ pub struct Block {
     pub bytes: Bytes,
     /// Optional metadata for the block
     pub metadata: BlockMetadata,
+    /// Per-line layout for variants that participate in read-time slot
+    /// rewriting. `None` for variants that emit bytes without slot
+    /// metadata (the default).
+    pub line_layout: Option<Vec<crate::line_layout::LineEntry>>,
+    /// Microseconds the simulated clock advances per line. Set when the
+    /// variant participates in slot rewriting; `None` otherwise. Used
+    /// by timestamp-shaped slot flavors at FUSE read time.
+    pub microseconds_per_line: Option<u64>,
 }
 
 /// Metadata associated with a Block
@@ -104,6 +112,51 @@ pub struct Block {
 pub struct BlockMetadata {
     /// Number of data points in this block
     pub data_points: Option<u64>,
+}
+
+/// Cache-wide line layout, assembled by [`Cache::cache_layout`] from
+/// per-block layouts. Line offsets are global within the cache cycle.
+#[derive(Debug, Clone)]
+pub struct CacheLayout {
+    /// Per-line entries, sorted by `line_start`.
+    pub entries: Vec<crate::line_layout::LineEntry>,
+    /// The total cycle size of the cache this layout was built from. Used
+    /// by readers to normalize offsets via modulo.
+    pub total_cycle_size: u32,
+    /// Microseconds the simulated clock advances per line — passed by
+    /// the FUSE read path into [`crate::line_layout::rewrite_slots`].
+    /// Aggregated from per-block values; all participating blocks must
+    /// agree because they're produced by the same variant.
+    pub microseconds_per_line: u64,
+}
+
+impl CacheLayout {
+    /// Number of lines in the cache layout.
+    #[must_use]
+    pub fn lines_per_cache(&self) -> u64 {
+        self.entries.len() as u64
+    }
+
+    /// Find the index of the line whose byte range contains the given
+    /// cache-position, using binary search.
+    ///
+    /// Returns `None` if `pos` falls in an inter-line gap (e.g. between
+    /// blocks where a serializer left trailing padding). Callers generally
+    /// treat this as "no slot to rewrite at this position."
+    #[must_use]
+    pub fn line_idx_containing(&self, pos: u32) -> Option<usize> {
+        // `partition_point` returns the first index where `line_start > pos`.
+        // The candidate line is therefore `partition_point - 1`; we verify
+        // that `pos` falls inside its byte range.
+        let pp = self.entries.partition_point(|e| e.line_start <= pos);
+        if pp == 0 {
+            return None;
+        }
+        let idx = pp - 1;
+        let e = &self.entries[idx];
+        let end = e.line_start + e.line_length;
+        if pos < end { Some(idx) } else { None }
+    }
 }
 
 /// Errors for the construction of the block cache
@@ -123,6 +176,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
             total_bytes: NonZeroU32::new(total_bytes).expect("total_bytes must be non-zero"),
             bytes,
             metadata: BlockMetadata::default(),
+            line_layout: None,
+            microseconds_per_line: None,
         })
     }
 }
@@ -231,6 +286,18 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
+            crate::Config::TruncationTest(config) => {
+                let mut serializer = crate::TruncationTest::new(config.clone())
+                    .map_err(|e| Error::InvalidConfig(format!("truncation_test: {e}")))?;
+                let span = span!(Level::INFO, "fixed", payload = "truncation-test");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
             crate::Config::TraceAgent(config) => {
                 use crate::trace_agent::{self, v04};
 
@@ -304,8 +371,8 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
-            crate::Config::ApacheCommon => {
-                let mut pyld = crate::ApacheCommon::new(&mut rng);
+            crate::Config::ApacheCommon(cfg) => {
+                let mut pyld = crate::ApacheCommon::with_config(&mut rng, *cfg);
                 let span = span!(Level::INFO, "fixed", payload = "apache-common");
                 let _guard = span.enter();
                 construct_block_cache_inner(
@@ -315,8 +382,8 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
-            crate::Config::Ascii => {
-                let mut pyld = crate::Ascii::new(&mut rng);
+            crate::Config::Ascii(cfg) => {
+                let mut pyld = crate::Ascii::with_config(&mut rng, cfg.clone());
                 let span = span!(Level::INFO, "fixed", payload = "ascii");
                 let _guard = span.enter();
                 construct_block_cache_inner(
@@ -502,6 +569,65 @@ impl Cache {
                 block
             }
         }
+    }
+
+    /// Build a cache-wide line layout if any block carries per-line metadata.
+    ///
+    /// Entries are concatenated across blocks with `line_start` adjusted to
+    /// reference the cache-cycle global offset (i.e. positions within the
+    /// concatenation of all blocks, modulo `total_cycle_size`). Returns
+    /// `None` if no block in the cache has a layout — meaning the variant
+    /// does not participate in read-time slot rewriting.
+    ///
+    /// Entries are guaranteed sorted by `line_start`, suitable for binary
+    /// search.
+    #[must_use]
+    pub fn cache_layout(&self) -> Option<CacheLayout> {
+        let Self::Fixed { blocks, .. } = self;
+
+        let any_layout = blocks.iter().any(|b| b.line_layout.is_some());
+        if !any_layout {
+            return None;
+        }
+
+        let mut entries: Vec<crate::line_layout::LineEntry> = Vec::new();
+        let mut block_base: u32 = 0;
+        // All participating blocks must agree on microseconds_per_line —
+        // they're built from the same variant, so this is an invariant
+        // not a configuration choice. We pick the first non-None value
+        // and assert subsequent blocks match.
+        let mut microseconds_per_line: Option<u64> = None;
+        for block in blocks {
+            if let Some(layout) = &block.line_layout {
+                for e in layout {
+                    entries.push(crate::line_layout::LineEntry {
+                        line_start: block_base + e.line_start,
+                        ..*e
+                    });
+                }
+                match (microseconds_per_line, block.microseconds_per_line) {
+                    (None, Some(v)) => microseconds_per_line = Some(v),
+                    (Some(prev), Some(v)) => {
+                        debug_assert_eq!(
+                            prev, v,
+                            "all blocks in the same cache must agree on microseconds_per_line"
+                        );
+                    }
+                    (_, None) => debug_assert!(
+                        false,
+                        "block has line_layout but no microseconds_per_line"
+                    ),
+                }
+            }
+            block_base += block.total_bytes.get();
+        }
+
+        Some(CacheLayout {
+            entries,
+            total_cycle_size: block_base,
+            microseconds_per_line: microseconds_per_line
+                .unwrap_or_else(crate::line_layout::default_microseconds_per_line),
+        })
     }
 
     /// Read data starting from a given offset and up to the specified size.
@@ -761,10 +887,15 @@ where
             metadata.data_points = Some(data_points);
         }
 
+        let line_layout = serializer.line_layout().map(<[_]>::to_vec);
+        let microseconds_per_line = serializer.microseconds_per_line();
+
         Ok(Block {
             total_bytes,
             bytes,
             metadata,
+            line_layout,
+            microseconds_per_line,
         })
     }
 }

@@ -4,6 +4,7 @@ members = [
   "integration/sheepdog",
   "integration/ducks",
   "lading",
+  "lading_analysis",
   "lading_capture_schema",
   "lading_capture",
   "lading_fuzz",

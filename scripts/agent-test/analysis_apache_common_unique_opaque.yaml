@@ -1,0 +1,19 @@
+inputs:
+  fuse_capture: scratch/captures/fuse_reads.jsonl
+  blackhole_capture: scratch/captures/blackhole.jsonl
+  lading_config: scripts/agent-test/lading_apache_common_unique_opaque.yaml
+
+output_dir: scratch/captures/analysis
+
+# Strict thresholds: the slot mechanism delivers per-line uniqueness
+# even with cache wrap and cross-file overlap, so any completeness gap,
+# fabricated message, or duplicate is a real bug.
+checks:
+  - completeness:
+      min_ratio: 1.0
+  - fabrication:
+      max_count: 0
+  - duplication:
+      max_ratio: 0.0
+  - latency:
+      max_p99_ms: 10000

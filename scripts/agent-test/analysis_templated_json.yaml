@@ -1,0 +1,16 @@
+inputs:
+  fuse_capture: scratch/captures/fuse_reads.jsonl
+  blackhole_capture: scratch/captures/blackhole.jsonl
+  lading_config: scripts/agent-test/lading_templated_json.yaml
+
+output_dir: scratch/captures/analysis
+
+checks:
+  - completeness:
+      min_ratio: 0.95
+  - fabrication:
+      max_count: 0
+  - duplication:
+      max_ratio: 0.01
+  - latency:
+      max_p99_ms: 10000
