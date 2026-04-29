@@ -43,7 +43,15 @@ mod tests {
     use crate::scenario::multiline::MultilineScenario;
     use crate::scenario::truncation::TruncationScenario;
 
+    fn init_tracing() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .try_init();
+    }
+
     fn orchestrator_config() -> OrchestratorConfig {
+        init_tracing();
         OrchestratorConfig::default()
     }
 
@@ -54,15 +62,9 @@ mod tests {
             .block_on(f)
     }
 
-    fn proptest_cases() -> u32 {
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1)
-    }
-
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(proptest_cases()))]
+        // Default 1 case; override via PROPTEST_CASES env var (read by proptest natively).
+        #![proptest_config(ProptestConfig::with_cases(1))]
 
         #[test]
         fn multiline_timestamp_detection(
@@ -144,6 +146,86 @@ mod tests {
         fn truncation_plain_text(
             params in crate::scenario::truncation::strategy_with_format(
                 LogFormat::PlainText,
+            )
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<TruncationScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn truncation_json(
+            params in crate::scenario::truncation::strategy_with_format(
+                LogFormat::Json,
+            )
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<TruncationScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn truncation_syslog(
+            params in crate::scenario::truncation::strategy_with_format(
+                LogFormat::Syslog5424,
+            )
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<TruncationScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn truncation_apache(
+            params in crate::scenario::truncation::strategy_with_format(
+                LogFormat::ApacheCommon,
+            )
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<TruncationScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn truncation_timestamp_prefixed(
+            params in crate::scenario::truncation::strategy_with_format(
+                LogFormat::TimestampPrefixed,
             )
         ) {
             let config = orchestrator_config();

@@ -33,7 +33,7 @@ pub enum Error {
 }
 
 /// A single log entry as received from the Datadog Agent.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct ReceivedLogEntry {
     /// The log message content.
     pub message: String,
@@ -235,19 +235,26 @@ async fn handle_request(
 
         match decompress_if_needed(&body, &content_encoding) {
             Ok(decompressed) => {
-                match serde_json::from_slice::<Vec<ReceivedLogEntry>>(&decompressed) {
-                    Ok(entries) => {
-                        debug!("parsed {} log entries", entries.len());
-                        store.append(entries);
-                    }
-                    Err(e) => {
-                        warn!("failed to parse log payload: {e}");
-                        // Try parsing as a single entry (some agent versions send objects
-                        // rather than arrays).
-                        if let Ok(entry) =
-                            serde_json::from_slice::<ReceivedLogEntry>(&decompressed)
-                        {
-                            store.append(vec![entry]);
+                // The agent may send empty objects `{}` as health/keepalive
+                // pings. Skip payloads that are too small to contain log data.
+                if decompressed.len() <= 2 {
+                    trace!("ignoring empty payload ({} bytes)", decompressed.len());
+                } else {
+                    match serde_json::from_slice::<Vec<ReceivedLogEntry>>(&decompressed) {
+                        Ok(entries) => {
+                            debug!("parsed {} log entries", entries.len());
+                            store.append(entries);
+                        }
+                        Err(e) => {
+                            // Try parsing as a single entry (some agent versions
+                            // send objects rather than arrays).
+                            if let Ok(entry) =
+                                serde_json::from_slice::<ReceivedLogEntry>(&decompressed)
+                            {
+                                store.append(vec![entry]);
+                            } else {
+                                warn!("failed to parse log payload ({} bytes): {e}", decompressed.len());
+                            }
                         }
                     }
                 }

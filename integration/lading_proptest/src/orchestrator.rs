@@ -65,6 +65,9 @@ pub struct OrchestratorConfig {
     pub use_compression: bool,
     /// Agent batch wait time in ms (lower = faster drain).
     pub batch_wait_ms: u64,
+    /// Always preserve the temp directory, even on success.
+    /// Set via `LADING_KEEP_TEMP=1`.
+    pub keep_temp: bool,
 }
 
 impl Default for OrchestratorConfig {
@@ -76,6 +79,7 @@ impl Default for OrchestratorConfig {
             readiness_timeout: Duration::from_secs(60),
             use_compression: true,
             batch_wait_ms: 1000,
+            keep_temp: std::env::var("LADING_KEEP_TEMP").is_ok(),
         }
     }
 }
@@ -210,6 +214,9 @@ pub async fn run_case<S: Scenario>(
     let output = intake.stop().await;
     info!("collected {} output entries", output.len());
 
+    // Dump output to temp dir for inspection
+    dump_output(&temp_path, &output)?;
+
     // 10. Check properties
     let properties = S::properties(params);
     let property_results: Vec<Result<(), PropertyFailure>> = properties
@@ -224,14 +231,12 @@ pub async fn run_case<S: Scenario>(
         output,
         property_results,
         temp_dir_path: temp_path,
-        // On failure: leak the TempDir so the directory persists for debugging.
-        // On success: keep the TempDir so it gets cleaned up when dropped.
-        _temp_dir: if all_passed {
-            Some(temp_dir)
-        } else {
-            let path = temp_dir.keep(); // prevents cleanup
-            info!("preserving temp dir for debugging: {}", path.display());
+        _temp_dir: if !all_passed || config.keep_temp {
+            let path = temp_dir.keep();
+            info!("preserving temp dir: {}", path.display());
             None
+        } else {
+            Some(temp_dir)
         },
     })
 }
@@ -244,5 +249,25 @@ async fn write_log_batch(path: &Path, batch: &LogBatch) -> Result<(), std::io::E
         file.write_all(b"\n").await?;
     }
     file.flush().await?;
+    Ok(())
+}
+
+/// Dump received output entries to the temp dir for manual inspection.
+fn dump_output(temp_path: &Path, output: &[ReceivedLogEntry]) -> Result<(), std::io::Error> {
+    use std::io::Write;
+
+    // Raw JSON array of all received entries
+    let json_path = temp_path.join("output.json");
+    let json = serde_json::to_string_pretty(output).unwrap_or_else(|_| "[]".to_string());
+    std::fs::write(&json_path, json)?;
+
+    // One message per line (easier to diff against input)
+    let messages_path = temp_path.join("output_messages.txt");
+    let mut f = std::fs::File::create(&messages_path)?;
+    for (i, entry) in output.iter().enumerate() {
+        writeln!(f, "[{i}] ({} bytes) {}", entry.message.len(), entry.message)?;
+    }
+
+    info!("output dumped to {} and {}", json_path.display(), messages_path.display());
     Ok(())
 }

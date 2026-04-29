@@ -220,11 +220,22 @@ impl Property for ContentPreserved {
 
 /// Lines exceeding the configured max message size are truncated; lines under
 /// the limit are delivered intact.
+///
+/// The Datadog Agent's truncation behavior:
+/// - Lines under the limit pass through intact.
+/// - Lines over the limit are split into a **head chunk** (content up to the
+///   limit with `...TRUNCATED...` appended) and one or more **tail chunks**
+///   (prefixed with `...TRUNCATED...` containing the remaining content).
+/// - The head chunk size is `max_message_size_bytes + TRUNCATED_MARKER.len()`.
+/// - Tail chunks are standalone output entries with no UUID.
 #[derive(Debug, Copy, Clone)]
 pub struct TruncationRespected {
     /// The agent's `max_message_size_bytes` setting.
     pub max_message_bytes: usize,
 }
+
+/// The marker the agent appends/prepends on truncated messages.
+const TRUNCATED_MARKER: &str = "...TRUNCATED...";
 
 impl Property for TruncationRespected {
     fn name(&self) -> &'static str {
@@ -243,9 +254,18 @@ impl Property for TruncationRespected {
             .map(|l| (l.id.as_str(), l.content.as_str()))
             .collect();
 
+        // The agent appends "...TRUNCATED..." to the head chunk, so the
+        // output message can be up to this many bytes over the raw limit.
+        let max_head_bytes = self.max_message_bytes + TRUNCATED_MARKER.len();
+
         let mut violations = Vec::new();
 
         for entry in output {
+            // Skip tail chunks — they are expected byproducts of truncation
+            if entry.message.starts_with(TRUNCATED_MARKER) {
+                continue;
+            }
+
             let Some(id) = LogFormat::extract_id(&entry.message) else {
                 continue;
             };
@@ -257,16 +277,22 @@ impl Property for TruncationRespected {
             let output_len = entry.message.len();
 
             if input_len > self.max_message_bytes {
-                // Input was over limit — output should be truncated
-                if output_len > self.max_message_bytes {
+                // Input was over limit — head chunk should be truncated.
+                // The agent appends "...TRUNCATED..." so output can be up to
+                // max_message_bytes + 15 bytes.
+                if output_len > max_head_bytes {
                     violations.push(format!(
-                        "id={id}: input {input_len}B over limit, but output {output_len}B still over limit {}B",
-                        self.max_message_bytes
+                        "id={id}: input {input_len}B over limit, head chunk {output_len}B exceeds max head size {max_head_bytes}B"
+                    ));
+                }
+                // The head chunk should also contain the truncation marker
+                if !entry.message.ends_with(TRUNCATED_MARKER) {
+                    violations.push(format!(
+                        "id={id}: input {input_len}B over limit, but head chunk missing '{TRUNCATED_MARKER}' suffix"
                     ));
                 }
             } else {
-                // Input was under limit — output should match
-                // (allow some slack for agent metadata/wrapping)
+                // Input was under limit — output should be delivered intact
                 if output_len < input_len / 2 {
                     violations.push(format!(
                         "id={id}: input {input_len}B under limit, but output only {output_len}B (possible data loss)"
