@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f4a32975f78b2bb19be6f892fd9b790cf83a86fd5df1ed862cf4e37111afc94c # shrinks to params = TruncationParams { line_count: 5, format: PlainText, max_message_bytes: 1024 }
+cc 6d433df64fad4082459158fa6db5fe6db1915064ff4d1989ae0c59f41ecb480f # shrinks to params = MultilineParams { entry_count: 3, max_continuations: 2, format: TimestampPrefixed }
+cc 353dca5e12c9cd94c45a8f4f6337331f6d690682ec7acda7a3adef9c3abb68f9 # shrinks to params = MultilineParams { entry_count: 3, max_continuations: 1, format: Json }
+cc 4a1578bf322ea4984ee5e297074bc269411686682749a843deab5b1c31651b39 # shrinks to params = MultilineParams { entry_count: 3, max_continuations: 2, format: Json }
+cc 2a24bc76c153f9d472823b18403fcdc135741b81b578be7e45112d0f5733cf85 # shrinks to params = TruncationParams { line_count: 5, format: ApacheCommon, max_message_bytes: 262144 }

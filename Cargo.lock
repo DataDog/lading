@@ -2050,6 +2050,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "lading_proptest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bollard",
+ "bytes",
+ "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix 0.30.1",
+ "proptest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
