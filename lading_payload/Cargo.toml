@@ -18,7 +18,7 @@ byte-unit = { workspace = true }
 chrono = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
-rand = { workspace = true, features = ["small_rng", "std", "std_rng"] }
+rand = { workspace = true, features = ["std", "std_rng"] }
 rustc-hash = { workspace = true }
 rmp-serde = { version = "1.3", default-features = false }
 serde = { workspace = true }

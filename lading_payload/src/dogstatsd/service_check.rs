@@ -1,7 +1,7 @@
 //! `DogStatsD` service check.
 use std::fmt;
 
-use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use crate::{
     Error, Generator,

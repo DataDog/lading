@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::io::Write;
 use std::num::NonZeroI64;
 
-use rand::Rng;
 use rand::prelude::IndexedRandom;
+use rand::{Rng, RngExt};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 

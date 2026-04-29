@@ -11,7 +11,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode};
 use metrics::counter;
-use rand::{Rng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Write, net::SocketAddr};
 use tracing::{debug, error};

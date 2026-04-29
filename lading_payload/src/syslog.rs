@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::Error;

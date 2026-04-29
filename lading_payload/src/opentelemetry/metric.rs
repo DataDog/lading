@@ -41,6 +41,7 @@
 pub(crate) mod templates;
 pub(crate) mod unit;
 
+use rand::RngExt;
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 

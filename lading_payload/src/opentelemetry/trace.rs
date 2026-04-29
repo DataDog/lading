@@ -15,7 +15,7 @@ use opentelemetry_proto::tonic::{
 };
 use opentelemetry_proto::tonic::{resource::v1::Resource, trace::v1};
 use prost::Message;
-use rand::{Rng, seq::IndexedRandom};
+use rand::{Rng, RngExt, seq::IndexedRandom};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,

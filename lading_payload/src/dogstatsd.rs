@@ -2,7 +2,7 @@
 
 use std::{fmt, io::Write, rc::Rc};
 
-use rand::{Rng, distr::weighted::WeightedIndex, prelude::Distribution};
+use rand::{Rng, RngExt, distr::weighted::WeightedIndex, prelude::Distribution};
 use serde::Deserialize;
 use tracing::{debug, warn};
 

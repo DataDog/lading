@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use lading_payload::block;
 use metrics::counter;
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 use tracing::info;

@@ -1,7 +1,7 @@
 //! `DogStatsD` event.
 use std::{fmt, ops::Range};
 
-use rand::{Rng, distr::StandardUniform, prelude::Distribution};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 

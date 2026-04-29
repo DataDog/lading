@@ -3,7 +3,7 @@
 use crate::{Error, Generator, common::strings};
 
 use core::fmt;
-use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use std::io::Write;
 
 const PATH_NAMES: [&str; 25] = [

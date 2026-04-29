@@ -59,9 +59,8 @@ path = "../lading_fuzz"
 optional = true
 
 [dependencies.rand]
-version = "0.9"
-default-features = false
-features = ["small_rng", "std"]
+workspace = true
+features = ["std"]
 optional = true
 
 [dependencies.anyhow]

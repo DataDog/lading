@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crate::{Error, common::strings};
 

@@ -1,7 +1,7 @@
 //! Code for the quick creation of randomize strings
 
 use enum_dispatch::enum_dispatch;
-use rand::seq::IndexedRandom;
+use rand::{RngExt, seq::IndexedRandom};
 
 mod random_string_pool;
 mod string_list_pool;

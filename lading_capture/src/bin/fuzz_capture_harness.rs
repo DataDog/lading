@@ -14,7 +14,7 @@ use lading_capture::{
     formats::jsonl, line::Line, manager::CaptureManager, manager::RealClock,
     test::writer::InMemoryWriter, validate,
 };
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::SmallRng};
 use std::io::{self, Read};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};

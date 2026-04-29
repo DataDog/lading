@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 
 use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};

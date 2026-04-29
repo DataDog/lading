@@ -564,7 +564,7 @@ mod tests {
     }
 
     fn generate_event_sequence(seed: u64, instances: u32) -> Vec<Event> {
-        use rand::{Rng, SeedableRng, rngs::StdRng};
+        use rand::{RngExt, SeedableRng, rngs::StdRng};
 
         let mut rng = StdRng::seed_from_u64(seed);
         let mut events = Vec::new();
