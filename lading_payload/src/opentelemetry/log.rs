@@ -50,7 +50,7 @@ use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest, logs::v1::ResourceLogs,
 };
 use prost::Message;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::Deserialize;
 use std::{cell::RefCell, io::Write, rc::Rc};
 

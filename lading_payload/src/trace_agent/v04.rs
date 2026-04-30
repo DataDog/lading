@@ -5,7 +5,7 @@
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{collections::BTreeMap, io::Write, rc::Rc};
 
-use rand::{Rng, seq::IndexedRandom};
+use rand::{Rng, RngExt, seq::IndexedRandom};
 use rmp_serde::Serializer;
 use serde::Serialize;
 

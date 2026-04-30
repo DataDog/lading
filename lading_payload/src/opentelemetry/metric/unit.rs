@@ -7,6 +7,8 @@
 // that for our purposes, so for now we rely on a simple table method. I imagine
 // we can just keep stuffing the table for a while as seems desirable.
 
+use rand::RngExt;
+
 use crate::opentelemetry::common::GeneratorError;
 
 const UNITS: &[&str] = &[

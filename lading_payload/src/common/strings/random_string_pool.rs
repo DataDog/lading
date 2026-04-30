@@ -1,5 +1,5 @@
-use rand::Rng;
 use rand::distr::uniform::SampleUniform;
+use rand::{Rng, RngExt};
 use std::ops::Range;
 use std::rc::Rc;
 

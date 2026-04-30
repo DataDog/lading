@@ -1,6 +1,6 @@
 //! Common configuration for all lading payloads
 
-use rand::distr::uniform::SampleUniform;
+use rand::{RngExt, distr::uniform::SampleUniform};
 use serde::Deserialize;
 use std::{cmp, fmt};
 

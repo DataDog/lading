@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use rmp_serde::Serializer;
 use serde::Serialize;
 use serde_tuple::Serialize_tuple;

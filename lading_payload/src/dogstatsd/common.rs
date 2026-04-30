@@ -1,7 +1,7 @@
 use std::fmt;
 
 use rand::{
-    Rng,
+    Rng, RngExt,
     distr::{OpenClosed01, StandardUniform, Uniform},
     prelude::Distribution,
 };

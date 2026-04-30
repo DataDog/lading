@@ -3,8 +3,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use rand::Rng;
 use rand::distr::{Distribution, OpenClosed01};
+use rand::{Rng, RngExt};
 use rand::{SeedableRng, rngs::SmallRng};
 use tracing::warn;
 

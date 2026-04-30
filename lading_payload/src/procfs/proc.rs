@@ -1,4 +1,4 @@
-use rand::{Rng, distr::StandardUniform, prelude::Distribution};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy)]

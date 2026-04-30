@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use serde::{Deserialize, Serialize};
 
 use crate::Error;

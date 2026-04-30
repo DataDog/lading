@@ -9,7 +9,7 @@ use std::{
 };
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use tracing::{info, warn};
 
 #[derive(Debug)]

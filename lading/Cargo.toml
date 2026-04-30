@@ -60,7 +60,7 @@ num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
-rand = { workspace = true, features = ["small_rng", "thread_rng"] }
+rand = { workspace = true, features = ["thread_rng"] }
 regex = { version = "1.12" }
 reqwest = { version = "0.12", default-features = false, features = [
   "default-tls",

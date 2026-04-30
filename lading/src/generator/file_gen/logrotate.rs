@@ -26,7 +26,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at};
 use byte_unit::Byte;
 use futures::future::join_all;
 use metrics::counter;
-use rand::{Rng, SeedableRng, prelude::StdRng};
+use rand::{RngExt, SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,

@@ -1,7 +1,7 @@
 //! Procfs payload.
 
 use crate::{Error, Generator, common::strings};
-use rand::{Rng, distr::StandardUniform, prelude::Distribution};
+use rand::{Rng, RngExt, distr::StandardUniform, prelude::Distribution};
 use std::{cmp, fmt};
 
 mod proc;

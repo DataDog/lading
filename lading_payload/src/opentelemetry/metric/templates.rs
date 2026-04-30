@@ -12,7 +12,7 @@ use opentelemetry_proto::tonic::{
 };
 use prost::Message;
 use rand::{
-    Rng,
+    Rng, RngExt,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
 };
 use tracing::debug;

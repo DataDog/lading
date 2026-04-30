@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use tracing::debug;
 
 #[derive(Debug)]

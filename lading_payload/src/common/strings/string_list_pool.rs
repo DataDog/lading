@@ -1,3 +1,5 @@
+use rand::RngExt;
+
 use super::{Handle, Pool};
 
 /// Error type for `StringListPool` pattern expansion
