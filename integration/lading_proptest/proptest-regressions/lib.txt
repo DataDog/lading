@@ -1,6 +1,1 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
+cc 9393a0a1568067551b0e0a8a16cb976ff16c4cb021c2e28a57b9d1b2fdff881c # shrinks to params = TruncationParams { line_count: 5, format: PlainText, max_message_bytes: 1024 }

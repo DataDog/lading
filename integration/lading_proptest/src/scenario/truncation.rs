@@ -88,6 +88,8 @@ impl Scenario for TruncationScenario {
         LogBatch {
             lines,
             format: params.format,
+            expected_continuations: Vec::new(),
+            expected_json: None,
         }
     }
 

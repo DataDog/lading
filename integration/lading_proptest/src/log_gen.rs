@@ -23,6 +23,12 @@ pub struct LogBatch {
     pub lines: Vec<LogLine>,
     /// The format used to generate these lines.
     pub format: LogFormat,
+    /// For multiline scenarios: maps header UUID → expected continuation count.
+    /// Empty for non-multiline scenarios.
+    pub expected_continuations: Vec<(String, usize)>,
+    /// For JSON multiline scenarios: maps UUID → expected JSON value.
+    /// `None` for non-JSON scenarios.
+    pub expected_json: Option<Vec<(String, serde_json::Value)>>,
 }
 
 /// A multiline log entry consisting of a header and continuation lines.
@@ -56,7 +62,7 @@ pub fn simple_log_batch(
                 let content = format.format_line(&id, &filler);
                 lines.push(LogLine { id, content });
             }
-            LogBatch { lines, format }
+            LogBatch { lines, format, expected_continuations: Vec::new(), expected_json: None }
         })
     })
 }
@@ -96,7 +102,7 @@ pub fn multiline_log_batch(
                         });
                     }
                 }
-                LogBatch { lines, format }
+                LogBatch { lines, format, expected_continuations: Vec::new(), expected_json: None }
             },
         )
     })
@@ -141,7 +147,7 @@ pub fn truncation_log_batch(
                 let content = format.format_line(&id, &filler);
                 lines.push(LogLine { id, content });
             }
-            LogBatch { lines, format }
+            LogBatch { lines, format, expected_continuations: Vec::new(), expected_json: None }
         })
     })
 }

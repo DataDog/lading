@@ -68,18 +68,22 @@ impl Property for AllLinesDelivered {
         input: &LogBatch,
         output: &[ReceivedLogEntry],
     ) -> Result<(), PropertyFailure> {
-        // Collect all header IDs from input (skip continuation IDs like "uuid:cont:N")
+        // Collect all header IDs from input. Skip internal line fragment IDs:
+        // - "uuid:cont:N" — timestamp multiline continuation lines
+        // - "uuid:json_line:N" — JSON multiline continuation lines
         let input_ids: FxHashSet<&str> = input
             .lines
             .iter()
-            .filter(|l| !l.id.contains(":cont:"))
+            .filter(|l| !l.id.contains(":cont:") && !l.id.contains(":json_line:"))
             .map(|l| l.id.as_str())
             .collect();
 
-        // Collect all IDs found in output messages
+        // Collect all IDs found in output messages. Use extract_all_ids
+        // because aggregated messages may contain multiple UUIDs (e.g., a
+        // plain text line merged into a preceding entry's buffer).
         let output_ids: FxHashSet<&str> = output
             .iter()
-            .filter_map(|entry| LogFormat::extract_id(&entry.message))
+            .flat_map(|entry| LogFormat::extract_all_ids(&entry.message))
             .collect();
 
         let missing: Vec<&str> = input_ids.difference(&output_ids).copied().collect();
@@ -121,7 +125,7 @@ impl Property for NoExtraLines {
         let input_ids: FxHashSet<&str> = input
             .lines
             .iter()
-            .filter(|l| !l.id.contains(":cont:"))
+            .filter(|l| !l.id.contains(":cont:") && !l.id.contains(":json_line:"))
             .map(|l| l.id.as_str())
             .collect();
 
@@ -320,6 +324,14 @@ impl Property for TruncationRespected {
 }
 
 /// Continuation lines are correctly aggregated with their header line.
+///
+/// Verifies:
+/// - All expected continuations for each header are present in its output entry
+/// - Continuations are in ascending sequence order
+/// - No continuations from a different header appear in an entry
+///
+/// Uses `LogBatch::expected_continuations` to know what to expect. If that
+/// field is empty (non-multiline scenarios), this property passes trivially.
 #[derive(Debug, Copy, Clone)]
 pub struct MultilineAggregated;
 
@@ -330,11 +342,21 @@ impl Property for MultilineAggregated {
 
     fn check(
         &self,
-        _input: &LogBatch,
+        input: &LogBatch,
         output: &[ReceivedLogEntry],
     ) -> Result<(), PropertyFailure> {
-        // For each output entry, check that if it contains a header marker,
-        // it also contains the expected continuation markers.
+        // If no continuation metadata, pass trivially (non-multiline scenario)
+        if input.expected_continuations.is_empty() {
+            return Ok(());
+        }
+
+        // Build expected: header_id → continuation count
+        let expected: FxHashMap<&str, usize> = input
+            .expected_continuations
+            .iter()
+            .map(|(id, count)| (id.as_str(), *count))
+            .collect();
+
         let mut failures = Vec::new();
 
         for entry in output {
@@ -342,14 +364,43 @@ impl Property for MultilineAggregated {
                 continue;
             };
 
-            // Check what continuations are present in this entry
+            let Some(&expected_count) = expected.get(header_id) else {
+                continue;
+            };
+
+            // Extract continuations found in this output entry
             let continuations = LogFormat::extract_continuations(&entry.message);
 
-            // If there are continuations, verify they belong to this header
+            // Check no cross-contamination
             for (cont_header_id, _seq) in &continuations {
                 if *cont_header_id != header_id {
                     failures.push(format!(
                         "header {header_id} contains continuation from different header {cont_header_id}"
+                    ));
+                }
+            }
+
+            // Check all expected continuations are present
+            let found_seqs: Vec<usize> = continuations
+                .iter()
+                .filter(|(hid, _)| *hid == header_id)
+                .map(|(_, seq)| *seq)
+                .collect();
+
+            for expected_seq in 0..expected_count {
+                if !found_seqs.contains(&expected_seq) {
+                    failures.push(format!(
+                        "header {header_id} missing continuation seq {expected_seq} (expected {expected_count} continuations, found {found_seqs:?})"
+                    ));
+                }
+            }
+
+            // Check ordering (continuations should appear in ascending order)
+            for window in found_seqs.windows(2) {
+                if window[0] >= window[1] {
+                    failures.push(format!(
+                        "header {header_id} has out-of-order continuations: seq {} before seq {}",
+                        window[0], window[1]
                     ));
                 }
             }
@@ -406,6 +457,144 @@ impl Property for ExpectedEntryCount {
                     ("total_output".to_string(), output.len().to_string()),
                 ],
             })
+        }
+    }
+}
+
+/// JSON data integrity: every input JSON entry arrives in the output with
+/// all fields preserved.
+///
+/// Parses output messages as JSON and verifies that the `proptest_id` field
+/// matches and all expected fields are present with correct values. This
+/// property does not encode knowledge of which JSON structures the agent
+/// supports — it discovers gaps mechanically.
+#[derive(Debug, Copy, Clone)]
+pub struct JsonIntegrity;
+
+impl Property for JsonIntegrity {
+    fn name(&self) -> &'static str {
+        "json_integrity"
+    }
+
+    fn check(
+        &self,
+        input: &LogBatch,
+        output: &[ReceivedLogEntry],
+    ) -> Result<(), PropertyFailure> {
+        let Some(expected_entries) = &input.expected_json else {
+            // No JSON metadata — pass trivially
+            return Ok(());
+        };
+
+        let mut failures = Vec::new();
+
+        for (expected_id, expected_json) in expected_entries {
+            // Find the output entry containing this UUID
+            let matching_output = output.iter().find(|entry| {
+                entry.message.contains(expected_id)
+            });
+
+            let Some(output_entry) = matching_output else {
+                failures.push(format!(
+                    "id={expected_id}: not found in any output entry"
+                ));
+                continue;
+            };
+
+            // Try to parse the output message as JSON
+            let parsed: Result<serde_json::Value, _> =
+                serde_json::from_str(&output_entry.message);
+
+            match parsed {
+                Ok(output_json) => {
+                    // Verify the proptest_id field
+                    if let Some(id_val) = output_json.get("proptest_id")
+                        && id_val.as_str() != Some(expected_id.as_str())
+                    {
+                        failures.push(format!(
+                            "id={expected_id}: proptest_id mismatch, got {id_val}"
+                        ));
+                    }
+
+                    // Verify all expected fields are present
+                    check_json_fields(
+                        expected_id,
+                        expected_json,
+                        &output_json,
+                        "",
+                        &mut failures,
+                    );
+                }
+                Err(e) => {
+                    failures.push(format!(
+                        "id={expected_id}: output is not valid JSON: {e} (message: {})",
+                        &output_entry.message[..output_entry.message.len().min(200)]
+                    ));
+                }
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: format!("{} JSON integrity failures", failures.len()),
+                details: vec![("failures".to_string(), failures.join("\n"))],
+            })
+        }
+    }
+}
+
+/// Recursively verify that all fields in `expected` are present in `actual`.
+fn check_json_fields(
+    id: &str,
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+    path: &str,
+    failures: &mut Vec<String>,
+) {
+    match (expected, actual) {
+        (serde_json::Value::Object(exp_map), serde_json::Value::Object(act_map)) => {
+            for (key, exp_val) in exp_map {
+                let field_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                match act_map.get(key) {
+                    Some(act_val) => {
+                        check_json_fields(id, exp_val, act_val, &field_path, failures);
+                    }
+                    None => {
+                        failures.push(format!(
+                            "id={id}: missing field '{field_path}'"
+                        ));
+                    }
+                }
+            }
+        }
+        (serde_json::Value::Array(exp_arr), serde_json::Value::Array(act_arr)) => {
+            if exp_arr.len() != act_arr.len() {
+                failures.push(format!(
+                    "id={id}: array at '{path}' has {} elements, expected {}",
+                    act_arr.len(),
+                    exp_arr.len()
+                ));
+            }
+            for (i, (exp_item, act_item)) in
+                exp_arr.iter().zip(act_arr.iter()).enumerate()
+            {
+                let item_path = format!("{path}[{i}]");
+                check_json_fields(id, exp_item, act_item, &item_path, failures);
+            }
+        }
+        (exp, act) => {
+            if exp != act {
+                failures.push(format!(
+                    "id={id}: field '{path}' expected {exp}, got {act}"
+                ));
+            }
         }
     }
 }

@@ -25,6 +25,8 @@ pub enum LogSourceConfig {
         /// Regex pattern that starts a new logical log entry.
         pattern: String,
     },
+    /// Auto multiline with JSON detection and aggregation enabled.
+    JsonMultiline,
 }
 
 /// Parameters for generating agent configuration.
@@ -140,6 +142,21 @@ compliance_config:
       - type: multi_line
         name: proptest_multiline
         pattern: '{pattern}'
+"#,
+                log_path = params.log_file_path,
+            )
+        }
+        LogSourceConfig::JsonMultiline => {
+            format!(
+                r#"logs:
+  - type: file
+    path: "{log_path}"
+    service: proptest
+    source: proptest
+    auto_multi_line_detection: true
+    auto_multi_line:
+      enable_json_detection: true
+      enable_json_aggregation: true
 "#,
                 log_path = params.log_file_path,
             )

@@ -1,7 +1,13 @@
 //! Multiline aggregation scenario.
 //!
 //! Tests that the agent correctly aggregates continuation lines with their
-//! header line based on format-specific detection (timestamp, JSON, etc.).
+//! header line based on format-specific timestamp detection.
+//!
+//! Only formats with timestamps work for auto multiline detection:
+//! `TimestampPrefixed`, `Syslog5424`, `ApacheCommon`. `PlainText` has no
+//! `startGroup` signal (all lines merge). `Json` complete objects get
+//! `noAggregate` (flushed standalone). JSON multiline (incomplete objects
+//! spanning lines) is deferred to a future scenario.
 
 use proptest::prelude::*;
 
@@ -52,22 +58,26 @@ impl Scenario for MultilineScenario {
     }
 
     fn generate_input(params: &Self::Params) -> LogBatch {
-        // Use a fixed strategy value since we're generating from params, not
-        // from proptest. The proptest strategy already generated the params.
         let mut lines = Vec::new();
-        for _ in 0..params.entry_count {
+        let mut expected_continuations = Vec::new();
+
+        for entry_idx in 0..params.entry_count {
             let header_id = uuid::Uuid::new_v4().to_string();
-            let header_content =
-                params.format.format_line(&header_id, "log entry header");
+
+            // Header line with a distinct timestamp per entry so the agent
+            // sees each as a new `startGroup`.
+            let header_content = params
+                .format
+                .format_line_with_index(&header_id, entry_idx, "log entry header");
             lines.push(log_gen::LogLine {
                 id: header_id.clone(),
                 content: header_content,
             });
 
-            // Generate a random-ish number of continuations up to the max.
-            // Since we're outside proptest's strategy here, we use the entry
-            // index to vary the count deterministically.
-            let cont_count = lines.len() % (params.max_continuations + 1);
+            // Vary continuation count deterministically per entry.
+            let cont_count = entry_idx % (params.max_continuations + 1);
+            expected_continuations.push((header_id.clone(), cont_count));
+
             for seq in 0..cont_count {
                 let cont_content = params.format.format_continuation(
                     &header_id,
@@ -83,6 +93,8 @@ impl Scenario for MultilineScenario {
         LogBatch {
             lines,
             format: params.format,
+            expected_continuations,
+            expected_json: None,
         }
     }
 

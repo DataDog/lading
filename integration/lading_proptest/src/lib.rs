@@ -40,6 +40,8 @@ mod tests {
     use crate::log_format::LogFormat;
     use crate::orchestrator::{self, OrchestratorConfig};
     use crate::scenario::Scenario;
+    use crate::scenario::json_multiline::JsonMultilineScenario;
+    use crate::scenario::mixed_multiline::MixedMultilineScenario;
     use crate::scenario::multiline::MultilineScenario;
     use crate::scenario::truncation::TruncationScenario;
 
@@ -67,7 +69,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(1))]
 
         #[test]
-        fn multiline_timestamp_detection(
+        fn multiline_timestamp_prefixed(
             params in crate::scenario::multiline::strategy_with_format(
                 LogFormat::TimestampPrefixed,
             )
@@ -87,14 +89,72 @@ mod tests {
         }
 
         #[test]
-        fn multiline_json_detection(
+        fn multiline_syslog(
             params in crate::scenario::multiline::strategy_with_format(
-                LogFormat::Json,
+                LogFormat::Syslog5424,
             )
         ) {
             let config = orchestrator_config();
             let result = run_async(
                 orchestrator::run_case::<MultilineScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn multiline_apache(
+            params in crate::scenario::multiline::strategy_with_format(
+                LogFormat::ApacheCommon,
+            )
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<MultilineScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        // PlainText multiline deferred — needs explicit regex patterns.
+
+        #[test]
+        fn json_multiline(
+            params in JsonMultilineScenario::strategy()
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<JsonMultilineScenario>(&config, &params)
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        #[test]
+        fn mixed_multiline(
+            params in MixedMultilineScenario::strategy()
+        ) {
+            let config = orchestrator_config();
+            let result = run_async(
+                orchestrator::run_case::<MixedMultilineScenario>(&config, &params)
             ).expect("test infrastructure failure");
 
             for prop_result in &result.property_results {
