@@ -3,6 +3,7 @@
 //! A scenario defines what kind of log data to generate, how to configure
 //! the agent, and what properties to assert on the output.
 
+pub mod adaptive_sampling;
 pub mod json_multiline;
 pub mod mixed_multiline;
 pub mod multiline;

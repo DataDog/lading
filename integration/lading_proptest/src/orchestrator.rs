@@ -12,10 +12,10 @@ use tokio::io::AsyncWriteExt;
 use tracing::{debug, info};
 
 use crate::agent::AgentTarget;
-use crate::config::{self, AgentConfigParams};
+use crate::config::{self, AgentConfigParams, LogSourceConfig};
 use crate::intake::{LogIntakeServer, ReceivedLogEntry};
-use crate::log_gen::LogBatch;
-use crate::property::PropertyFailure;
+use crate::log_gen::{LogBatch, LogLine};
+use crate::property::{Property, PropertyFailure};
 use crate::scenario::Scenario;
 
 /// Return a temp directory base that is visible inside Docker VMs.
@@ -214,8 +214,18 @@ pub async fn run_case<S: Scenario>(
     let output = intake.stop().await;
     info!("collected {} output entries", output.len());
 
-    // Dump output to temp dir for inspection
+    // Dump output and summary to temp dir for inspection
     dump_output(&temp_path, &output)?;
+    let proptest_output = output
+        .iter()
+        .filter(|e| crate::log_format::LogFormat::extract_id(&e.message).is_some())
+        .count();
+    dump_summary(&temp_path, &[
+        "=== Single Batch ===".to_string(),
+        format!("Lines written: {}", input.lines.len()),
+        format!("Total output entries: {}", output.len()),
+        format!("Proptest output entries: {proptest_output}"),
+    ])?;
 
     // 10. Check properties
     let properties = S::properties(params);
@@ -252,6 +262,182 @@ async fn write_log_batch(path: &Path, batch: &LogBatch) -> Result<(), std::io::E
     Ok(())
 }
 
+// --- Action Sequence Support ---
+
+/// A step in an action sequence.
+#[derive(Debug, Clone)]
+pub enum Action {
+    /// Append lines to the log file.
+    WriteLines(Vec<LogLine>),
+    /// Sleep for a duration (e.g., to allow credit refill).
+    Sleep(Duration),
+}
+
+/// Run an action sequence against the agent.
+///
+/// Like [`run_case`] but instead of writing all logs at once, executes a
+/// sequence of write and sleep actions. Used for scenarios that depend on
+/// timing (e.g., adaptive sampling credit refill).
+///
+/// # Errors
+///
+/// Returns error if any infrastructure step fails.
+///
+/// # Panics
+///
+/// Panics if the log directory path is not valid UTF-8.
+#[expect(clippy::too_many_lines)]
+pub async fn run_action_sequence(
+    config: &OrchestratorConfig,
+    log_source_config: LogSourceConfig,
+    max_message_size_bytes: Option<usize>,
+    actions: &[Action],
+    properties: Vec<Box<dyn Property>>,
+) -> Result<TestCaseResult, Error> {
+    let temp_base = dirs_or_home();
+    let temp_dir = TempDir::with_prefix_in("lading_proptest_", temp_base)?;
+    let temp_path = temp_dir.path().to_owned();
+    let config_dir = temp_path.join("config");
+    let log_dir = temp_path.join("logs");
+    std::fs::create_dir_all(&config_dir)?;
+    std::fs::create_dir_all(&log_dir)?;
+
+    info!("test case temp dir: {}", temp_path.display());
+
+    let intake = LogIntakeServer::start().await?;
+    let intake_port = intake.port();
+    debug!("intake server on port {intake_port}");
+
+    let log_file_path = match &config.agent_target {
+        AgentTarget::Container(_) => "/var/log/proptest/proptest.log".to_string(),
+        AgentTarget::Binary(_) => {
+            log_dir
+                .join("proptest.log")
+                .to_str()
+                .expect("log path must be valid UTF-8")
+                .to_string()
+        }
+    };
+
+    let agent_config_params = AgentConfigParams {
+        intake_port,
+        log_file_path,
+        use_compression: config.use_compression,
+        batch_wait_ms: config.batch_wait_ms,
+        log_source_config,
+        max_message_size_bytes,
+    };
+    config::write_agent_config(&config_dir, &agent_config_params)?;
+
+    let agent = config.agent_target.start(&config_dir, &log_dir, intake_port).await?;
+    agent.wait_ready(config.readiness_timeout).await?;
+    debug!("agent is ready, waiting for logs pipeline to initialize");
+    tokio::time::sleep(config.pipeline_warmup).await;
+    debug!("pipeline warmup complete");
+
+    // Execute actions, collecting all written lines and a summary log
+    let mut all_lines = Vec::new();
+    let mut summary_lines: Vec<String> = Vec::new();
+    let log_file = log_dir.join("proptest.log");
+    let mut total_lines_written: usize = 0;
+
+    summary_lines.push("=== Action Sequence ===".to_string());
+
+    for (step_idx, action) in actions.iter().enumerate() {
+        match action {
+            Action::WriteLines(lines) => {
+                append_lines(&log_file, lines).await?;
+                let first_id = lines.first().map_or("?", |l| l.id.as_str());
+                let last_id = lines.last().map_or("?", |l| l.id.as_str());
+                summary_lines.push(format!(
+                    "Step {step_idx}: Write {} lines (IDs {first_id}..{last_id})",
+                    lines.len(),
+                ));
+                info!("wrote {} lines to {}", lines.len(), log_file.display());
+                total_lines_written += lines.len();
+                all_lines.extend_from_slice(lines);
+            }
+            Action::Sleep(duration) => {
+                summary_lines.push(format!("Step {step_idx}: Sleep {duration:?}"));
+                info!("sleeping {:?}", duration);
+                tokio::time::sleep(*duration).await;
+            }
+        }
+    }
+
+    summary_lines.push(format!("\nTotal lines written: {total_lines_written}"));
+
+    // Drain
+    debug!("waiting {:?} for drain", config.drain_timeout);
+    tokio::time::sleep(config.drain_timeout).await;
+
+    agent.stop().await?;
+    debug!("agent stopped");
+
+    let output = intake.stop().await;
+    info!("collected {} output entries", output.len());
+
+    summary_lines.push(format!("Total output entries: {}", output.len()));
+
+    // Count proptest entries vs agent-internal entries
+    let proptest_output = output
+        .iter()
+        .filter(|e| crate::log_format::LogFormat::extract_id(&e.message).is_some())
+        .count();
+    summary_lines.push(format!("Proptest output entries: {proptest_output}"));
+    summary_lines.push(format!(
+        "Lines dropped: {}",
+        total_lines_written.saturating_sub(proptest_output),
+    ));
+
+    dump_output(&temp_path, &output)?;
+    dump_summary(&temp_path, &summary_lines)?;
+
+    let input = LogBatch {
+        lines: all_lines,
+        format: crate::log_format::LogFormat::PlainText,
+        expected_continuations: Vec::new(),
+        expected_json: None,
+    };
+
+    let property_results: Vec<Result<(), PropertyFailure>> = properties
+        .iter()
+        .map(|prop| prop.check(&input, &output))
+        .collect();
+
+    let all_passed = property_results.iter().all(Result::is_ok);
+
+    Ok(TestCaseResult {
+        input,
+        output,
+        property_results,
+        temp_dir_path: temp_path,
+        _temp_dir: if !all_passed || config.keep_temp {
+            let path = temp_dir.keep();
+            info!("preserving temp dir: {}", path.display());
+            None
+        } else {
+            Some(temp_dir)
+        },
+    })
+}
+
+/// Append lines to an existing file (or create it).
+async fn append_lines(path: &Path, lines: &[LogLine]) -> Result<(), std::io::Error> {
+    use tokio::fs::OpenOptions;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    for line in lines {
+        file.write_all(line.content.as_bytes()).await?;
+        file.write_all(b"\n").await?;
+    }
+    file.flush().await?;
+    Ok(())
+}
+
 /// Dump received output entries to the temp dir for manual inspection.
 fn dump_output(temp_path: &Path, output: &[ReceivedLogEntry]) -> Result<(), std::io::Error> {
     use std::io::Write;
@@ -269,5 +455,13 @@ fn dump_output(temp_path: &Path, output: &[ReceivedLogEntry]) -> Result<(), std:
     }
 
     info!("output dumped to {} and {}", json_path.display(), messages_path.display());
+    Ok(())
+}
+
+/// Dump a summary of the test case execution.
+fn dump_summary(temp_path: &Path, lines: &[String]) -> Result<(), std::io::Error> {
+    let path = temp_path.join("summary.txt");
+    std::fs::write(&path, lines.join("\n"))?;
+    info!("summary dumped to {}", path.display());
     Ok(())
 }

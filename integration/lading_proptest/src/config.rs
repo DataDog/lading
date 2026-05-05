@@ -27,6 +27,13 @@ pub enum LogSourceConfig {
     },
     /// Auto multiline with JSON detection and aggregation enabled.
     JsonMultiline,
+    /// Adaptive sampling enabled with configurable parameters.
+    AdaptiveSampling {
+        /// Initial credits per pattern and credit cap.
+        burst_size: f64,
+        /// Credits refilled per second per pattern.
+        rate_limit: f64,
+    },
 }
 
 /// Parameters for generating agent configuration.
@@ -56,6 +63,7 @@ pub struct AgentConfigParams {
 /// # Errors
 ///
 /// Returns error if file I/O fails.
+#[expect(clippy::too_many_lines)]
 pub fn write_agent_config(config_dir: &Path, params: &AgentConfigParams) -> Result<(), Error> {
     // Write main datadog.yaml
     let datadog_yaml = format!(
@@ -80,7 +88,7 @@ logs_config:
   batch_max_size: 100
   open_files_limit: 100
   max_message_size_bytes: {max_message_size_bytes}
-
+{adaptive_sampling_config}
 apm_config:
   enabled: false
 
@@ -99,6 +107,14 @@ compliance_config:
         use_compression = params.use_compression,
         batch_wait = params.batch_wait_ms,
         max_message_size_bytes = params.max_message_size_bytes.unwrap_or(256 * 1024),
+        adaptive_sampling_config = match &params.log_source_config {
+            LogSourceConfig::AdaptiveSampling { burst_size, rate_limit } => {
+                format!(
+                    "  experimental_adaptive_sampling:\n    enabled: true\n    burst_size: {burst_size}\n    rate_limit: {rate_limit}\n    protect_important_logs: false\n"
+                )
+            }
+            _ => String::new(),
+        },
     );
 
     std::fs::write(config_dir.join("datadog.yaml"), datadog_yaml)?;
@@ -158,6 +174,12 @@ compliance_config:
       enable_json_detection: true
       enable_json_aggregation: true
 "#,
+                log_path = params.log_file_path,
+            )
+        }
+        LogSourceConfig::AdaptiveSampling { .. } => {
+            format!(
+                "logs:\n  - type: file\n    path: \"{log_path}\"\n    service: proptest\n    source: proptest\n    experimental_adaptive_sampling:\n      enabled: true\n",
                 log_path = params.log_file_path,
             )
         }

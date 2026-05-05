@@ -1,1 +1,1 @@
-cc 9393a0a1568067551b0e0a8a16cb976ff16c4cb021c2e28a57b9d1b2fdff881c # shrinks to params = TruncationParams { line_count: 5, format: PlainText, max_message_bytes: 1024 }
+cc cc5b3078f725e938ba698986c08ab9c131ec0baab3a2a553e5aefdf63f49a16f # shrinks to params = JsonMultilineParams { entries: [WithArray { item_count: 4 }, UnicodeValues, UnicodeValues, TopLevelArray, EmptyObject, MixedValueTypes, DeepNested { depth: 3 }, Flat { field_count: 5 }] }

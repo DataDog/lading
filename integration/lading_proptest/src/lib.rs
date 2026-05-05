@@ -302,4 +302,38 @@ mod tests {
             }
         }
     }
+
+    // Adaptive sampling uses run_action_sequence (not run_case), so it
+    // lives outside the proptest! macro as a regular proptest test.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1))]
+
+        #[test]
+        fn adaptive_sampling(
+            params in crate::scenario::adaptive_sampling::strategy()
+        ) {
+            let config = orchestrator_config();
+            let seq = crate::scenario::adaptive_sampling::build_actions(&params);
+            let properties = crate::scenario::adaptive_sampling::build_properties(&seq);
+            let log_source = crate::scenario::adaptive_sampling::log_source_config();
+
+            let result = run_async(
+                orchestrator::run_action_sequence(
+                    &config,
+                    log_source,
+                    None,
+                    &seq.actions,
+                    properties,
+                )
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+    }
 }

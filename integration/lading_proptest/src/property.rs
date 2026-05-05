@@ -598,3 +598,158 @@ fn check_json_fields(
         }
     }
 }
+
+// --- Adaptive Sampling Properties ---
+
+/// Model-based adaptive sampling check.
+///
+/// Simulates the agent's credit-based rate limiter as a simple state machine:
+/// - Each `WriteLines` action consumes 1 credit per line (if available)
+/// - Each `Sleep` action refills credits at `rate_limit` per second
+/// - Compares the model's prediction of which IDs should be delivered
+///   against what actually appeared in the output
+///
+/// Also verifies the `adaptive_sampler_sampled_count` tag appears when
+/// the model predicts drops occurred.
+///
+/// The model is intentionally simpler than the agent's implementation —
+/// no tokenizer, no pattern table, no hot-path optimization. It just
+/// tracks credits. This tests that the real system adheres to the model.
+#[derive(Debug, Clone)]
+pub struct AdaptiveSamplingModel {
+    /// The action sequence that was executed, with IDs for each write step.
+    pub actions: Vec<SamplingAction>,
+    /// Configured burst size (initial credits and cap).
+    pub burst_size: f64,
+    /// Credits refilled per second.
+    pub rate_limit: f64,
+    /// Allowed deviation per check point (absorbs timing jitter).
+    /// Goal is to eventually get this to 0.
+    pub tolerance: usize,
+}
+
+/// A step in the sampling action sequence, annotated with line IDs.
+#[derive(Debug, Clone)]
+pub enum SamplingAction {
+    /// Lines written to the log file, with their IDs.
+    Write(Vec<String>),
+    /// Sleep duration in seconds.
+    Sleep(u64),
+}
+
+impl Property for AdaptiveSamplingModel {
+    fn name(&self) -> &'static str {
+        "adaptive_sampling_model"
+    }
+
+    fn check(
+        &self,
+        _input: &LogBatch,
+        output: &[ReceivedLogEntry],
+    ) -> Result<(), PropertyFailure> {
+        // Simulate the credit model
+        let mut credits = self.burst_size;
+        let mut expected_delivered: Vec<String> = Vec::new();
+        let mut expected_dropped: usize = 0;
+
+        for action in &self.actions {
+            match action {
+                SamplingAction::Write(ids) => {
+                    for id in ids {
+                        if credits >= 1.0 {
+                            expected_delivered.push(id.clone());
+                            credits -= 1.0;
+                        } else {
+                            expected_dropped += 1;
+                        }
+                    }
+                }
+                SamplingAction::Sleep(seconds) => {
+                    #[expect(clippy::cast_precision_loss)]
+                    let refill = *seconds as f64 * self.rate_limit;
+                    credits += refill;
+                    if credits > self.burst_size {
+                        credits = self.burst_size;
+                    }
+                }
+            }
+        }
+
+        // Collect all IDs found in output
+        let output_ids: FxHashSet<&str> = output
+            .iter()
+            .flat_map(|entry| LogFormat::extract_all_ids(&entry.message))
+            .collect();
+
+        let mut failures = Vec::new();
+
+        // Check: model-predicted deliveries vs actual
+        let model_delivered_count = expected_delivered.len();
+        let actual_delivered_count = expected_delivered
+            .iter()
+            .filter(|id| output_ids.contains(id.as_str()))
+            .count();
+
+        let min_expected = model_delivered_count.saturating_sub(self.tolerance);
+        let max_expected = model_delivered_count + self.tolerance;
+        if actual_delivered_count < min_expected || actual_delivered_count > max_expected {
+            // Report which specific IDs the model expected but didn't find
+            let missing: Vec<&str> = expected_delivered
+                .iter()
+                .filter(|id| !output_ids.contains(id.as_str()))
+                .map(String::as_str)
+                .take(10)
+                .collect();
+            failures.push(format!(
+                "model predicted {model_delivered_count} delivered, got {actual_delivered_count} (±{}). missing: {missing:?}",
+                self.tolerance,
+            ));
+        }
+
+        // Check: total output should be close to model prediction
+        // (some output entries may be agent-internal without our IDs)
+        let total_proptest_output: usize = output
+            .iter()
+            .filter(|e| LogFormat::extract_id(&e.message).is_some())
+            .count();
+        if total_proptest_output < min_expected || total_proptest_output > max_expected {
+            failures.push(format!(
+                "total proptest output: {total_proptest_output}, model predicted: {model_delivered_count} (±{})",
+                self.tolerance,
+            ));
+        }
+
+        // Check: if the model predicted any drops, the sampled count tag
+        // should appear on at least one output entry
+        if expected_dropped > 0 {
+            let has_sampled_tag = output.iter().any(|entry| {
+                entry
+                    .ddtags
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("adaptive_sampler_sampled_count:")
+            });
+            if !has_sampled_tag {
+                failures.push(format!(
+                    "model predicted {expected_dropped} drops, but no output has adaptive_sampler_sampled_count tag"
+                ));
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: format!("{} model violations", failures.len()),
+                details: vec![
+                    ("failures".to_string(), failures.join("\n")),
+                    ("model_delivered".to_string(), model_delivered_count.to_string()),
+                    ("model_dropped".to_string(), expected_dropped.to_string()),
+                    ("actual_output".to_string(), total_proptest_output.to_string()),
+                    ("credits_remaining".to_string(), format!("{credits:.1}")),
+                ],
+            })
+        }
+    }
+}
