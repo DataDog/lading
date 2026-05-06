@@ -86,7 +86,7 @@ pub struct Contexts {
     pub attributes_per_metric: ConfRange<u8>,
     /// Fraction of attributes that are unique vs. reused. 1.0 means every
     /// attribute is unique; 0.01 means nearly all attributes are reused from
-    /// the existing pool. Valid range: 0.01–1.0.
+    /// the existing pool. Valid range: 0.01 to 1.0.
     pub unique_tag_ratio: f32,
 }
 
