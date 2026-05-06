@@ -84,6 +84,10 @@ pub struct Contexts {
     pub metrics_per_scope: ConfRange<u8>,
     /// The range of attributes for each metric.
     pub attributes_per_metric: ConfRange<u8>,
+    /// Fraction of attributes that are unique vs. reused. 1.0 means every
+    /// attribute is unique; 0.01 means nearly all attributes are reused from
+    /// the existing pool. Valid range: 0.01–1.0.
+    pub unique_tag_ratio: f32,
 }
 
 impl Default for Contexts {
@@ -95,6 +99,7 @@ impl Default for Contexts {
             attributes_per_scope: ConfRange::Constant(0),
             metrics_per_scope: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_metric: ConfRange::Inclusive { min: 0, max: 10 },
+            unique_tag_ratio: 0.75,
         }
     }
 }
@@ -218,6 +223,10 @@ impl Config {
             && min > max
         {
             return Err("attributes_per_metric minimum cannot be greater than maximum".to_string());
+        }
+
+        if !(0.01_f32..=1.0_f32).contains(&self.contexts.unique_tag_ratio) {
+            return Err("unique_tag_ratio must be between 0.01 and 1.0".to_string());
         }
 
         let min_contexts = match self.contexts.total_contexts {
@@ -570,6 +579,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -614,6 +624,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -661,6 +672,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -707,6 +719,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -739,6 +752,7 @@ mod test {
                 attributes_per_scope: ConfRange::Constant(1),
                 metrics_per_scope: ConfRange::Constant(3),
                 attributes_per_metric: ConfRange::Constant(2),
+                unique_tag_ratio: 0.75,
             },
             ..Default::default()
         };
@@ -782,6 +796,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -926,6 +941,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -973,6 +989,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 ..Default::default()
             };
@@ -1055,6 +1072,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
@@ -1095,6 +1113,7 @@ mod test {
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
                     metrics_per_scope: ConfRange::Constant(metrics_per_scope),
                     attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                    unique_tag_ratio: 0.75,
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
@@ -1217,6 +1236,7 @@ mod test {
                 attributes_per_scope: ConfRange::Constant(0),
                 metrics_per_scope: ConfRange::Inclusive { min: 1, max: 20 },
                 attributes_per_metric: ConfRange::Inclusive { min: 0, max: 10 },
+                unique_tag_ratio: 0.75,
             },
             ..Default::default()
         };

@@ -28,6 +28,7 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
                     attributes_per_scope: ConfRange::Inclusive { min: 0, max: 4 },
                     metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
                     attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
+                    unique_tag_ratio: 0.75,
                 },
             };
             let _ot = OpentelemetryMetrics::new(config, MIB, &mut rng)
@@ -57,6 +58,7 @@ fn opentelemetry_metric_throughput(c: &mut Criterion) {
                             attributes_per_scope: ConfRange::Inclusive { min: 0, max: 4 },
                             metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
                             attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
+                            unique_tag_ratio: 0.75,
                         },
                     };
                     let ot = OpentelemetryMetrics::new(config, size, &mut rng)

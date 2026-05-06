@@ -18,7 +18,7 @@ use rand::{
 use tracing::debug;
 
 use super::{Config, UnitGenerator};
-use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO, templates};
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, templates};
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
 pub(crate) type Pool = templates::Pool<ResourceMetrics, ResourceTemplateGenerator>;
@@ -104,7 +104,7 @@ impl MetricTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             str_pool,
-            UNIQUE_TAG_RATIO,
+            config.contexts.unique_tag_ratio,
         )?;
 
         Ok(Self {
@@ -307,7 +307,7 @@ impl ScopeTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             str_pool,
-            UNIQUE_TAG_RATIO,
+            config.contexts.unique_tag_ratio,
         )?;
 
         Ok(Self {
@@ -425,7 +425,7 @@ impl ResourceTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             &Rc::clone(str_pool),
-            UNIQUE_TAG_RATIO,
+            config.contexts.unique_tag_ratio,
         )?;
 
         Ok(Self {
