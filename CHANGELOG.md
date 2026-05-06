@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 - Updated to rand 0.10.x
+- Added `unique_tag_ratio` field to the OpenTelemetry metrics `Contexts` config, allowing control over attribute cardinality. Defaults to `0.75`; set to `1.0` for fully unique attributes on every emission.
 
 ## [0.32.0]
 ## Changed
