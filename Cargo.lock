@@ -1938,9 +1938,11 @@ dependencies = [
  "lading-payload",
  "lading-signal",
  "lading-throttle",
+ "libc",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "mio",
  "nix 0.30.1",
  "num-traits",
  "num_cpus",
@@ -1960,6 +1962,7 @@ dependencies = [
  "serde_qs",
  "serde_yaml",
  "sha2",
+ "socket2",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
@@ -2294,6 +2297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
 dependencies = [
  "libc",
+ "log",
  "wasi",
  "windows-sys 0.61.2",
 ]
