@@ -161,6 +161,7 @@ impl TcpRr {
                 .collect::<Vec<_>>(),
         );
 
+        let mut handles = Vec::with_capacity(num_threads as usize);
         let metrics_handle = {
             let tm = Arc::clone(&thread_metrics);
             let labels = self.metric_labels.clone();
@@ -169,6 +170,7 @@ impl TcpRr {
                 metrics::run_metrics_thread(&tm, &labels, &flag);
             })
         };
+        handles.push(metrics_handle);
 
         // Pre-build thread 0's listener here so the BPF program is attached
         // to the reuseport group before any other thread calls bind(). This
@@ -192,7 +194,6 @@ impl TcpRr {
         // instead of hanging forever.
         let (ready_tx, mut ready_rx) = mpsc::unbounded_channel::<()>();
 
-        let mut handles = Vec::with_capacity(num_threads as usize);
         let mut thread0_listener = thread0_listener;
         for i in 0..num_threads {
             let request_size = self.config.request_size.get();
@@ -250,7 +251,6 @@ impl TcpRr {
             .expect("failed to set control listener nonblocking");
         info!("control port listening on {control_addr}, waiting for generator");
 
-        handles.push(metrics_handle);
 
         // Accept with shutdown awareness: poll accept in a loop.
         let flag = Arc::clone(&shutdown_flag);
