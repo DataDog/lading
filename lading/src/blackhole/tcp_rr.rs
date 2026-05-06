@@ -260,31 +260,31 @@ impl TcpRr {
             flag.store(true, Relaxed);
         });
         let mut generator_connected = false;
-        loop {
+        let controller_err = loop {
             if shutdown_flag.load(Relaxed) {
                 info!("shutdown before generator connected");
-                break;
+                break Ok(());
             }
             match control_listener.accept() {
                 Ok((_conn, peer)) => {
                     info!("generator connected from {peer}, data threads running");
                     generator_connected = true;
-                    break;
+                    break Ok(());
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(e) => {
-                    return Err(Error::Bind {
+                    break Err(Error::Bind {
                         addr: control_addr,
                         source: Box::new(e),
                     });
                 }
             }
-        }
+        };
         drop(control_listener);
 
-        if generator_connected {
+        if controller_err.is_ok() && generator_connected {
             self.shutdown.recv().await;
             info!("shutdown signal received");
         }
@@ -292,7 +292,7 @@ impl TcpRr {
 
         thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
 
-        Ok(())
+        controller_err
     }
 }
 
