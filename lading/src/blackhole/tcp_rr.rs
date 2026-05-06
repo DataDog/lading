@@ -251,7 +251,6 @@ impl TcpRr {
             .expect("failed to set control listener nonblocking");
         info!("control port listening on {control_addr}, waiting for generator");
 
-
         // Accept with shutdown awareness: poll accept in a loop.
         let flag = Arc::clone(&shutdown_flag);
         let shutdown_clone = self.shutdown.clone();
