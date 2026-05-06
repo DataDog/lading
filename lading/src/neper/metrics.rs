@@ -71,7 +71,7 @@ define_thread_metrics! {
     bytes_read,
     connections_failed,
     connections_accepted,
-    requests_received_count,
+    requests_received,
     responses_sent,
     bytes_received,
 }

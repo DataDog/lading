@@ -459,7 +459,7 @@ fn handle_server_event(
                     if flow.xfer == 0 {
                         flow.xfer = response_buf.len();
                         flow.state = ServerState::SendResponse;
-                        metrics.requests_received_count.add(1);
+                        metrics.requests_received.add(1);
                         metrics.bytes_received.add(request_buf.len() as u64);
                         Action::Reregister(Interest::WRITABLE)
                     } else {
