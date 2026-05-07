@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 - Updated to rand 0.10.x
+- `dogstatsd` generator now supports configurable pools for the `|c:` (container
+  ID), `|e:` (external data), and `|card:` (cardinality) origin detection
+  extension fields via the new `container_ids`, `external_data`, and
+  `cardinality` config options. Each field randomly selects from its pool per
+  metric, or omits the field entirely if the pool is empty.
 
 ## [0.32.0]
 ## Changed
