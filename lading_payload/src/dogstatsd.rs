@@ -206,13 +206,11 @@ pub struct Config {
     /// Pool of possible External Data strings for the `|e:` origin detection extension field.
     ///
     /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
-    /// Format: `pu-<pod_uid>,cn-<container_name>,it-<bool>`.
     /// When empty, the field is never emitted.
     pub external_data: Vec<String>,
     /// Pool of possible cardinality values for the `|card:` origin detection extension field.
     ///
     /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
-    /// Valid values: `low`, `orchestrator`, `high`, `none`.
     /// When empty, the field is never emitted.
     pub cardinality: Vec<String>,
 }
