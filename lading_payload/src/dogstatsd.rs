@@ -848,6 +848,8 @@ mod test {
 
     #[test]
     fn container_id_uses_configured_pool() {
+        // No absence test for container_ids: an empty pool falls back to random strings rather
+        // than suppressing the field, so there is no "absent when empty" condition to assert.
         let id = "abc123def456";
         let config = Config {
             container_ids: vec![id.to_string()],
@@ -858,7 +860,7 @@ mod test {
     }
 
     #[test]
-    fn extension_field_values_come_from_pool() {
+    fn cardinality_values_come_from_pool() {
         // When a pool is non-empty, only values from that pool should appear after the prefix.
         let config = Config {
             cardinality: vec!["low".to_string()],
