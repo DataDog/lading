@@ -77,11 +77,11 @@ pub struct Contexts {
     /// The range of attributes for resources.
     pub attributes_per_resource: ConfRange<u8>,
     /// The range of scopes that will be generated per resource.
-    pub scopes_per_resource: ConfRange<u8>,
+    pub scopes_per_resource: ConfRange<u16>,
     /// The range of attributes for each scope.
     pub attributes_per_scope: ConfRange<u8>,
     /// The range of metrics that will be generated per scope.
-    pub metrics_per_scope: ConfRange<u8>,
+    pub metrics_per_scope: ConfRange<u16>,
     /// The range of attributes for each metric.
     pub attributes_per_metric: ConfRange<u8>,
 }
@@ -238,7 +238,7 @@ impl Config {
                     ConfRange::Constant(m) => u32::from(m),
                     ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                u32::from(n) * metrics
+                u32::from(n).saturating_mul(metrics)
             }
             ConfRange::Inclusive { min, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
@@ -246,7 +246,7 @@ impl Config {
                     ConfRange::Constant(m) => u32::from(m),
                     ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                u32::from(min) * metrics
+                u32::from(min).saturating_mul(metrics)
             }
         };
 
@@ -258,7 +258,7 @@ impl Config {
                     ConfRange::Constant(m) => u32::from(m),
                     ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                u32::from(n) * metrics
+                u32::from(n).saturating_mul(metrics)
             }
             ConfRange::Inclusive { max, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
@@ -266,7 +266,7 @@ impl Config {
                     ConfRange::Constant(m) => u32::from(m),
                     ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                u32::from(max) * metrics
+                u32::from(max).saturating_mul(metrics)
             }
         };
 
@@ -556,9 +556,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
         ) {
@@ -599,9 +599,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
             budget in 128..2048_usize,
@@ -647,9 +647,9 @@ mod test {
             total_contexts_min in 1..4_u32,
             total_contexts_max in 5..100_u32,
             attributes_per_resource in 0..25_u8,
-            scopes_per_resource in 1..10_u8,
+            scopes_per_resource in 1..10_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 1..10_u8,
+            metrics_per_scope in 1..10_u16,
             attributes_per_metric in 0..100_u8,
             budget in 128..2048_usize,
         ) {
@@ -693,9 +693,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             budget in SMALLEST_PROTOBUF..2048_usize,
         ) {
@@ -767,9 +767,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
             budget in SMALLEST_PROTOBUF..2048_usize,
@@ -912,9 +912,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 1..20_u8,
+            scopes_per_resource in 1..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 1..20_u8,
+            metrics_per_scope in 1..20_u16,
             attributes_per_metric in 0..10_u8,
             budget in SMALLEST_PROTOBUF..4098_usize,
         ) {
@@ -958,9 +958,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
             budget in SMALLEST_PROTOBUF..2048_usize,
@@ -1041,9 +1041,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             budget in SMALLEST_PROTOBUF..4098_usize,
         ) {
@@ -1081,9 +1081,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u16,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u16,
             attributes_per_metric in 0..10_u8,
             budget in SMALLEST_PROTOBUF..512_usize, // see note below about repetition
         ) {

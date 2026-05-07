@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 - Updated to rand 0.10.x
+- Widened `scopes_per_resource` and `metrics_per_scope` in the OpenTelemetry metrics `Contexts` config from `u8` to `u16`, raising the per-emission cardinality ceiling from 65,025 to ~4.3B unique metric sites.
 
 ## [0.32.0]
 ## Changed

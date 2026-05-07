@@ -285,7 +285,7 @@ pub(crate) enum Kind {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScopeTemplateGenerator {
-    metrics_per_scope: ConfRange<u8>,
+    metrics_per_scope: ConfRange<u16>,
     metric_generator: MetricTemplateGenerator,
     str_pool: Rc<strings::RandomStringPool>,
     tags: TagGenerator,
@@ -404,7 +404,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceTemplateGenerator {
-    scopes_per_resource: ConfRange<u8>,
+    scopes_per_resource: ConfRange<u16>,
     attributes_per_resource: ConfRange<u8>,
     scope_generator: ScopeTemplateGenerator,
     tags: TagGenerator,
