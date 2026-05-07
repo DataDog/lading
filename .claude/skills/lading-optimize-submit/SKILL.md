@@ -1,15 +1,12 @@
 ---
 name: lading-optimize-submit
-description: Full optimization workflow with git branch creation, commits, and optional PR. Wraps /lading-optimize-hunt with git automation.
+description: "End-to-end lading performance optimization with git automation: runs the full optimization hunt (profiling, baselines, implementation, review), then creates a git branch, commits with benchmark results, and optionally opens a PR. Use when the user wants to optimize lading and submit the results, or says 'optimize and commit', 'optimize and PR', or 'submit optimization'."
 allowed-tools: Bash(git:*) Bash(gh:*) Bash(cat:*) Read Skill
 ---
 
 # Optimization Submit Workflow
 
-**Complete optimization workflow with git automation.** This skill wraps `/lading-optimize-hunt` and handles:
-- Git branch creation
-- Git commit with formatted results
-- Optional push and PR creation
+Wraps `/lading-optimize-hunt` with git automation: branch creation, commit with benchmark results, and optional PR.
 
 ---
 
@@ -22,10 +19,7 @@ Run `/lading-preflight` first to ensure environment is ready.
 ## Phase 1: Prepare Git Environment
 
 ```bash
-# Ensure clean state on main
 git checkout main && git pull
-
-# Verify clean working directory
 git status
 ```
 
@@ -37,27 +31,7 @@ git status
 
 Run `/lading-optimize-hunt`.
 
-**CRITICAL: After `/lading-optimize-hunt` completes, you MUST return here to Phase 3.**
-
-The hunt workflow will:
-- Select and analyze optimization targets
-- Capture baseline benchmarks
-- Implement optimization
-- Run basic ci/validate check
-- Invoke /lading-optimize-review (which runs post-change benchmarks and judges)
-
-**The hunt will:**
-- Record the verdict in `.claude/skills/lading-optimize-hunt/assets/db.yaml` after review returns
-
-**BUT the hunt does NOT:**
-- Run post-change benchmarks (review does this)
-- Make pass/fail decisions (review does this)
-- Create git branches
-- Commit changes
-- Push to remote
-- Create PRs
-
-Those are the responsibility of THIS skill (lading-optimize-submit).
+**CRITICAL: After `/lading-optimize-hunt` completes, you MUST return here to Phase 3.** The hunt handles target selection, baselines, implementation, review, and verdict recording -- but NOT git operations (branch/commit/push/PR), which are handled below.
 
 ---
 
@@ -114,7 +88,7 @@ git push -u origin opt/<crate>-<technique>
 # Create PR using gh CLI
 gh pr create \
   --title "opt: <short description>" \
-  --body "$(cat <<'EOF'
+  --body "$(cat <<'PR_EOF'
 ## Summary
 <What was optimized>
 
@@ -132,9 +106,7 @@ gh pr create \
 - [x] ci/validate passes
 - [x] Kani proofs pass (or N/A: <reason>)
 - [x] Determinism verified
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-EOF
+PR_EOF
 )"
 ```
 ---

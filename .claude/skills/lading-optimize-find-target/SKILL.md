@@ -1,8 +1,7 @@
 ---
 name: lading-optimize-find-target
-description: Finds a valid optimization target in lading. Returns a filled target.yaml template with pattern, technique, target, file, bench, and fingerprint. Use before /lading-optimize-hunt or when selecting a new optimization target.
+description: "Finds a valid optimization target in lading by profiling allocation intensity, scanning for known inefficiency patterns (buffer reuse, hoist allocation, vec-with-capacity, etc.), and ranking opportunities by impact. Returns a filled target.yaml template with pattern, technique, target, file, bench, and fingerprint. Use when selecting what to optimize next, finding a performance bottleneck, or before running /lading-optimize-hunt."
 allowed-tools: Bash Read Glob Grep
-context: fork
 ---
 
 ## Phase 1: Discover Benchmark-Eligible Modules

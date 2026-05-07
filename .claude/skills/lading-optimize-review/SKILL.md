@@ -1,9 +1,7 @@
 ---
 name: lading-optimize-review
-description: Reviews optimization patches using a 5-persona peer review system. Requires unanimous approval backed by benchmarks.
-argument-hint: "[bench] [fingerprint] [file] [target] [technique]"
+description: "Reviews lading Rust performance optimization patches using a 5-persona peer review system (Duplicate Hunter, Skeptic, Conservative, Rust Expert, Greybeard). Runs post-change Criterion and hyperfine benchmarks, enforces statistical thresholds, and returns an APPROVED/REJECTED YAML verdict. Use when reviewing a performance patch, validating optimization results, or the user says 'review optimization' or 'check my perf changes'."
 allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Glob Grep
-context: fork
 ---
 
 # Optimization Patch Review
@@ -171,12 +169,7 @@ ci/kani lading_payload
 
 ## Phase 4: Decision
 
-| Outcome | Votes | Action |
-|---------|-------|--------|
-| **APPROVED** | 5/5 APPROVE | Return APPROVED report |
-| **REJECTED** | Any REJECT | Return REJECTED report |
-
-Duplicates, bugs, correctness issues, and missing benchmarks are all rejections. Describe the specific reason in the report's `reason` field.
+All 5 personas must APPROVE for the optimization to pass. Any REJECT from any persona results in rejection. Duplicates, bugs, correctness issues, and missing benchmarks are all rejections. Describe the specific reason in the report's `reason` field.
 
 ---
 

@@ -1,23 +1,12 @@
 ---
 name: lading-optimize-hunt
-description: Coordinates optimization attempts. Captures baselines, implements changes, invokes review, and records outcomes.
+description: "Coordinates lading Rust performance optimization attempts: profiles hot paths, captures benchmark baselines (Criterion + hyperfine), implements a single focused change, invokes multi-persona review, and records outcomes in db.yaml. Use when the user wants to optimize lading performance, speed up serialization, reduce allocations, or run the full benchmark-driven optimization loop."
 allowed-tools: Bash(cat:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
 ---
 
 # Optimization Hunt
 
-Coordinates optimization attempts: captures baselines, implements changes, invokes review, and records all outcomes.
-
-## Role: Coordinator and Recorder
-
-Hunt is the **coordinator and recorder** — it captures baselines, implements changes, hands off to review, and records all outcomes.
-
-Hunt does NOT:
-- Run post-change benchmarks (review does this)
-- Make pass/fail decisions on optimizations (review does this)
-
-Hunt DOES:
-- Record all verdicts and outcomes in `.claude/skills/lading-optimize-hunt/assets/db.yaml` after review returns
+Coordinates optimization attempts. Captures baselines, implements changes, hands off to review (which runs post-change benchmarks and judges), and records all verdicts in `.claude/skills/lading-optimize-hunt/assets/db.yaml`.
 
 ---
 

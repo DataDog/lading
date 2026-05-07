@@ -1,6 +1,6 @@
 ---
 name: release
-description: Prepare a lading release. Updates CHANGELOG.md, bumps version in Cargo.toml, updates Cargo.lock, commits, and creates a PR.
+description: "Prepare a lading release: determines the next semver version, updates CHANGELOG.md, bumps version in Cargo.toml, updates Cargo.lock, commits, and creates a PR. Use when the user wants to cut a release, bump the version, publish a new lading version, or says 'release lading'."
 allowed-tools: Read, Edit, Bash, AskUserQuestion
 ---
 
