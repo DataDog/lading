@@ -23,6 +23,8 @@ mod template;
 #[derive(Clone, Debug)]
 pub(crate) struct MetricGenerator {
     pub(crate) container_ids: Vec<String>,
+    pub(crate) external_data: Vec<String>,
+    pub(crate) cardinality: Vec<String>,
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
@@ -47,6 +49,8 @@ impl MetricGenerator {
         sampling_probability: f32,
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
+        external_data: Vec<String>,
+        cardinality: Vec<String>,
         tags_generator: &mut common::tags::Generator,
         pools: &StringPools,
         value_conf: ValueConf,
@@ -82,6 +86,8 @@ impl MetricGenerator {
 
         Ok(MetricGenerator {
             container_ids,
+            external_data,
+            cardinality,
             templates,
             multivalue_count,
             multivalue_pack_probability,
@@ -112,6 +118,8 @@ impl<'a> Generator<'a> for MetricGenerator {
         let tags = &self.tags[template_idx];
 
         let container_id = choose_or_not_ref(&mut rng, &self.container_ids).map(String::as_str);
+        let external_data = choose_or_not_ref(&mut rng, &self.external_data).map(String::as_str);
+        let cardinality = choose_or_not_ref(&mut rng, &self.cardinality).map(String::as_str);
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
         let prob: f32 = OpenClosed01.sample(&mut rng);
         let sample_rate = if prob < self.sampling_probability {
@@ -149,6 +157,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
             Template::Gauge(gauge) => {
@@ -163,6 +173,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
             Template::Distribution(dist) => {
@@ -178,6 +190,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
             Template::Histogram(hist) => {
@@ -193,6 +207,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
             Template::Timer(timer) => {
@@ -208,6 +224,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
             Template::Set(set) => {
@@ -222,6 +240,8 @@ impl<'a> Generator<'a> for MetricGenerator {
                     tags,
                     pools: &self.pools,
                     container_id,
+                    external_data,
+                    cardinality,
                 }))
             }
         }
@@ -284,8 +304,12 @@ pub struct Count<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Count<'_> {
@@ -325,6 +349,12 @@ impl fmt::Display for Count<'_> {
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
         }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
+        }
 
         Ok(())
     }
@@ -341,8 +371,12 @@ pub struct Gauge<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Gauge<'_> {
@@ -378,6 +412,12 @@ impl fmt::Display for Gauge<'_> {
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
         }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
+        }
 
         Ok(())
     }
@@ -396,8 +436,12 @@ pub struct Timer<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Timer<'_> {
@@ -436,6 +480,12 @@ impl fmt::Display for Timer<'_> {
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
         }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
+        }
 
         Ok(())
     }
@@ -454,8 +504,12 @@ pub struct Dist<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Dist<'_> {
@@ -494,6 +548,12 @@ impl fmt::Display for Dist<'_> {
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
         }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
+        }
 
         Ok(())
     }
@@ -510,8 +570,12 @@ pub struct Set<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Set<'_> {
@@ -543,6 +607,12 @@ impl fmt::Display for Set<'_> {
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
         }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
+        }
 
         Ok(())
     }
@@ -561,8 +631,12 @@ pub struct Histogram<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pools for tag handle lookups during serialization.
     pub(crate) pools: &'a StringPools,
-    /// Container ID of the metric.
+    /// Container ID for the `|c:` origin detection extension field.
     pub container_id: Option<&'a str>,
+    /// External Data for the `|e:` origin detection extension field.
+    pub external_data: Option<&'a str>,
+    /// Cardinality override for the `|card:` origin detection extension field.
+    pub cardinality: Option<&'a str>,
 }
 
 impl fmt::Display for Histogram<'_> {
@@ -600,6 +674,12 @@ impl fmt::Display for Histogram<'_> {
         }
         if let Some(container_id) = self.container_id {
             write!(f, "|c:{container_id}")?;
+        }
+        if let Some(external_data) = self.external_data {
+            write!(f, "|e:{external_data}")?;
+        }
+        if let Some(cardinality) = self.cardinality {
+            write!(f, "|card:{cardinality}")?;
         }
 
         Ok(())

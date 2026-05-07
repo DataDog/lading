@@ -198,6 +198,23 @@ pub struct Config {
     pub tag_names: Vec<String>,
     /// A list of possible tag values to generate
     pub tag_values: Vec<String>,
+    /// Pool of possible container ID values for the `|c:` origin detection extension field.
+    ///
+    /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
+    /// When empty, a random value is used, which matches the behavior prior to this field existing.
+    pub container_ids: Vec<String>,
+    /// Pool of possible External Data strings for the `|e:` origin detection extension field.
+    ///
+    /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
+    /// Format: `pu-<pod_uid>,cn-<container_name>,it-<bool>`.
+    /// When empty, the field is never emitted.
+    pub external_data: Vec<String>,
+    /// Pool of possible cardinality values for the `|card:` origin detection extension field.
+    ///
+    /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
+    /// Valid values: `low`, `orchestrator`, `high`, `none`.
+    /// When empty, the field is never emitted.
+    pub cardinality: Vec<String>,
 }
 
 impl Default for Config {
@@ -228,6 +245,9 @@ impl Default for Config {
             metric_names: Vec::default(),
             tag_names: Vec::default(),
             tag_values: Vec::default(),
+            container_ids: Vec::default(),
+            external_data: Vec::default(),
+            cardinality: Vec::default(),
         }
     }
 }
@@ -379,6 +399,9 @@ impl MemberGenerator {
         metric_names: &[String],
         tag_names: &[String],
         tag_values: &[String],
+        container_ids: Vec<String>,
+        external_data: Vec<String>,
+        cardinality: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -397,6 +420,12 @@ impl MemberGenerator {
 
         let texts_or_messages = random_strings_with_length(&pool, 4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(&pool, 16..1024, 8, &mut rng);
+        // Use caller-provided container IDs when available; fall back to random small strings.
+        let container_ids = if container_ids.is_empty() {
+            small_strings.clone()
+        } else {
+            container_ids
+        };
 
         let str_pool = Rc::new(pool.clone());
         let pool = Rc::new(strings::PoolKind::RandomStringPool(pool));
@@ -486,7 +515,9 @@ impl MemberGenerator {
             sampling,
             sampling_probability,
             &WeightedIndex::new(metric_choices)?,
-            small_strings,
+            container_ids,
+            external_data,
+            cardinality,
             &mut tags_generator,
             &pools,
             value_conf,
@@ -614,6 +645,9 @@ impl DogStatsD {
             &config.metric_names,
             &config.tag_names,
             &config.tag_values,
+            config.container_ids.clone(),
+            config.external_data.clone(),
+            config.cardinality.clone(),
             rng,
         )?;
 
