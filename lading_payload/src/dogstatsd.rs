@@ -869,7 +869,10 @@ mod test {
             let text = std::str::from_utf8(&bytes).expect("output should be valid utf-8");
             for segment in text.split("|card:").skip(1) {
                 // Each metric is newline-terminated, so split on both | and \n to isolate the value.
-                let value = segment.split(|c: char| c == '|' || c == '\n').next().unwrap_or("");
+                let value = segment
+                    .split(|c: char| c == '|' || c == '\n')
+                    .next()
+                    .unwrap_or("");
                 assert_eq!(
                     value, "low",
                     "|card: value {value:?} was not from the configured pool"
