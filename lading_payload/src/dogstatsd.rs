@@ -797,9 +797,9 @@ mod test {
 
     // With a non-empty pool, the extension field must appear in at least one metric across a
     // set of differently-seeded runs. Each metric has a 50% chance of including the field, so
-    // the probability of never seeing it across N independent runs is 0.5^N.
+    // the probability of never seeing it across N independent runs is 0.5^N (~10^-30 for N=100).
     fn assert_field_emitted_at_least_once(config: &Config, field_prefix: &[u8]) {
-        let seen = (0..20).any(|seed| {
+        let seen = (0..100).any(|seed| {
             let bytes = generate_bytes(config, seed);
             bytes.windows(field_prefix.len()).any(|w| w == field_prefix)
         });
