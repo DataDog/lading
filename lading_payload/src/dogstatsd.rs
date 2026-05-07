@@ -784,6 +784,100 @@ mod test {
 
     use crate::{DogStatsD, Serialize};
 
+    // Generate a batch of raw DogStatsD bytes using the given config and seed.
+    fn generate_bytes(config: &Config, seed: u64) -> Vec<u8> {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut dogstatsd = DogStatsD::new(config, &mut rng).expect("failed to create DogStatsD");
+        let mut bytes = Vec::new();
+        dogstatsd
+            .to_bytes(rng, 65536, &mut bytes)
+            .expect("failed to generate bytes");
+        bytes
+    }
+
+    // With a non-empty pool, the extension field must appear in at least one metric across a
+    // set of differently-seeded runs. Each metric has a 50% chance of including the field, so
+    // the probability of never seeing it across N independent runs is 0.5^N.
+    fn assert_field_emitted_at_least_once(config: &Config, field_prefix: &[u8]) {
+        let seen = (0..20).any(|seed| {
+            let bytes = generate_bytes(config, seed);
+            bytes.windows(field_prefix.len()).any(|w| w == field_prefix)
+        });
+        assert!(
+            seen,
+            "expected '{}' to appear in generated output with a non-empty pool, but it never did",
+            std::str::from_utf8(field_prefix).unwrap_or("<non-utf8>")
+        );
+    }
+
+    #[test]
+    fn external_data_emitted_when_pool_nonempty() {
+        let config = Config {
+            external_data: vec!["pu-abc123,cn-mycontainer,it-false".to_string()],
+            ..Default::default()
+        };
+        assert_field_emitted_at_least_once(&config, b"|e:");
+    }
+
+    #[test]
+    fn external_data_absent_when_pool_empty() {
+        let bytes = generate_bytes(&Config::default(), 0);
+        assert!(
+            !bytes.windows(3).any(|w| w == b"|e:"),
+            "expected no |e: field when external_data pool is empty"
+        );
+    }
+
+    #[test]
+    fn cardinality_emitted_when_pool_nonempty() {
+        let config = Config {
+            cardinality: vec!["low".to_string(), "orchestrator".to_string()],
+            ..Default::default()
+        };
+        assert_field_emitted_at_least_once(&config, b"|card:");
+    }
+
+    #[test]
+    fn cardinality_absent_when_pool_empty() {
+        let bytes = generate_bytes(&Config::default(), 0);
+        assert!(
+            !bytes.windows(6).any(|w| w == b"|card:"),
+            "expected no |card: field when cardinality pool is empty"
+        );
+    }
+
+    #[test]
+    fn container_id_uses_configured_pool() {
+        let id = "abc123def456";
+        let config = Config {
+            container_ids: vec![id.to_string()],
+            ..Default::default()
+        };
+        let needle = format!("|c:{id}");
+        assert_field_emitted_at_least_once(&config, needle.as_bytes());
+    }
+
+    #[test]
+    fn extension_field_values_come_from_pool() {
+        // When a pool is non-empty, only values from that pool should appear after the prefix.
+        let config = Config {
+            cardinality: vec!["low".to_string()],
+            ..Default::default()
+        };
+        for seed in 0..10 {
+            let bytes = generate_bytes(&config, seed);
+            let text = std::str::from_utf8(&bytes).expect("output should be valid utf-8");
+            for segment in text.split("|card:").skip(1) {
+                // Each metric is newline-terminated, so split on both | and \n to isolate the value.
+                let value = segment.split(|c: char| c == '|' || c == '\n').next().unwrap_or("");
+                assert_eq!(
+                    value, "low",
+                    "|card: value {value:?} was not from the configured pool"
+                );
+            }
+        }
+    }
+
     #[test]
     fn zero_contexts_should_be_rejected() {
         let config = Config {
