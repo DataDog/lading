@@ -62,6 +62,9 @@ pub(crate) fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Opt
 where
     R: rand::Rng + ?Sized,
 {
+    if pool.is_empty() {
+        return None;
+    }
     if rng.random() {
         pool.choose(&mut rng)
     } else {
