@@ -128,10 +128,8 @@ pub enum ProbabilityError {
 /// bound as a `u32` bit pattern (`{ f32::to_bits(0.5) }`) and the type decodes
 /// it back to `f32` inside [`Self::MIN`].
 ///
-/// Once the const generic is an integer, the natural follow-up question is
-/// whether bound checks can stay in the integer domain. They can, for the
-/// values this type accepts, because of two IEEE-754 properties of the
-/// `f32` ↔ `u32` round trip exposed by [`f32::to_bits`] / [`f32::from_bits`]:
+/// Two IEEE-754 properties of the `f32` ↔ `u32` round trip exposed by
+/// [`f32::to_bits`] / [`f32::from_bits`] inform the rest of the design:
 ///
 /// * For any two values `a, b` in `[+0.0, +∞)` (i.e. non-negative, non-NaN),
 ///   `a <= b` iff `a.to_bits() <= b.to_bits()`. The sign bit is zero and the
@@ -141,12 +139,8 @@ pub enum ProbabilityError {
 ///   distinct bit patterns (`0x0000_0000` vs `0x8000_0000`). Storing `-0.0`
 ///   would break the order-preservation property above (`-0.0.to_bits()` is
 ///   the largest `u32`), so [`Self::try_new`] normalizes `-0.0` inputs to
-///   `+0.0` before storage.
-///
-/// The current implementation still compares in the `f32` domain via
-/// [`PartialOrd`] for clarity, but `MIN_AS_BITS` is stored as `u32` precisely so
-/// that future revisions can move the hot-path comparison into the integer
-/// domain without an API break.
+///   `+0.0` before storage. This canonical-bit-pattern guarantee is what
+///   makes hashing on `value.to_bits()` consistent with numeric equality.
 ///
 /// # Example
 ///
