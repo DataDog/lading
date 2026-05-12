@@ -293,6 +293,26 @@ impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
     }
 }
 
+/// Generate a uniformly-distributed-over-bit-patterns value in `[MIN, +1.0]`
+/// by sampling a `u32` in `[MIN_AS_BITS, f32::to_bits(+1.0)]` and decoding it.
+///
+/// This works because the f32 ↔ u32 ordering (documented on the type) is
+/// monotonic for non-negative finite values, so every bit pattern in that
+/// range decodes to a valid stored value. `-0.0`'s bit pattern is
+/// `0x8000_0000`, far above `f32::to_bits(+1.0) = 0x3f80_0000`, so it can
+/// never be generated.
+#[cfg(feature = "arbitrary")]
+impl<'a, const MIN_AS_BITS: u32> arbitrary::Arbitrary<'a> for BoundedProbability<MIN_AS_BITS> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let bits = u.int_in_range(MIN_AS_BITS..=f32::to_bits(Self::MAX))?;
+        let value = f32::from_bits(bits);
+        // Routing through `try_new` fires the per-monomorphization const-eval
+        // bound check on `Self::MIN` and forwards any future invariant added
+        // to the constructor. The `expect` is safe by the argument above.
+        Ok(Self::try_new(value).expect("bits in [MIN_AS_BITS, MAX_AS_BITS] always valid"))
+    }
+}
+
 #[cfg(test)]
 mod probability_tests {
     use super::{BoundedProbability, NEG_ZERO_AS_BITS, ProbabilityError};
@@ -737,6 +757,47 @@ mod probability_tests {
                 err.to_string().contains("exceeds 1.0"),
                 "unexpected error: {}", err
             );
+        }
+    }
+
+    // ===== Property tests: Arbitrary impl (feature = "arbitrary") =====
+
+    #[cfg(feature = "arbitrary")]
+    fn check_arbitrary_produces_valid<const MIN_AS_BITS: u32>(bytes: &[u8]) {
+        use arbitrary::{Arbitrary, Unstructured};
+        let mut u = Unstructured::new(bytes);
+        // `int_in_range` can fail with `NotEnoughData` on short inputs; that's
+        // fine — we only need to check that any `Ok` value is valid.
+        if let Ok(p) = BoundedProbability::<MIN_AS_BITS>::arbitrary(&mut u) {
+            let v = p.get();
+            assert!(v.is_finite());
+            assert_ne!(v.to_bits(), NEG_ZERO_AS_BITS);
+            assert!(v >= BoundedProbability::<MIN_AS_BITS>::MIN);
+            assert!(v <= BoundedProbability::<MIN_AS_BITS>::MAX);
+        }
+    }
+
+    #[cfg(feature = "arbitrary")]
+    proptest! {
+        #[test]
+        fn arbitrary_produces_valid_zero_or_more(
+            bytes in prop::collection::vec(any::<u8>(), 4..32),
+        ) {
+            check_arbitrary_produces_valid::<{ f32::to_bits(0.0) }>(&bytes);
+        }
+
+        #[test]
+        fn arbitrary_produces_valid_at_least_half(
+            bytes in prop::collection::vec(any::<u8>(), 4..32),
+        ) {
+            check_arbitrary_produces_valid::<{ f32::to_bits(0.5) }>(&bytes);
+        }
+
+        #[test]
+        fn arbitrary_produces_valid_at_least_one(
+            bytes in prop::collection::vec(any::<u8>(), 4..32),
+        ) {
+            check_arbitrary_produces_valid::<{ f32::to_bits(1.0) }>(&bytes);
         }
     }
 }
