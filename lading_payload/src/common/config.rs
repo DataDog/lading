@@ -242,10 +242,13 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
 #[cfg(test)]
 mod probability_tests {
     use super::{NEG_ZERO_AS_BITS, Probability, ProbabilityError};
+    use proptest::prelude::*;
 
     type ZeroOrMore = Probability<{ f32::to_bits(0.0) }>;
     type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
     type AtLeastOne = Probability<{ f32::to_bits(1.0) }>;
+
+    // ===== Unit tests: constants =====
 
     #[test]
     fn min_const_matches_bit_pattern() {
@@ -260,66 +263,9 @@ mod probability_tests {
     }
 
     #[test]
-    fn accepts_values_in_range() {
-        let p = ZeroOrMore::try_new(0.5).expect("0.5 is in [0.0, 1.0]");
-        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
-
-        let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
-        assert_eq!(p.get().to_bits(), 0.75_f32.to_bits());
-    }
-
-    #[test]
-    fn accepts_lower_bound() {
-        let p = AtLeastHalf::try_new(0.5).expect("0.5 is the lower bound");
-        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
-    }
-
-    #[test]
-    fn accepts_upper_bound() {
-        let p = ZeroOrMore::try_new(1.0).expect("1.0 is the upper bound");
-        assert_eq!(p.get().to_bits(), 1.0_f32.to_bits());
-    }
-
-    #[test]
     fn accepts_only_one_for_unit_bound() {
         let p = AtLeastOne::try_new(1.0).expect("1.0 is in [1.0, 1.0]");
         assert_eq!(p.get().to_bits(), 1.0_f32.to_bits());
-    }
-
-    #[test]
-    fn rejects_below_min() {
-        let err = AtLeastHalf::try_new(0.1).expect_err("0.1 < 0.5");
-        match err {
-            ProbabilityError::BelowMin { min, value } => {
-                assert_eq!(min.to_bits(), 0.5_f32.to_bits());
-                assert_eq!(value.to_bits(), 0.1_f32.to_bits());
-            }
-            other => panic!("expected BelowMin, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rejects_above_one() {
-        let err = ZeroOrMore::try_new(1.5).expect_err("1.5 > 1.0");
-        assert!(matches!(err, ProbabilityError::AboveOne(_)));
-    }
-
-    #[test]
-    fn rejects_nan() {
-        let err = ZeroOrMore::try_new(f32::NAN).expect_err("NaN is not finite");
-        assert!(matches!(err, ProbabilityError::NotFinite(_)));
-    }
-
-    #[test]
-    fn rejects_positive_infinity() {
-        let err = ZeroOrMore::try_new(f32::INFINITY).expect_err("+inf is not finite");
-        assert!(matches!(err, ProbabilityError::NotFinite(_)));
-    }
-
-    #[test]
-    fn rejects_negative_infinity() {
-        let err = ZeroOrMore::try_new(f32::NEG_INFINITY).expect_err("-inf is not finite");
-        assert!(matches!(err, ProbabilityError::NotFinite(_)));
     }
 
     #[test]
@@ -329,12 +275,7 @@ mod probability_tests {
         assert!(matches!(err, ProbabilityError::NegativeZero));
     }
 
-    #[test]
-    fn rejects_negative_nonzero() {
-        // -0.1 is finite and not -0.0, so it fails the lower-bound check.
-        let err = ZeroOrMore::try_new(-0.1).expect_err("-0.1 < 0.0");
-        assert!(matches!(err, ProbabilityError::BelowMin { .. }));
-    }
+    // ===== Unit tests: wire-format pins =====
 
     #[test]
     fn serde_round_trip_json() {
@@ -346,47 +287,327 @@ mod probability_tests {
     }
 
     #[test]
-    fn serde_deserialize_accepts_valid() {
-        let p: AtLeastHalf = serde_json::from_str("0.5").expect("0.5 is the lower bound");
-        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
+    fn serde_round_trip_yaml_format() {
+        let p = AtLeastHalf::try_new(0.75).expect("0.75 in [0.5, 1.0]");
+        let yaml = serde_yaml::to_string(&p).expect("serialize");
+        assert_eq!(yaml, "0.75\n");
+        let back: AtLeastHalf = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(back.get().to_bits(), 0.75_f32.to_bits());
     }
 
-    #[test]
-    fn serde_deserialize_rejects_below_min() {
-        let err = serde_json::from_str::<AtLeastHalf>("0.1").expect_err("0.1 < 0.5");
-        // The serde error wraps our ProbabilityError's Display output.
+    // ===== Property-test strategies =====
+
+    fn valid_value_strategy(min: f32) -> BoxedStrategy<f32> {
+        // proptest's `RangeInclusive<f32>` panics on degenerate ranges, so
+        // produce a single-value strategy when `min == MAX`.
+        if min >= 1.0 {
+            Just(1.0_f32).boxed()
+        } else {
+            (min..=1.0_f32)
+                .prop_filter("not -0.0", |v| v.to_bits() != NEG_ZERO_AS_BITS)
+                .boxed()
+        }
+    }
+
+    fn below_min_strategy(min: f32) -> impl Strategy<Value = f32> {
+        (f32::MIN..min).prop_filter("finite, not -0.0", |v| {
+            v.is_finite() && v.to_bits() != NEG_ZERO_AS_BITS
+        })
+    }
+
+    fn above_one_strategy() -> impl Strategy<Value = f32> {
+        (1.0_f32..f32::MAX).prop_filter("> 1.0 and finite", |v| *v > 1.0 && v.is_finite())
+    }
+
+    fn non_finite_strategy() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            Just(f32::NAN),
+            Just(f32::INFINITY),
+            Just(f32::NEG_INFINITY),
+        ]
+    }
+
+    // ===== Property-test helpers (generic over MIN_AS_BITS) =====
+
+    fn check_accepts_in_range<const MIN_AS_BITS: u32>(v: f32) {
+        let p = Probability::<MIN_AS_BITS>::try_new(v)
+            .expect("v should be valid by construction");
+        assert_eq!(p.get().to_bits(), v.to_bits());
+    }
+
+    fn check_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
+        let err = Probability::<MIN_AS_BITS>::try_new(v).expect_err("v should be below MIN");
+        match err {
+            ProbabilityError::BelowMin { min, value } => {
+                assert_eq!(min.to_bits(), Probability::<MIN_AS_BITS>::MIN.to_bits());
+                assert_eq!(value.to_bits(), v.to_bits());
+            }
+            other => panic!("expected BelowMin, got {other:?}"),
+        }
+    }
+
+    fn check_display_matches<const MIN_AS_BITS: u32>(v: f32) {
+        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        assert_eq!(format!("{p}"), format!("{v}"));
+    }
+
+    fn check_display_precision<const MIN_AS_BITS: u32>(v: f32, n: usize) {
+        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        assert_eq!(format!("{p:.n$}"), format!("{v:.n$}"));
+    }
+
+    fn check_serde_json_round_trip<const MIN_AS_BITS: u32>(v: f32) {
+        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let json = serde_json::to_string(&p).expect("serialize");
+        let back: Probability<MIN_AS_BITS> =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.get().to_bits(), v.to_bits());
+    }
+
+    fn check_serde_yaml_round_trip<const MIN_AS_BITS: u32>(v: f32) {
+        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let yaml = serde_yaml::to_string(&p).expect("serialize");
+        let back: Probability<MIN_AS_BITS> =
+            serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(back.get().to_bits(), v.to_bits());
+    }
+
+    fn check_serde_json_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
+        let json = serde_json::to_string(&v).expect("serialize raw f32");
+        let err = serde_json::from_str::<Probability<MIN_AS_BITS>>(&json)
+            .expect_err("v < MIN");
         assert!(
             err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
         );
     }
 
-    #[test]
-    fn serde_deserialize_rejects_above_one() {
-        let err = serde_json::from_str::<ZeroOrMore>("1.5").expect_err("1.5 > 1.0");
+    fn check_serde_yaml_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
+        let yaml = serde_yaml::to_string(&v).expect("serialize raw f32");
+        let err = serde_yaml::from_str::<Probability<MIN_AS_BITS>>(&yaml)
+            .expect_err("v < MIN");
         assert!(
-            err.to_string().contains("exceeds 1.0"),
+            err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
         );
     }
 
-    #[test]
-    fn serde_yaml_round_trip() {
-        let p = ZeroOrMore::try_new(0.25).expect("0.25 in [0.0, 1.0]");
-        let yaml = serde_yaml::to_string(&p).expect("serialize");
-        let back: ZeroOrMore = serde_yaml::from_str(&yaml).expect("deserialize");
-        assert_eq!(back.get().to_bits(), 0.25_f32.to_bits());
+    // ===== Property tests: input validation =====
+
+    proptest! {
+        #[test]
+        fn accepts_any_value_in_range_zero_or_more(
+            v in valid_value_strategy(ZeroOrMore::MIN),
+        ) {
+            check_accepts_in_range::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn accepts_any_value_in_range_at_least_half(
+            v in valid_value_strategy(AtLeastHalf::MIN),
+        ) {
+            check_accepts_in_range::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn accepts_any_value_in_range_at_least_one(
+            v in valid_value_strategy(AtLeastOne::MIN),
+        ) {
+            check_accepts_in_range::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn rejects_any_value_below_min_zero_or_more(
+            v in below_min_strategy(ZeroOrMore::MIN),
+        ) {
+            check_rejects_below_min::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn rejects_any_value_below_min_at_least_half(
+            v in below_min_strategy(AtLeastHalf::MIN),
+        ) {
+            check_rejects_below_min::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn rejects_any_value_below_min_at_least_one(
+            v in below_min_strategy(AtLeastOne::MIN),
+        ) {
+            check_rejects_below_min::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn rejects_any_value_above_one(v in above_one_strategy()) {
+            let err = ZeroOrMore::try_new(v).expect_err("v > 1.0");
+            prop_assert!(matches!(err, ProbabilityError::AboveOne(_)));
+        }
+
+        #[test]
+        fn rejects_any_non_finite(v in non_finite_strategy()) {
+            let err = ZeroOrMore::try_new(v).expect_err("v is not finite");
+            prop_assert!(matches!(err, ProbabilityError::NotFinite(_)));
+        }
     }
 
-    #[test]
-    fn display_matches_inner_f32() {
-        let p = AtLeastHalf::try_new(0.75).expect("0.75 in [0.5, 1.0]");
-        assert_eq!(format!("{p}"), format!("{}", 0.75_f32));
+    // ===== Property tests: Display =====
+
+    proptest! {
+        #[test]
+        fn display_matches_inner_f32_for_valid_values_zero_or_more(
+            v in valid_value_strategy(ZeroOrMore::MIN),
+        ) {
+            check_display_matches::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn display_matches_inner_f32_for_valid_values_at_least_half(
+            v in valid_value_strategy(AtLeastHalf::MIN),
+        ) {
+            check_display_matches::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn display_matches_inner_f32_for_valid_values_at_least_one(
+            v in valid_value_strategy(AtLeastOne::MIN),
+        ) {
+            check_display_matches::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn display_propagates_precision_zero_or_more(
+            v in valid_value_strategy(ZeroOrMore::MIN),
+            n in 0_usize..=10,
+        ) {
+            check_display_precision::<{ f32::to_bits(0.0) }>(v, n);
+        }
+
+        #[test]
+        fn display_propagates_precision_at_least_half(
+            v in valid_value_strategy(AtLeastHalf::MIN),
+            n in 0_usize..=10,
+        ) {
+            check_display_precision::<{ f32::to_bits(0.5) }>(v, n);
+        }
+
+        #[test]
+        fn display_propagates_precision_at_least_one(
+            v in valid_value_strategy(AtLeastOne::MIN),
+            n in 0_usize..=10,
+        ) {
+            check_display_precision::<{ f32::to_bits(1.0) }>(v, n);
+        }
     }
 
-    #[test]
-    fn display_propagates_format_specifiers() {
-        let p = AtLeastHalf::try_new(0.5).expect("0.5 is the lower bound");
-        assert_eq!(format!("{p:.3}"), format!("{:.3}", 0.5_f32));
+    // ===== Property tests: serde round-trips =====
+
+    proptest! {
+        #[test]
+        fn serde_json_round_trips_for_valid_values_zero_or_more(
+            v in valid_value_strategy(ZeroOrMore::MIN),
+        ) {
+            check_serde_json_round_trip::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn serde_json_round_trips_for_valid_values_at_least_half(
+            v in valid_value_strategy(AtLeastHalf::MIN),
+        ) {
+            check_serde_json_round_trip::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn serde_json_round_trips_for_valid_values_at_least_one(
+            v in valid_value_strategy(AtLeastOne::MIN),
+        ) {
+            check_serde_json_round_trip::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_round_trips_for_valid_values_zero_or_more(
+            v in valid_value_strategy(ZeroOrMore::MIN),
+        ) {
+            check_serde_yaml_round_trip::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_round_trips_for_valid_values_at_least_half(
+            v in valid_value_strategy(AtLeastHalf::MIN),
+        ) {
+            check_serde_yaml_round_trip::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_round_trips_for_valid_values_at_least_one(
+            v in valid_value_strategy(AtLeastOne::MIN),
+        ) {
+            check_serde_yaml_round_trip::<{ f32::to_bits(1.0) }>(v);
+        }
+    }
+
+    // ===== Property tests: serde rejections =====
+
+    proptest! {
+        #[test]
+        fn serde_json_deserialize_rejects_below_min_zero_or_more(
+            v in below_min_strategy(ZeroOrMore::MIN),
+        ) {
+            check_serde_json_rejects_below_min::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn serde_json_deserialize_rejects_below_min_at_least_half(
+            v in below_min_strategy(AtLeastHalf::MIN),
+        ) {
+            check_serde_json_rejects_below_min::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn serde_json_deserialize_rejects_below_min_at_least_one(
+            v in below_min_strategy(AtLeastOne::MIN),
+        ) {
+            check_serde_json_rejects_below_min::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_deserialize_rejects_below_min_zero_or_more(
+            v in below_min_strategy(ZeroOrMore::MIN),
+        ) {
+            check_serde_yaml_rejects_below_min::<{ f32::to_bits(0.0) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_deserialize_rejects_below_min_at_least_half(
+            v in below_min_strategy(AtLeastHalf::MIN),
+        ) {
+            check_serde_yaml_rejects_below_min::<{ f32::to_bits(0.5) }>(v);
+        }
+
+        #[test]
+        fn serde_yaml_deserialize_rejects_below_min_at_least_one(
+            v in below_min_strategy(AtLeastOne::MIN),
+        ) {
+            check_serde_yaml_rejects_below_min::<{ f32::to_bits(1.0) }>(v);
+        }
+
+        #[test]
+        fn serde_json_deserialize_rejects_above_one(v in above_one_strategy()) {
+            let json = serde_json::to_string(&v).expect("serialize");
+            let err = serde_json::from_str::<ZeroOrMore>(&json).expect_err("v > 1.0");
+            prop_assert!(
+                err.to_string().contains("exceeds 1.0"),
+                "unexpected error: {}", err
+            );
+        }
+
+        #[test]
+        fn serde_yaml_deserialize_rejects_above_one(v in above_one_strategy()) {
+            let yaml = serde_yaml::to_string(&v).expect("serialize");
+            let err = serde_yaml::from_str::<ZeroOrMore>(&yaml).expect_err("v > 1.0");
+            prop_assert!(
+                err.to_string().contains("exceeds 1.0"),
+                "unexpected error: {}", err
+            );
+        }
     }
 }
