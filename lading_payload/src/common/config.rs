@@ -151,12 +151,12 @@ pub enum ProbabilityError {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use lading_payload::common::config::Probability;
 ///
 /// type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
 /// let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
-/// assert!((p.get() - 0.75).abs() < f32::EPSILON);
+/// assert_eq!(p.get(), 0.75);
 /// ```
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(into = "f32", try_from = "f32")]
