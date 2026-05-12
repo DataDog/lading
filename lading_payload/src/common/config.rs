@@ -208,10 +208,14 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     /// `[MIN, +1.0]` and is not NaN or `±∞`. A `-0.0` input is normalized to
     /// `+0.0`.
     ///
+    /// This is a `const fn`, so callers can build a [`Probability`] in a
+    /// `const` context by matching on the returned [`Result`]; the validation
+    /// then runs at compile time.
+    ///
     /// # Errors
     ///
     /// Returns [`ProbabilityError`] when validation fails.
-    pub fn try_new(value: f32) -> Result<Self, ProbabilityError> {
+    pub const fn try_new(value: f32) -> Result<Self, ProbabilityError> {
         // Force evaluation of the const-eval bound check for this
         // monomorphization. Without this reference the assertions in `MIN`
         // can be elided when no caller names `Self::MIN` directly.
@@ -268,6 +272,21 @@ mod probability_tests {
     fn accepts_only_one_for_unit_bound() {
         let p = AtLeastOne::try_new(1.0).expect("1.0 is in [1.0, 1.0]");
         assert_eq!(p.get().to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn try_new_is_const_evaluable() {
+        // `try_new` must remain a `const fn` so callers can validate
+        // literals at compile time. The `const` bindings below would fail
+        // to build if it ever lost that property.
+        const VALID: AtLeastHalf = match AtLeastHalf::try_new(0.75) {
+            Ok(p) => p,
+            Err(_) => panic!("0.75 is in [0.5, 1.0]"),
+        };
+        const ABOVE_ONE: Result<AtLeastHalf, ProbabilityError> =
+            AtLeastHalf::try_new(2.0);
+        assert_eq!(VALID.get().to_bits(), 0.75_f32.to_bits());
+        assert!(matches!(ABOVE_ONE, Err(ProbabilityError::AboveOne(_))));
     }
 
     #[test]
