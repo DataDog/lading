@@ -121,6 +121,34 @@ pub enum ProbabilityError {
 /// Stored values are validated by [`Self::try_new`] against the same edge-case
 /// rules and must lie in `[MIN, +1.0]`.
 ///
+/// # Design
+///
+/// Rust does not yet allow floating-point types as const generic parameters on
+/// stable; tracking issue `rust-lang/rust#95174` covers `#![feature(adt_const_params)]`
+/// and its float-specific complications. To carry a compile-time lower bound
+/// today the type must be parameterized on an integer, so callers spell the
+/// bound as a `u32` bit pattern (`{ f32::to_bits(0.5) }`) and the type decodes
+/// it back to `f32` inside [`Self::MIN`].
+///
+/// Once the const generic is an integer, the natural follow-up question is
+/// whether bound checks can stay in the integer domain. They can, for the
+/// values this type accepts, because of two IEEE-754 properties of the
+/// `f32` ↔ `u32` round trip exposed by [`f32::to_bits`] / [`f32::from_bits`]:
+///
+/// * For any two values `a, b` in `[+0.0, +∞)` (i.e. non-negative, non-NaN),
+///   `a <= b` iff `a.to_bits() <= b.to_bits()`. The sign bit is zero and the
+///   remaining 31 bits are laid out exponent-then-mantissa, so the unsigned
+///   integer ordering matches the numeric ordering.
+/// * `+0.0` and `-0.0` are numerically equal under `==`/`<`/`<=` but have
+///   distinct bit patterns (`0x0000_0000` vs `0x8000_0000`). Allowing `-0.0`
+///   would break the order-preservation property above (`-0.0.to_bits()` is
+///   the largest `u32`), so the type rejects `-0.0` explicitly.
+///
+/// The current implementation still compares in the `f32` domain via
+/// [`PartialOrd`] for clarity, but `MIN_BITS` is stored as `u32` precisely so
+/// that future revisions can move the hot-path comparison into the integer
+/// domain without an API break.
+///
 /// # Example
 ///
 /// ```ignore
