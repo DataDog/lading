@@ -150,6 +150,12 @@ impl<const MIN_BITS: u32> From<Probability<MIN_BITS>> for f32 {
     }
 }
 
+impl<const MIN_BITS: u32> fmt::Display for Probability<MIN_BITS> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.value, f)
+    }
+}
+
 impl<const MIN_BITS: u32> Probability<MIN_BITS> {
     /// The lower bound decoded from `MIN_BITS`.
     ///
@@ -342,5 +348,17 @@ mod probability_tests {
         let yaml = serde_yaml::to_string(&p).expect("serialize");
         let back: ZeroOrMore = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(back.get().to_bits(), 0.25_f32.to_bits());
+    }
+
+    #[test]
+    fn display_matches_inner_f32() {
+        let p = AtLeastHalf::try_new(0.75).expect("0.75 in [0.5, 1.0]");
+        assert_eq!(format!("{p}"), format!("{}", 0.75_f32));
+    }
+
+    #[test]
+    fn display_propagates_format_specifiers() {
+        let p = AtLeastHalf::try_new(0.5).expect("0.5 is the lower bound");
+        assert_eq!(format!("{p:.3}"), format!("{:.3}", 0.5_f32));
     }
 }
