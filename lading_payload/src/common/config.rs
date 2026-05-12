@@ -87,7 +87,7 @@ where
 
 /// Bit pattern of `-0.0_f32`. Used to reject negative zero, which compares
 /// equal to `+0.0` under IEEE-754 numeric ordering.
-const NEG_ZERO_BITS: u32 = 0x8000_0000;
+const NEG_ZERO_AS_BITS: u32 = 0x8000_0000;
 
 /// Error returned when a value cannot be turned into a [`Probability`].
 #[derive(Debug, thiserror::Error, Clone, Copy)]
@@ -113,7 +113,7 @@ pub enum ProbabilityError {
 
 /// An `f32`-valued probability with a compile-time lower bound.
 ///
-/// The const generic `MIN_BITS` is the IEEE-754 bit pattern of the lower bound,
+/// The const generic `MIN_AS_BITS` is the IEEE-754 bit pattern of the lower bound,
 /// obtained at the call site via [`f32::to_bits`]. The decoded bound must be a
 /// finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise the type
 /// fails to instantiate at compile time via the assertions on [`Self::MIN`].
@@ -145,7 +145,7 @@ pub enum ProbabilityError {
 ///   the largest `u32`), so the type rejects `-0.0` explicitly.
 ///
 /// The current implementation still compares in the `f32` domain via
-/// [`PartialOrd`] for clarity, but `MIN_BITS` is stored as `u32` precisely so
+/// [`PartialOrd`] for clarity, but `MIN_AS_BITS` is stored as `u32` precisely so
 /// that future revisions can move the hot-path comparison into the integer
 /// domain without an API break.
 ///
@@ -160,11 +160,11 @@ pub enum ProbabilityError {
 /// ```
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(into = "f32", try_from = "f32")]
-pub struct Probability<const MIN_BITS: u32> {
+pub struct Probability<const MIN_AS_BITS: u32> {
     value: f32,
 }
 
-impl<const MIN_BITS: u32> TryFrom<f32> for Probability<MIN_BITS> {
+impl<const MIN_AS_BITS: u32> TryFrom<f32> for Probability<MIN_AS_BITS> {
     type Error = ProbabilityError;
 
     fn try_from(value: f32) -> Result<Self, Self::Error> {
@@ -172,31 +172,31 @@ impl<const MIN_BITS: u32> TryFrom<f32> for Probability<MIN_BITS> {
     }
 }
 
-impl<const MIN_BITS: u32> From<Probability<MIN_BITS>> for f32 {
-    fn from(p: Probability<MIN_BITS>) -> Self {
+impl<const MIN_AS_BITS: u32> From<Probability<MIN_AS_BITS>> for f32 {
+    fn from(p: Probability<MIN_AS_BITS>) -> Self {
         p.value
     }
 }
 
-impl<const MIN_BITS: u32> fmt::Display for Probability<MIN_BITS> {
+impl<const MIN_AS_BITS: u32> fmt::Display for Probability<MIN_AS_BITS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.value, f)
     }
 }
 
-impl<const MIN_BITS: u32> Probability<MIN_BITS> {
-    /// The lower bound decoded from `MIN_BITS`.
+impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
+    /// The lower bound decoded from `MIN_AS_BITS`.
     ///
     /// The `assert!`s here run at const-evaluation time for every
     /// monomorphization of [`Probability`], rejecting bit patterns that decode
     /// to NaN, `±∞`, `-0.0`, or values outside `[+0.0, +1.0]`.
     pub const MIN: f32 = {
         assert!(
-            MIN_BITS != NEG_ZERO_BITS,
-            "MIN_BITS must not encode -0.0"
+            MIN_AS_BITS != NEG_ZERO_AS_BITS,
+            "MIN_AS_BITS must not encode -0.0"
         );
-        let v = f32::from_bits(MIN_BITS);
-        assert!(v.is_finite(), "MIN_BITS must decode to a finite f32");
+        let v = f32::from_bits(MIN_AS_BITS);
+        assert!(v.is_finite(), "MIN_AS_BITS must decode to a finite f32");
         assert!(v >= 0.0, "lower bound must be >= +0.0");
         assert!(v <= 1.0, "lower bound must be <= +1.0");
         v
@@ -220,7 +220,7 @@ impl<const MIN_BITS: u32> Probability<MIN_BITS> {
         if !value.is_finite() {
             return Err(ProbabilityError::NotFinite(value));
         }
-        if value.to_bits() == NEG_ZERO_BITS {
+        if value.to_bits() == NEG_ZERO_AS_BITS {
             return Err(ProbabilityError::NegativeZero);
         }
         if value < min {
@@ -241,7 +241,7 @@ impl<const MIN_BITS: u32> Probability<MIN_BITS> {
 
 #[cfg(test)]
 mod probability_tests {
-    use super::{NEG_ZERO_BITS, Probability, ProbabilityError};
+    use super::{NEG_ZERO_AS_BITS, Probability, ProbabilityError};
 
     type ZeroOrMore = Probability<{ f32::to_bits(0.0) }>;
     type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
@@ -324,7 +324,7 @@ mod probability_tests {
 
     #[test]
     fn rejects_negative_zero() {
-        let neg_zero = f32::from_bits(NEG_ZERO_BITS);
+        let neg_zero = f32::from_bits(NEG_ZERO_AS_BITS);
         let err = ZeroOrMore::try_new(neg_zero).expect_err("-0.0 is rejected");
         assert!(matches!(err, ProbabilityError::NegativeZero));
     }
