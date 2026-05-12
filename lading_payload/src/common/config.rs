@@ -2,7 +2,7 @@
 
 use rand::{RngExt, distr::uniform::SampleUniform};
 use serde::Deserialize;
-use std::{cmp, fmt};
+use std::{cmp, fmt, hash};
 
 /// Range expression for configuration
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -182,6 +182,38 @@ impl<const MIN_AS_BITS: u32> fmt::Display for Probability<MIN_AS_BITS> {
     }
 }
 
+// `Eq`, `Ord`, and `Hash` are sound because [`Self::try_new`] rejects NaN and
+// normalizes `-0.0` to `+0.0`, so every value in the valid range has a unique
+// bit pattern and an unambiguous numeric ordering. `Hash` works on the `u32`
+// bit pattern because `f32: !Hash`; the `Eq`/`Hash` contract is preserved
+// because numerically equal valid values share a bit pattern.
+
+impl<const MIN_AS_BITS: u32> PartialEq for Probability<MIN_AS_BITS> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<const MIN_AS_BITS: u32> Eq for Probability<MIN_AS_BITS> {}
+
+impl<const MIN_AS_BITS: u32> Ord for Probability<MIN_AS_BITS> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.value.total_cmp(&other.value)
+    }
+}
+
+impl<const MIN_AS_BITS: u32> PartialOrd for Probability<MIN_AS_BITS> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const MIN_AS_BITS: u32> hash::Hash for Probability<MIN_AS_BITS> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.value.to_bits().hash(state);
+    }
+}
+
 impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     /// The lower bound decoded from `MIN_AS_BITS`.
     ///
@@ -306,6 +338,38 @@ mod probability_tests {
             }
             other => panic!("expected BelowMin, got {other:?}"),
         }
+    }
+
+    // ===== Unit tests: ordering / equality / hashing =====
+
+    #[test]
+    fn equality_holds_for_same_bit_pattern() {
+        let a = AtLeastHalf::try_new(0.75).expect("valid");
+        let b = AtLeastHalf::try_new(0.75).expect("valid");
+        let c = AtLeastHalf::try_new(0.875).expect("valid");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn ordering_matches_numeric_ordering() {
+        let half = AtLeastHalf::try_new(0.5).expect("valid");
+        let three_quarters = AtLeastHalf::try_new(0.75).expect("valid");
+        let one = AtLeastHalf::try_new(1.0).expect("valid");
+        assert!(half < three_quarters);
+        assert!(three_quarters < one);
+        assert!(half < one);
+    }
+
+    #[test]
+    fn hash_agrees_with_eq() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(AtLeastHalf::try_new(0.75).expect("valid"));
+        // Re-inserting the equivalent value must hit the existing entry.
+        assert!(!set.insert(AtLeastHalf::try_new(0.75).expect("valid")));
+        assert!(set.insert(AtLeastHalf::try_new(0.875).expect("valid")));
+        assert_eq!(set.len(), 2);
     }
 
     // ===== Unit tests: wire-format pins =====
@@ -471,6 +535,23 @@ mod probability_tests {
         fn rejects_any_non_finite(v in non_finite_strategy()) {
             let err = ZeroOrMore::try_new(v).expect_err("v is not finite");
             prop_assert!(matches!(err, ProbabilityError::NotFinite(_)));
+        }
+    }
+
+    // ===== Property tests: ordering agrees with f32 PartialOrd =====
+
+    proptest! {
+        #[test]
+        fn ord_matches_f32_partial_cmp(
+            a in valid_value_strategy(ZeroOrMore::MIN),
+            b in valid_value_strategy(ZeroOrMore::MIN),
+        ) {
+            let pa = ZeroOrMore::try_new(a).expect("valid");
+            let pb = ZeroOrMore::try_new(b).expect("valid");
+            prop_assert_eq!(
+                pa.cmp(&pb),
+                a.partial_cmp(&b).expect("no NaN in valid range")
+            );
         }
     }
 
