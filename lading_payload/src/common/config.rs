@@ -84,3 +84,206 @@ where
         }
     }
 }
+
+/// Bit pattern of `-0.0_f32`. Used to reject negative zero, which compares
+/// equal to `+0.0` under IEEE-754 numeric ordering.
+const NEG_ZERO_BITS: u32 = 0x8000_0000;
+
+/// Error returned when a value cannot be turned into a [`Probability`].
+#[derive(Debug, thiserror::Error, Clone, Copy)]
+pub enum ProbabilityError {
+    /// Value is NaN or `±∞`.
+    #[error("probability must be finite, got {0}")]
+    NotFinite(f32),
+    /// Value has the bit pattern of `-0.0`.
+    #[error("probability must not be -0.0")]
+    NegativeZero,
+    /// Value is below the type's compile-time lower bound.
+    #[error("probability {value} is below lower bound {min}")]
+    BelowMin {
+        /// The lower bound encoded in the type parameter.
+        min: f32,
+        /// The offending value.
+        value: f32,
+    },
+    /// Value exceeds `+1.0`.
+    #[error("probability {0} exceeds 1.0")]
+    AboveOne(f32),
+}
+
+/// An `f32`-valued probability with a compile-time lower bound.
+///
+/// The const generic `MIN_BITS` is the IEEE-754 bit pattern of the lower bound,
+/// obtained at the call site via [`f32::to_bits`]. The decoded bound must be a
+/// finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise the type
+/// fails to instantiate at compile time via the assertions on [`Self::MIN`].
+///
+/// Stored values are validated by [`Self::try_new`] against the same edge-case
+/// rules and must lie in `[MIN, +1.0]`.
+///
+/// # Example
+///
+/// ```ignore
+/// use lading_payload::common::config::Probability;
+///
+/// type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
+/// let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
+/// assert!((p.get() - 0.75).abs() < f32::EPSILON);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Probability<const MIN_BITS: u32> {
+    value: f32,
+}
+
+impl<const MIN_BITS: u32> Probability<MIN_BITS> {
+    /// The lower bound decoded from `MIN_BITS`.
+    ///
+    /// The `assert!`s here run at const-evaluation time for every
+    /// monomorphization of [`Probability`], rejecting bit patterns that decode
+    /// to NaN, `±∞`, `-0.0`, or values outside `[+0.0, +1.0]`.
+    pub const MIN: f32 = {
+        assert!(
+            MIN_BITS != NEG_ZERO_BITS,
+            "MIN_BITS must not encode -0.0"
+        );
+        let v = f32::from_bits(MIN_BITS);
+        assert!(v.is_finite(), "MIN_BITS must decode to a finite f32");
+        assert!(v >= 0.0, "lower bound must be >= +0.0");
+        assert!(v <= 1.0, "lower bound must be <= +1.0");
+        v
+    };
+
+    /// The upper bound, fixed at `+1.0`.
+    pub const MAX: f32 = 1.0;
+
+    /// Construct a [`Probability`] from `value`, validating that it lies in
+    /// `[MIN, +1.0]` and is not NaN, `±∞`, or `-0.0`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProbabilityError`] when validation fails.
+    pub fn try_new(value: f32) -> Result<Self, ProbabilityError> {
+        // Force evaluation of the const-eval bound check for this
+        // monomorphization. Without this reference the assertions in `MIN`
+        // can be elided when no caller names `Self::MIN` directly.
+        let min = Self::MIN;
+
+        if !value.is_finite() {
+            return Err(ProbabilityError::NotFinite(value));
+        }
+        if value.to_bits() == NEG_ZERO_BITS {
+            return Err(ProbabilityError::NegativeZero);
+        }
+        if value < min {
+            return Err(ProbabilityError::BelowMin { min, value });
+        }
+        if value > Self::MAX {
+            return Err(ProbabilityError::AboveOne(value));
+        }
+        Ok(Self { value })
+    }
+
+    /// Return the stored probability value.
+    #[must_use]
+    pub const fn get(&self) -> f32 {
+        self.value
+    }
+}
+
+#[cfg(test)]
+mod probability_tests {
+    use super::{NEG_ZERO_BITS, Probability, ProbabilityError};
+
+    type ZeroOrMore = Probability<{ f32::to_bits(0.0) }>;
+    type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
+    type AtLeastOne = Probability<{ f32::to_bits(1.0) }>;
+
+    #[test]
+    fn min_const_matches_bit_pattern() {
+        assert_eq!(ZeroOrMore::MIN.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(AtLeastHalf::MIN.to_bits(), 0.5_f32.to_bits());
+        assert_eq!(AtLeastOne::MIN.to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn max_const_is_one() {
+        assert_eq!(ZeroOrMore::MAX.to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn accepts_values_in_range() {
+        let p = ZeroOrMore::try_new(0.5).expect("0.5 is in [0.0, 1.0]");
+        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
+
+        let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
+        assert_eq!(p.get().to_bits(), 0.75_f32.to_bits());
+    }
+
+    #[test]
+    fn accepts_lower_bound() {
+        let p = AtLeastHalf::try_new(0.5).expect("0.5 is the lower bound");
+        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
+    }
+
+    #[test]
+    fn accepts_upper_bound() {
+        let p = ZeroOrMore::try_new(1.0).expect("1.0 is the upper bound");
+        assert_eq!(p.get().to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn accepts_only_one_for_unit_bound() {
+        let p = AtLeastOne::try_new(1.0).expect("1.0 is in [1.0, 1.0]");
+        assert_eq!(p.get().to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn rejects_below_min() {
+        let err = AtLeastHalf::try_new(0.1).expect_err("0.1 < 0.5");
+        match err {
+            ProbabilityError::BelowMin { min, value } => {
+                assert_eq!(min.to_bits(), 0.5_f32.to_bits());
+                assert_eq!(value.to_bits(), 0.1_f32.to_bits());
+            }
+            other => panic!("expected BelowMin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_above_one() {
+        let err = ZeroOrMore::try_new(1.5).expect_err("1.5 > 1.0");
+        assert!(matches!(err, ProbabilityError::AboveOne(_)));
+    }
+
+    #[test]
+    fn rejects_nan() {
+        let err = ZeroOrMore::try_new(f32::NAN).expect_err("NaN is not finite");
+        assert!(matches!(err, ProbabilityError::NotFinite(_)));
+    }
+
+    #[test]
+    fn rejects_positive_infinity() {
+        let err = ZeroOrMore::try_new(f32::INFINITY).expect_err("+inf is not finite");
+        assert!(matches!(err, ProbabilityError::NotFinite(_)));
+    }
+
+    #[test]
+    fn rejects_negative_infinity() {
+        let err = ZeroOrMore::try_new(f32::NEG_INFINITY).expect_err("-inf is not finite");
+        assert!(matches!(err, ProbabilityError::NotFinite(_)));
+    }
+
+    #[test]
+    fn rejects_negative_zero() {
+        let neg_zero = f32::from_bits(NEG_ZERO_BITS);
+        let err = ZeroOrMore::try_new(neg_zero).expect_err("-0.0 is rejected");
+        assert!(matches!(err, ProbabilityError::NegativeZero));
+    }
+
+    #[test]
+    fn rejects_negative_nonzero() {
+        // -0.1 is finite and not -0.0, so it fails the lower-bound check.
+        let err = ZeroOrMore::try_new(-0.1).expect_err("-0.1 < 0.0");
+        assert!(matches!(err, ProbabilityError::BelowMin { .. }));
+    }
+}
