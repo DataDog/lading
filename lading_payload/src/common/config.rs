@@ -95,9 +95,6 @@ pub enum ProbabilityError {
     /// Value is NaN or `±∞`.
     #[error("probability must be finite, got {0}")]
     NotFinite(f32),
-    /// Value has the bit pattern of `-0.0`.
-    #[error("probability must not be -0.0")]
-    NegativeZero,
     /// Value is below the type's compile-time lower bound.
     #[error("probability {value} is below lower bound {min}")]
     BelowMin {
@@ -118,8 +115,9 @@ pub enum ProbabilityError {
 /// finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise the type
 /// fails to instantiate at compile time via the assertions on [`Self::MIN`].
 ///
-/// Stored values are validated by [`Self::try_new`] against the same edge-case
-/// rules and must lie in `[MIN, +1.0]`.
+/// Stored values must be finite and lie in `[MIN, +1.0]`. Inputs of `-0.0` are
+/// normalized to `+0.0`; other invalid inputs are rejected via
+/// [`ProbabilityError`].
 ///
 /// # Design
 ///
@@ -140,9 +138,10 @@ pub enum ProbabilityError {
 ///   remaining 31 bits are laid out exponent-then-mantissa, so the unsigned
 ///   integer ordering matches the numeric ordering.
 /// * `+0.0` and `-0.0` are numerically equal under `==`/`<`/`<=` but have
-///   distinct bit patterns (`0x0000_0000` vs `0x8000_0000`). Allowing `-0.0`
+///   distinct bit patterns (`0x0000_0000` vs `0x8000_0000`). Storing `-0.0`
 ///   would break the order-preservation property above (`-0.0.to_bits()` is
-///   the largest `u32`), so the type rejects `-0.0` explicitly.
+///   the largest `u32`), so [`Self::try_new`] normalizes `-0.0` inputs to
+///   `+0.0` before storage.
 ///
 /// The current implementation still compares in the `f32` domain via
 /// [`PartialOrd`] for clarity, but `MIN_AS_BITS` is stored as `u32` precisely so
@@ -206,7 +205,8 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     pub const MAX: f32 = 1.0;
 
     /// Construct a [`Probability`] from `value`, validating that it lies in
-    /// `[MIN, +1.0]` and is not NaN, `±∞`, or `-0.0`.
+    /// `[MIN, +1.0]` and is not NaN or `±∞`. A `-0.0` input is normalized to
+    /// `+0.0`.
     ///
     /// # Errors
     ///
@@ -220,9 +220,11 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
         if !value.is_finite() {
             return Err(ProbabilityError::NotFinite(value));
         }
-        if value.to_bits() == NEG_ZERO_AS_BITS {
-            return Err(ProbabilityError::NegativeZero);
-        }
+        let value = if value.to_bits() == NEG_ZERO_AS_BITS {
+            0.0_f32
+        } else {
+            value
+        };
         if value < min {
             return Err(ProbabilityError::BelowMin { min, value });
         }
@@ -269,10 +271,23 @@ mod probability_tests {
     }
 
     #[test]
-    fn rejects_negative_zero() {
+    fn normalizes_negative_zero() {
         let neg_zero = f32::from_bits(NEG_ZERO_AS_BITS);
-        let err = ZeroOrMore::try_new(neg_zero).expect_err("-0.0 is rejected");
-        assert!(matches!(err, ProbabilityError::NegativeZero));
+        let p = ZeroOrMore::try_new(neg_zero).expect("-0.0 normalizes to +0.0");
+        assert_eq!(p.get().to_bits(), 0.0_f32.to_bits());
+    }
+
+    #[test]
+    fn negative_zero_below_strict_min_is_below_min() {
+        let neg_zero = f32::from_bits(NEG_ZERO_AS_BITS);
+        let err = AtLeastHalf::try_new(neg_zero).expect_err("0.0 < 0.5");
+        match err {
+            ProbabilityError::BelowMin { min, value } => {
+                assert_eq!(min.to_bits(), AtLeastHalf::MIN.to_bits());
+                assert_eq!(value.to_bits(), 0.0_f32.to_bits());
+            }
+            other => panic!("expected BelowMin, got {other:?}"),
+        }
     }
 
     // ===== Unit tests: wire-format pins =====
