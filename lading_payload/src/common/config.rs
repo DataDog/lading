@@ -89,7 +89,7 @@ where
 /// equal to `+0.0` under IEEE-754 numeric ordering.
 const NEG_ZERO_AS_BITS: u32 = 0x8000_0000;
 
-/// Error returned when a value cannot be turned into a [`Probability`].
+/// Error returned when a value cannot be turned into a [`BoundedProbability`].
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ProbabilityError {
     /// Value is [`f32::NAN`], [`f32::INFINITY`], or [`f32::NEG_INFINITY`].
@@ -147,22 +147,38 @@ pub enum ProbabilityError {
 ///   before storage. This canonical-bit-pattern guarantee is what makes hashing
 ///   on `value.to_bits()` consistent with numeric equality.
 ///
+/// Two type aliases are provided for the bounds that actually occur in lading
+/// payload configuration today; callers should prefer them over spelling the
+/// bit pattern at the use site. Define additional aliases as new bounds appear.
+///
 /// # Example
 ///
 /// ```
-/// use lading_payload::common::config::Probability;
+/// use lading_payload::common::config::{BoundedProbability, Probability};
 ///
-/// type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
-/// let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
+/// // For the common `[0.0, 1.0]` case, use the `Probability` alias.
+/// let p = Probability::try_new(0.75).expect("0.75 is in [0.0, 1.0]");
 /// assert_eq!(p.get(), 0.75);
+///
+/// // For other lower bounds, parameterize `BoundedProbability` directly.
+/// type AtLeastHalf = BoundedProbability<{ f32::to_bits(0.5) }>;
+/// let q = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
+/// assert_eq!(q.get(), 0.75);
 /// ```
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(into = "f32", try_from = "f32")]
-pub struct Probability<const MIN_AS_BITS: u32> {
+pub struct BoundedProbability<const MIN_AS_BITS: u32> {
     value: f32,
 }
 
-impl<const MIN_AS_BITS: u32> TryFrom<f32> for Probability<MIN_AS_BITS> {
+/// A probability in the closed unit interval `[0.0, 1.0]`. The most common bound.
+pub type Probability = BoundedProbability<{ f32::to_bits(0.0) }>;
+
+/// A probability or ratio in `[0.1, 1.0]`. Used for fields such as
+/// `unique_tag_ratio` that must avoid extreme low values.
+pub type AtLeastOneTenth = BoundedProbability<{ f32::to_bits(0.1) }>;
+
+impl<const MIN_AS_BITS: u32> TryFrom<f32> for BoundedProbability<MIN_AS_BITS> {
     type Error = ProbabilityError;
 
     fn try_from(value: f32) -> Result<Self, Self::Error> {
@@ -170,13 +186,13 @@ impl<const MIN_AS_BITS: u32> TryFrom<f32> for Probability<MIN_AS_BITS> {
     }
 }
 
-impl<const MIN_AS_BITS: u32> From<Probability<MIN_AS_BITS>> for f32 {
-    fn from(p: Probability<MIN_AS_BITS>) -> Self {
+impl<const MIN_AS_BITS: u32> From<BoundedProbability<MIN_AS_BITS>> for f32 {
+    fn from(p: BoundedProbability<MIN_AS_BITS>) -> Self {
         p.value
     }
 }
 
-impl<const MIN_AS_BITS: u32> fmt::Display for Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> fmt::Display for BoundedProbability<MIN_AS_BITS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.value, f)
     }
@@ -188,33 +204,33 @@ impl<const MIN_AS_BITS: u32> fmt::Display for Probability<MIN_AS_BITS> {
 // bit pattern because `f32: !Hash`; the `Eq`/`Hash` contract is preserved
 // because numerically equal valid values share a bit pattern.
 
-impl<const MIN_AS_BITS: u32> PartialEq for Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> PartialEq for BoundedProbability<MIN_AS_BITS> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl<const MIN_AS_BITS: u32> Eq for Probability<MIN_AS_BITS> {}
+impl<const MIN_AS_BITS: u32> Eq for BoundedProbability<MIN_AS_BITS> {}
 
-impl<const MIN_AS_BITS: u32> Ord for Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> Ord for BoundedProbability<MIN_AS_BITS> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.value.total_cmp(&other.value)
     }
 }
 
-impl<const MIN_AS_BITS: u32> PartialOrd for Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> PartialOrd for BoundedProbability<MIN_AS_BITS> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<const MIN_AS_BITS: u32> hash::Hash for Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> hash::Hash for BoundedProbability<MIN_AS_BITS> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.value.to_bits().hash(state);
     }
 }
 
-impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
+impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
     /// The lower bound decoded from `MIN_AS_BITS`.
     ///
     /// The `assert!`s here run at const-evaluation time for every
@@ -240,7 +256,7 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     /// `[MIN, +1.0]` and is not [`f32::NAN`], [`f32::INFINITY`], or
     /// [`f32::NEG_INFINITY`]. A `-0.0` input is normalized to `+0.0`.
     ///
-    /// This is a `const fn`, so callers can build a [`Probability`] in a
+    /// This is a `const fn`, so callers can build a [`BoundedProbability`] in a
     /// `const` context by matching on the returned [`Result`]; the validation
     /// then runs at compile time.
     ///
@@ -279,12 +295,12 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
 
 #[cfg(test)]
 mod probability_tests {
-    use super::{NEG_ZERO_AS_BITS, Probability, ProbabilityError};
+    use super::{BoundedProbability, NEG_ZERO_AS_BITS, ProbabilityError};
     use proptest::prelude::*;
 
-    type ZeroOrMore = Probability<{ f32::to_bits(0.0) }>;
-    type AtLeastHalf = Probability<{ f32::to_bits(0.5) }>;
-    type AtLeastOne = Probability<{ f32::to_bits(1.0) }>;
+    type ZeroOrMore = BoundedProbability<{ f32::to_bits(0.0) }>;
+    type AtLeastHalf = BoundedProbability<{ f32::to_bits(0.5) }>;
+    type AtLeastOne = BoundedProbability<{ f32::to_bits(1.0) }>;
 
     // ===== Unit tests: constants =====
 
@@ -423,15 +439,19 @@ mod probability_tests {
     // ===== Property-test helpers (generic over MIN_AS_BITS) =====
 
     fn check_accepts_in_range<const MIN_AS_BITS: u32>(v: f32) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("v should be valid by construction");
+        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v)
+            .expect("v should be valid by construction");
         assert_eq!(p.get().to_bits(), v.to_bits());
     }
 
     fn check_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
-        let err = Probability::<MIN_AS_BITS>::try_new(v).expect_err("v should be below MIN");
+        let err = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect_err("v should be below MIN");
         match err {
             ProbabilityError::BelowMin { min, value } => {
-                assert_eq!(min.to_bits(), Probability::<MIN_AS_BITS>::MIN.to_bits());
+                assert_eq!(
+                    min.to_bits(),
+                    BoundedProbability::<MIN_AS_BITS>::MIN.to_bits()
+                );
                 assert_eq!(value.to_bits(), v.to_bits());
             }
             other => panic!("expected BelowMin, got {other:?}"),
@@ -439,32 +459,35 @@ mod probability_tests {
     }
 
     fn check_display_matches<const MIN_AS_BITS: u32>(v: f32) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         assert_eq!(format!("{p}"), format!("{v}"));
     }
 
     fn check_display_precision<const MIN_AS_BITS: u32>(v: f32, n: usize) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         assert_eq!(format!("{p:.n$}"), format!("{v:.n$}"));
     }
 
     fn check_serde_json_round_trip<const MIN_AS_BITS: u32>(v: f32) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         let json = serde_json::to_string(&p).expect("serialize");
-        let back: Probability<MIN_AS_BITS> = serde_json::from_str(&json).expect("deserialize");
+        let back: BoundedProbability<MIN_AS_BITS> =
+            serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.get().to_bits(), v.to_bits());
     }
 
     fn check_serde_yaml_round_trip<const MIN_AS_BITS: u32>(v: f32) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
+        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         let yaml = serde_yaml::to_string(&p).expect("serialize");
-        let back: Probability<MIN_AS_BITS> = serde_yaml::from_str(&yaml).expect("deserialize");
+        let back: BoundedProbability<MIN_AS_BITS> =
+            serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(back.get().to_bits(), v.to_bits());
     }
 
     fn check_serde_json_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
         let json = serde_json::to_string(&v).expect("serialize raw f32");
-        let err = serde_json::from_str::<Probability<MIN_AS_BITS>>(&json).expect_err("v < MIN");
+        let err =
+            serde_json::from_str::<BoundedProbability<MIN_AS_BITS>>(&json).expect_err("v < MIN");
         assert!(
             err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
@@ -473,7 +496,8 @@ mod probability_tests {
 
     fn check_serde_yaml_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
         let yaml = serde_yaml::to_string(&v).expect("serialize raw f32");
-        let err = serde_yaml::from_str::<Probability<MIN_AS_BITS>>(&yaml).expect_err("v < MIN");
+        let err =
+            serde_yaml::from_str::<BoundedProbability<MIN_AS_BITS>>(&yaml).expect_err("v < MIN");
         assert!(
             err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
