@@ -130,9 +130,24 @@ pub enum ProbabilityError {
 /// let p = AtLeastHalf::try_new(0.75).expect("0.75 is in [0.5, 1.0]");
 /// assert!((p.get() - 0.75).abs() < f32::EPSILON);
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(into = "f32", try_from = "f32")]
 pub struct Probability<const MIN_BITS: u32> {
     value: f32,
+}
+
+impl<const MIN_BITS: u32> TryFrom<f32> for Probability<MIN_BITS> {
+    type Error = ProbabilityError;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl<const MIN_BITS: u32> From<Probability<MIN_BITS>> for f32 {
+    fn from(p: Probability<MIN_BITS>) -> Self {
+        p.value
+    }
 }
 
 impl<const MIN_BITS: u32> Probability<MIN_BITS> {
@@ -285,5 +300,47 @@ mod probability_tests {
         // -0.1 is finite and not -0.0, so it fails the lower-bound check.
         let err = ZeroOrMore::try_new(-0.1).expect_err("-0.1 < 0.0");
         assert!(matches!(err, ProbabilityError::BelowMin { .. }));
+    }
+
+    #[test]
+    fn serde_round_trip_json() {
+        let p = AtLeastHalf::try_new(0.75).expect("0.75 in [0.5, 1.0]");
+        let json = serde_json::to_string(&p).expect("serialize");
+        assert_eq!(json, "0.75");
+        let back: AtLeastHalf = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.get().to_bits(), 0.75_f32.to_bits());
+    }
+
+    #[test]
+    fn serde_deserialize_accepts_valid() {
+        let p: AtLeastHalf = serde_json::from_str("0.5").expect("0.5 is the lower bound");
+        assert_eq!(p.get().to_bits(), 0.5_f32.to_bits());
+    }
+
+    #[test]
+    fn serde_deserialize_rejects_below_min() {
+        let err = serde_json::from_str::<AtLeastHalf>("0.1").expect_err("0.1 < 0.5");
+        // The serde error wraps our ProbabilityError's Display output.
+        assert!(
+            err.to_string().contains("below lower bound"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn serde_deserialize_rejects_above_one() {
+        let err = serde_json::from_str::<ZeroOrMore>("1.5").expect_err("1.5 > 1.0");
+        assert!(
+            err.to_string().contains("exceeds 1.0"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn serde_yaml_round_trip() {
+        let p = ZeroOrMore::try_new(0.25).expect("0.25 in [0.0, 1.0]");
+        let yaml = serde_yaml::to_string(&p).expect("serialize");
+        let back: ZeroOrMore = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(back.get().to_bits(), 0.25_f32.to_bits());
     }
 }
