@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extension fields via the new `container_ids`, `external_data`, and
   `cardinality` config options. Each field randomly selects from its pool per
   metric, or omits the field entirely if the pool is empty.
+- `dogstatsd` generator now supports DogStatsD protocol v1.3 `|T` timestamps
+  for count and gauge metrics via `timestamp.range` and `timestamp.probability`.
 
 ## [0.32.0]
 ## Changed

@@ -213,6 +213,52 @@ pub struct Config {
     /// When non-empty, each generated metric randomly selects from this pool (or omits the field).
     /// When empty, the field is never emitted.
     pub cardinality: Vec<String>,
+    /// Configuration for the optional `|T` `DogStatsD` protocol v1.3 timestamp field.
+    pub timestamp: Box<TimestampConfig>,
+}
+
+/// Configuration for the optional `|T` `DogStatsD` protocol v1.3 timestamp field.
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct TimestampConfig {
+    /// Range of possible Unix timestamps for the `|T` `DogStatsD` protocol v1.3 field.
+    ///
+    /// The `DogStatsD` protocol only supports this field for count and gauge metrics.
+    pub range: ConfRange<u32>,
+    /// Probability between 0 and 1 that a generated count or gauge metric includes `|T`.
+    pub probability: f32,
+}
+
+impl Default for TimestampConfig {
+    fn default() -> Self {
+        Self {
+            range: ConfRange::Constant(1),
+            probability: 0.0,
+        }
+    }
+}
+
+impl TimestampConfig {
+    fn valid(&self) -> Result<(), String> {
+        let (range_valid, reason) = self.range.valid();
+        if !range_valid {
+            return Result::Err(format!("Timestamp range is invalid: {reason}"));
+        }
+        if !self.probability.is_finite() || self.probability < 0.0 || self.probability > 1.0 {
+            return Result::Err(format!(
+                "Timestamp probability {} must be finite and in range [0.0, 1.0]",
+                self.probability
+            ));
+        }
+        if self.probability > 0.0 && self.range.start() == 0 {
+            return Result::Err(
+                "Timestamp range start value cannot be 0 when timestamps are enabled".to_string(),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for Config {
@@ -246,6 +292,7 @@ impl Default for Config {
             container_ids: Vec::default(),
             external_data: Vec::default(),
             cardinality: Vec::default(),
+            timestamp: Box::default(),
         }
     }
 }
@@ -340,6 +387,8 @@ impl Config {
             ));
         }
 
+        self.timestamp.valid()?;
+
         if self.kind_weights.metric == 0
             && self.kind_weights.event == 0
             && self.kind_weights.service_check == 0
@@ -400,6 +449,8 @@ impl MemberGenerator {
         container_ids: Vec<String>,
         external_data: Vec<String>,
         cardinality: Vec<String>,
+        timestamp_range: ConfRange<u32>,
+        timestamp_probability: f32,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -516,6 +567,8 @@ impl MemberGenerator {
             container_ids,
             external_data,
             cardinality,
+            timestamp_range,
+            timestamp_probability,
             &mut tags_generator,
             &pools,
             value_conf,
@@ -646,6 +699,8 @@ impl DogStatsD {
             config.container_ids.clone(),
             config.external_data.clone(),
             config.cardinality.clone(),
+            config.timestamp.range,
+            config.timestamp.probability,
             rng,
         )?;
 
@@ -778,7 +833,7 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod test {
-    use super::{ConfRange, Config};
+    use super::{ConfRange, Config, KindWeights, MetricWeights, TimestampConfig};
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
@@ -881,6 +936,107 @@ mod test {
     }
 
     #[test]
+    fn timestamp_emitted_when_probability_is_one() {
+        let config = Config {
+            kind_weights: KindWeights::new(100, 0, 0),
+            metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
+            timestamp: Box::new(TimestampConfig {
+                range: ConfRange::Constant(1_656_581_400),
+                probability: 1.0,
+            }),
+            ..Default::default()
+        };
+        assert_field_emitted_at_least_once(&config, b"|T1656581400");
+    }
+
+    #[test]
+    fn timestamp_absent_when_probability_is_zero() {
+        let config = Config {
+            kind_weights: KindWeights::new(100, 0, 0),
+            metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
+            timestamp: Box::new(TimestampConfig {
+                range: ConfRange::Constant(1_656_581_400),
+                probability: 0.0,
+            }),
+            ..Default::default()
+        };
+        let bytes = generate_bytes(&config, 0);
+        assert!(
+            !bytes.windows(2).any(|w| w == b"|T"),
+            "expected no |T field when timestamp_probability is 0"
+        );
+    }
+
+    #[test]
+    fn timestamp_values_come_from_range() {
+        let config = Config {
+            kind_weights: KindWeights::new(100, 0, 0),
+            metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
+            timestamp: Box::new(TimestampConfig {
+                range: ConfRange::Inclusive { min: 10, max: 20 },
+                probability: 1.0,
+            }),
+            ..Default::default()
+        };
+        let bytes = generate_bytes(&config, 0);
+        let text = std::str::from_utf8(&bytes).expect("output should be valid utf-8");
+        for segment in text.split("|T").skip(1) {
+            let value = segment
+                .split(['|', '\n'])
+                .next()
+                .unwrap_or("")
+                .parse::<u32>()
+                .expect("timestamp should parse as u64");
+            assert!(
+                (10..=20).contains(&value),
+                "|T value {value} was not inside the configured timestamp range"
+            );
+        }
+    }
+
+    #[test]
+    fn timestamp_only_emitted_for_count_and_gauge() {
+        let config = Config {
+            kind_weights: KindWeights::new(100, 0, 0),
+            metric_weights: MetricWeights::new(0, 0, 100, 0, 0, 0),
+            timestamp: Box::new(TimestampConfig {
+                range: ConfRange::Constant(1_656_581_400),
+                probability: 1.0,
+            }),
+            ..Default::default()
+        };
+        let bytes = generate_bytes(&config, 0);
+        assert!(
+            !bytes.windows(2).any(|w| w == b"|T"),
+            "expected no |T field for metric types outside count and gauge"
+        );
+    }
+
+    #[test]
+    fn timestamp_probability_must_be_valid() {
+        let config = Config {
+            timestamp: Box::new(TimestampConfig {
+                probability: 2.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(config.valid().is_err());
+    }
+
+    #[test]
+    fn timestamp_range_must_be_positive_when_enabled() {
+        let config = Config {
+            timestamp: Box::new(TimestampConfig {
+                range: ConfRange::Constant(0),
+                probability: 1.0,
+            }),
+            ..Default::default()
+        };
+        assert!(config.valid().is_err());
+    }
+
+    #[test]
     fn zero_contexts_should_be_rejected() {
         let config = Config {
             contexts: ConfRange::Constant(0),
@@ -896,6 +1052,24 @@ mod test {
             err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
             "Expected error about 0 contexts, got: {err}"
         );
+    }
+
+    // For all seeds, generation with the same timestamp configuration and same seed
+    // produces byte-identical output.
+    proptest! {
+        #[test]
+        fn timestamp_generation_is_deterministic(seed: u64) {
+            let config = Config {
+                kind_weights: KindWeights::new(100, 0, 0),
+                metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
+                timestamp: Box::new(TimestampConfig {
+                    range: ConfRange::Inclusive { min: 10, max: 20 },
+                    probability: 0.5,
+                }),
+                ..Default::default()
+            };
+            prop_assert_eq!(generate_bytes(&config, seed), generate_bytes(&config, seed));
+        }
     }
 
     // We want to be sure that the serialized size of the payload does not

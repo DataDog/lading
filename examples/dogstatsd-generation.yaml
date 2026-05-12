@@ -30,6 +30,21 @@ generator:
             distribution: 0
             set: 0
             histogram: 0
+          container_ids:
+            - "abc123def456"
+            - "def456abc123"
+          external_data:
+            - "pu-abc123,cn-mycontainer,it-false"
+            - "pu-def456,cn-othercontainer,it-true"
+          cardinality:
+            - "low"
+            - "orchestrator"
+          timestamp:
+            range:
+              inclusive:
+                min: 1656581400
+                max: 1656585000
+            probability: 0.25
       bytes_per_second: "80 MiB"
       maximum_prebuild_cache_size_bytes: "1 GiB"
 
