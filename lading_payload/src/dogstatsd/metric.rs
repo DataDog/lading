@@ -3,7 +3,7 @@ use std::fmt;
 
 use rand::{
     Rng,
-    distr::{OpenClosed01, weighted::WeightedIndex},
+    distr::{OpenClosed01, StandardUniform, weighted::WeightedIndex},
     prelude::Distribution,
     seq::IteratorRandom,
 };
@@ -25,6 +25,8 @@ pub(crate) struct MetricGenerator {
     pub(crate) container_ids: Vec<String>,
     pub(crate) external_data: Vec<String>,
     pub(crate) cardinality: Vec<String>,
+    pub(crate) timestamp_range: ConfRange<u32>,
+    pub(crate) timestamp_probability: f32,
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
@@ -51,6 +53,8 @@ impl MetricGenerator {
         container_ids: Vec<String>,
         external_data: Vec<String>,
         cardinality: Vec<String>,
+        timestamp_range: ConfRange<u32>,
+        timestamp_probability: f32,
         tags_generator: &mut common::tags::Generator,
         pools: &StringPools,
         value_conf: ValueConf,
@@ -88,6 +92,8 @@ impl MetricGenerator {
             container_ids,
             external_data,
             cardinality,
+            timestamp_range,
+            timestamp_probability,
             templates,
             multivalue_count,
             multivalue_pack_probability,
@@ -97,6 +103,22 @@ impl MetricGenerator {
             pools: pools.clone(),
             tags,
         })
+    }
+
+    fn timestamp<R>(&self, rng: &mut R) -> Option<u32>
+    where
+        R: Rng + ?Sized,
+    {
+        if self.timestamp_probability == 0.0 {
+            return None;
+        }
+
+        let prob: f32 = StandardUniform.sample(rng);
+        if prob < self.timestamp_probability {
+            Some(self.timestamp_range.sample(rng))
+        } else {
+            None
+        }
     }
 }
 
@@ -159,6 +181,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     container_id,
                     external_data,
                     cardinality,
+                    timestamp: self.timestamp(&mut rng),
                 }))
             }
             Template::Gauge(gauge) => {
@@ -175,6 +198,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     container_id,
                     external_data,
                     cardinality,
+                    timestamp: self.timestamp(&mut rng),
                 }))
             }
             Template::Distribution(dist) => {
@@ -310,6 +334,8 @@ pub struct Count<'a> {
     pub external_data: Option<&'a str>,
     /// Cardinality override for the `|card:` origin detection extension field.
     pub cardinality: Option<&'a str>,
+    /// Unix timestamp for the `|T` `DogStatsD` protocol v1.3 extension field.
+    pub timestamp: Option<u32>,
 }
 
 impl fmt::Display for Count<'_> {
@@ -355,6 +381,9 @@ impl fmt::Display for Count<'_> {
         if let Some(cardinality) = self.cardinality {
             write!(f, "|card:{cardinality}")?;
         }
+        if let Some(timestamp) = self.timestamp {
+            write!(f, "|T{timestamp}")?;
+        }
 
         Ok(())
     }
@@ -377,6 +406,8 @@ pub struct Gauge<'a> {
     pub external_data: Option<&'a str>,
     /// Cardinality override for the `|card:` origin detection extension field.
     pub cardinality: Option<&'a str>,
+    /// Unix timestamp for the `|T` `DogStatsD` protocol v1.3 extension field.
+    pub timestamp: Option<u32>,
 }
 
 impl fmt::Display for Gauge<'_> {
@@ -417,6 +448,9 @@ impl fmt::Display for Gauge<'_> {
         }
         if let Some(cardinality) = self.cardinality {
             write!(f, "|card:{cardinality}")?;
+        }
+        if let Some(timestamp) = self.timestamp {
+            write!(f, "|T{timestamp}")?;
         }
 
         Ok(())
