@@ -291,6 +291,19 @@ impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
     pub const fn get(&self) -> f32 {
         self.value
     }
+
+    /// Sample a Bernoulli trial with success probability `self.get()`.
+    ///
+    /// Returns `true` with probability `self.get()` and `false` otherwise.
+    /// The f32 ↔ f64 conversion is exact for every f32 in `[+0.0, +1.0]`, so
+    /// the success probability is preserved bit-for-bit.
+    #[must_use]
+    pub fn sample_bernoulli<R>(&self, rng: &mut R) -> bool
+    where
+        R: rand::Rng + ?Sized,
+    {
+        rng.random_bool(f64::from(self.value))
+    }
 }
 
 /// Generate a uniformly-distributed-over-bit-patterns value in `[MIN, +1.0]`
@@ -798,6 +811,35 @@ mod probability_tests {
             bytes in prop::collection::vec(any::<u8>(), 4..32),
         ) {
             check_arbitrary_produces_valid::<{ f32::to_bits(1.0) }>(&bytes);
+        }
+    }
+
+    // ===== Property tests: sample_bernoulli =====
+    //
+    // The degenerate `p = 0.0` and `p = 1.0` cases together pin both the
+    // wiring (no inversion of P(true) vs P(false)) and the absence of a
+    // panic from `random_bool`. A statistical test on intermediate values
+    // would only re-test `rand::Rng::random_bool`, so it is omitted.
+
+    proptest! {
+        #[test]
+        fn bernoulli_at_zero_never_succeeds(seed: u64) {
+            use rand::{SeedableRng, rngs::SmallRng};
+            let p = ZeroOrMore::try_new(0.0).expect("0.0 in [0, 1]");
+            let mut rng = SmallRng::seed_from_u64(seed);
+            for _ in 0..1024 {
+                prop_assert!(!p.sample_bernoulli(&mut rng));
+            }
+        }
+
+        #[test]
+        fn bernoulli_at_one_always_succeeds(seed: u64) {
+            use rand::{SeedableRng, rngs::SmallRng};
+            let p = AtLeastOne::try_new(1.0).expect("1.0 in [1, 1]");
+            let mut rng = SmallRng::seed_from_u64(seed);
+            for _ in 0..1024 {
+                prop_assert!(p.sample_bernoulli(&mut rng));
+            }
         }
     }
 }
