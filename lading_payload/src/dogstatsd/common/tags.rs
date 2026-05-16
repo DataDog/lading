@@ -1,6 +1,9 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::PoolKind, tags},
+    common::{
+        strings::PoolKind,
+        tags::{self, MIN_TAG_LENGTH},
+    },
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -21,6 +24,20 @@ pub(crate) enum Error {
     /// Invalid construction
     #[error("Invalid construction: {0}")]
     InvalidConstruction(#[from] crate::common::tags::Error),
+
+    /// `tag_length.end()` is at or below `MIN_TAG_LENGTH`. On-wire
+    /// dogstatsd tags carry a `:` separator between key and value
+    /// that this wrapper subtracts from `tag_length.end()` before
+    /// forwarding to the inner generator. The inner generator
+    /// requires `start >= MIN_TAG_LENGTH`, so after the subtract
+    /// the resulting `max` must still be at least `MIN_TAG_LENGTH`,
+    /// i.e. the user-supplied `end()` must be strictly greater
+    /// than `MIN_TAG_LENGTH`.
+    #[error(
+        "tag_length.end() ({end}) must be greater than MIN_TAG_LENGTH ({min}) so the range \
+         remains valid after subtracting the colon separator byte"
+    )]
+    TagLengthEndTooSmall { end: u16, min: u16 },
 }
 
 impl Generator {
@@ -28,7 +45,16 @@ impl Generator {
     ///
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
-    /// - If `tag_length` is invalid or has minimum value less than 3
+    /// - If `tag_length.start()` is less than `MIN_TAG_LENGTH` (forwarded
+    ///   from the inner generator's `Error::InvalidConstruction`)
+    /// - If `tag_length.end()` is not strictly greater than
+    ///   `MIN_TAG_LENGTH`, returned as `Error::TagLengthEndTooSmall`.
+    ///   This catches the otherwise-confusing case where a
+    ///   `ConfRange::Constant(MIN_TAG_LENGTH)` or a tight
+    ///   `Inclusive { min: MIN_TAG_LENGTH, max: MIN_TAG_LENGTH }`
+    ///   would, after the colon-separator subtract on `max`, yield
+    ///   an inner range with `min > max` and surface as a
+    ///   misleading inner construction error.
     /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
@@ -39,7 +65,17 @@ impl Generator {
         tag_pool: Rc<PoolKind>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        // Adjust tag_length range to account for the colon separator
+        if tag_length.end() <= MIN_TAG_LENGTH {
+            return Err(Error::TagLengthEndTooSmall {
+                end: tag_length.end(),
+                min: MIN_TAG_LENGTH,
+            });
+        }
+
+        // Adjust tag_length range to account for the colon separator.
+        // The upfront `end > MIN_TAG_LENGTH` check above guarantees the
+        // adjusted `max` stays at or above `MIN_TAG_LENGTH`, which is
+        // also the inner generator's minimum for `start`.
         let adjusted_tag_length = ConfRange::Inclusive {
             min: tag_length.start(),
             max: tag_length.end().saturating_sub(1),
@@ -87,7 +123,8 @@ mod test {
 
     use crate::Generator;
     use crate::common::strings::{Handle, PoolKind, RandomStringPool, StringListPool};
-    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
+    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, Tag, WARN_UNIQUE_TAG_RATIO};
+    use crate::dogstatsd::common::tags::Error;
     use crate::dogstatsd::{ConfRange, tags};
 
     /// Given a list of tagsets, count unique contexts.
@@ -420,5 +457,80 @@ mod test {
             let num_contexts = count_num_contexts(&tagsets);
             assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
         }
+    }
+
+    fn small_string_pool() -> Rc<PoolKind> {
+        let mut rng = SmallRng::seed_from_u64(0);
+        Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(
+            &mut rng, 1024,
+        )))
+    }
+
+    /// `tag_length.end() == MIN_TAG_LENGTH` would, prior to the
+    /// upfront validation, produce an adjusted range with `min >
+    /// max` and surface as a misleading inner construction error.
+    /// The wrapper now rejects this with `TagLengthEndTooSmall`.
+    #[test]
+    fn tag_length_constant_at_min_rejected() {
+        let pool = small_string_pool();
+        let result = tags::Generator::new(
+            0,
+            ConfRange::Inclusive { min: 0, max: 2 },
+            ConfRange::Constant(MIN_TAG_LENGTH),
+            10,
+            Rc::clone(&pool),
+            pool,
+            1.0,
+        );
+        match result {
+            Err(Error::TagLengthEndTooSmall { end, min }) => {
+                assert_eq!(end, MIN_TAG_LENGTH);
+                assert_eq!(min, MIN_TAG_LENGTH);
+            }
+            other => panic!("expected TagLengthEndTooSmall, got {other:?}"),
+        }
+    }
+
+    /// `Inclusive { min: MIN_TAG_LENGTH, max: MIN_TAG_LENGTH }` is
+    /// the same problematic shape as the constant case and must
+    /// also be rejected by the upfront check.
+    #[test]
+    fn tag_length_inclusive_min_equals_max_at_min_rejected() {
+        let pool = small_string_pool();
+        let result = tags::Generator::new(
+            0,
+            ConfRange::Inclusive { min: 0, max: 2 },
+            ConfRange::Inclusive {
+                min: MIN_TAG_LENGTH,
+                max: MIN_TAG_LENGTH,
+            },
+            10,
+            Rc::clone(&pool),
+            pool,
+            1.0,
+        );
+        assert!(matches!(result, Err(Error::TagLengthEndTooSmall { .. })));
+    }
+
+    /// `tag_length.end() == MIN_TAG_LENGTH + 1` is the smallest
+    /// accepted end value. The adjusted inner range becomes
+    /// `Inclusive { min: MIN_TAG_LENGTH, max: MIN_TAG_LENGTH }`,
+    /// which the inner generator accepts.
+    #[test]
+    fn tag_length_at_min_plus_one_accepted() {
+        let pool = small_string_pool();
+        let result = tags::Generator::new(
+            0,
+            ConfRange::Inclusive { min: 0, max: 2 },
+            ConfRange::Inclusive {
+                min: MIN_TAG_LENGTH,
+                max: MIN_TAG_LENGTH + 1,
+            },
+            10,
+            Rc::clone(&pool),
+            pool,
+            1.0,
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 }

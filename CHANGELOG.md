@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metric, or omits the field entirely if the pool is empty.
 - `dogstatsd` generator now supports DogStatsD protocol v1.3 `|T` timestamps
   for count and gauge metrics via `timestamp.range` and `timestamp.probability`.
+- Fixed: `dogstatsd::common::tags::Generator::new` would silently produce an
+  invalid `Inclusive { min, max: min - 1 }` range when the caller's
+  `tag_length.end()` equalled `MIN_TAG_LENGTH` (e.g. `Constant(3)` or
+  `Inclusive { min: 3, max: 3 }`). The inner generator then rejected the range
+  and the error surfaced as a misleading `Error::StringGenerate` upstream. The
+  wrapper now validates upfront and returns `Error::TagLengthEndTooSmall` with
+  a message identifying the violated constraint.
 
 ## Removed
 - Removed no longer used `smaps.private_hugetlb.by_pathname` procfs observer
