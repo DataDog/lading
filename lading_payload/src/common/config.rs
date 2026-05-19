@@ -111,10 +111,13 @@ pub enum ProbabilityError {
 /// An `f32`-valued probability with a compile-time lower bound.
 ///
 /// The const generic `MIN_AS_BITS` is the IEEE-754 bit pattern of the lower
-/// bound, obtained at the call site via [`f32::to_bits`]. The decoded bound
-/// must be a finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise
-/// the type fails to instantiate at compile time via the assertions on
-/// [`Self::MIN`].
+/// bound, obtained at the call site via [`f32::to_bits`]. This generic
+/// parameter exists because some payload generators have probability-valued
+/// fields with a minimum probability strictly greater than zero (e.g.,
+/// `unique_tag_probability` must be at least 0.1 in
+/// [`crate::common::tags::Generator`]). The decoded bound must be a finite
+/// value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise the type fails to
+/// instantiate at compile time via the assertions on [`Self::MIN`].
 ///
 /// Stored values must be finite and lie in `[MIN, +1.0]`. Inputs of `-0.0` are
 /// normalized to `+0.0`; other invalid inputs are rejected via
