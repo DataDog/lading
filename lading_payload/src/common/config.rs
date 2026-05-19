@@ -92,7 +92,7 @@ const NEG_ZERO_AS_BITS: u32 = 0x8000_0000;
 /// Error returned when a value cannot be turned into a [`Probability`].
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ProbabilityError {
-    /// Value is NaN or `±∞`.
+    /// Value is [`f32::NAN`], [`f32::INFINITY`], or [`f32::NEG_INFINITY`].
     #[error("probability must be finite, got {0}")]
     NotFinite(f32),
     /// Value is below the type's compile-time lower bound.
@@ -110,10 +110,11 @@ pub enum ProbabilityError {
 
 /// An `f32`-valued probability with a compile-time lower bound.
 ///
-/// The const generic `MIN_AS_BITS` is the IEEE-754 bit pattern of the lower bound,
-/// obtained at the call site via [`f32::to_bits`]. The decoded bound must be a
-/// finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise the type
-/// fails to instantiate at compile time via the assertions on [`Self::MIN`].
+/// The const generic `MIN_AS_BITS` is the IEEE-754 bit pattern of the lower
+/// bound, obtained at the call site via [`f32::to_bits`]. The decoded bound
+/// must be a finite value in `[+0.0, +1.0]` and must not be `-0.0`; otherwise
+/// the type fails to instantiate at compile time via the assertions on
+/// [`Self::MIN`].
 ///
 /// Stored values must be finite and lie in `[MIN, +1.0]`. Inputs of `-0.0` are
 /// normalized to `+0.0`; other invalid inputs are rejected via
@@ -122,25 +123,26 @@ pub enum ProbabilityError {
 /// # Design
 ///
 /// Rust does not yet allow floating-point types as const generic parameters on
-/// stable; tracking issue `rust-lang/rust#95174` covers `#![feature(adt_const_params)]`
-/// and its float-specific complications. To carry a compile-time lower bound
-/// today the type must be parameterized on an integer, so callers spell the
-/// bound as a `u32` bit pattern (`{ f32::to_bits(0.5) }`) and the type decodes
-/// it back to `f32` inside [`Self::MIN`].
+/// stable; tracking issue `rust-lang/rust#95174` covers
+/// `#![feature(adt_const_params)]` and its float-specific complications. To
+/// carry a compile-time lower bound today the type must be parameterized on an
+/// integer, so callers spell the bound as a `u32` bit pattern (`{
+/// f32::to_bits(0.5) }`) and the type decodes it back to `f32` inside
+/// [`Self::MIN`].
 ///
-/// Two IEEE-754 properties of the `f32` ↔ `u32` round trip exposed by
+/// Two IEEE-754 properties of the `f32` <-> `u32` round trip exposed by
 /// [`f32::to_bits`] / [`f32::from_bits`] inform the rest of the design:
 ///
-/// * For any two values `a, b` in `[+0.0, +∞)` (i.e. non-negative, non-NaN),
-///   `a <= b` iff `a.to_bits() <= b.to_bits()`. The sign bit is zero and the
-///   remaining 31 bits are laid out exponent-then-mantissa, so the unsigned
-///   integer ordering matches the numeric ordering.
+/// * For any two values `a, b` in `[+0.0, +inf)` (i.e. non-negative,
+///   non-[`f32::NAN`]), `a <= b` iff `a.to_bits() <= b.to_bits()`. The sign bit
+///   is zero and the remaining 31 bits are laid out exponent-then-mantissa, so
+///   the unsigned integer ordering matches the numeric ordering.
 /// * `+0.0` and `-0.0` are numerically equal under `==`/`<`/`<=` but have
 ///   distinct bit patterns (`0x0000_0000` vs `0x8000_0000`). Storing `-0.0`
-///   would break the order-preservation property above (`-0.0.to_bits()` is
-///   the largest `u32`), so [`Self::try_new`] normalizes `-0.0` inputs to
-///   `+0.0` before storage. This canonical-bit-pattern guarantee is what
-///   makes hashing on `value.to_bits()` consistent with numeric equality.
+///   would break the order-preservation property above (`-0.0.to_bits()` is the
+///   largest `u32`), so [`Self::try_new`] normalizes `-0.0` inputs to `+0.0`
+///   before storage. This canonical-bit-pattern guarantee is what makes hashing
+///   on `value.to_bits()` consistent with numeric equality.
 ///
 /// # Example
 ///
@@ -182,7 +184,8 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     ///
     /// The `assert!`s here run at const-evaluation time for every
     /// monomorphization of [`Probability`], rejecting bit patterns that decode
-    /// to NaN, `±∞`, `-0.0`, or values outside `[+0.0, +1.0]`.
+    /// to [`f32::NAN`], [`f32::INFINITY`], [`f32::NEG_INFINITY`], `-0.0`, or
+    /// values outside `[+0.0, +1.0]`.
     pub const MIN: f32 = {
         assert!(
             MIN_AS_BITS != NEG_ZERO_AS_BITS,
@@ -199,8 +202,8 @@ impl<const MIN_AS_BITS: u32> Probability<MIN_AS_BITS> {
     pub const MAX: f32 = 1.0;
 
     /// Construct a [`Probability`] from `value`, validating that it lies in
-    /// `[MIN, +1.0]` and is not NaN or `±∞`. A `-0.0` input is normalized to
-    /// `+0.0`.
+    /// `[MIN, +1.0]` and is not [`f32::NAN`], [`f32::INFINITY`], or
+    /// [`f32::NEG_INFINITY`]. A `-0.0` input is normalized to `+0.0`.
     ///
     /// This is a `const fn`, so callers can build a [`Probability`] in a
     /// `const` context by matching on the returned [`Result`]; the validation
@@ -277,8 +280,7 @@ mod probability_tests {
             Ok(p) => p,
             Err(_) => panic!("0.75 is in [0.5, 1.0]"),
         };
-        const ABOVE_ONE: Result<AtLeastHalf, ProbabilityError> =
-            AtLeastHalf::try_new(2.0);
+        const ABOVE_ONE: Result<AtLeastHalf, ProbabilityError> = AtLeastHalf::try_new(2.0);
         assert_eq!(VALID.get().to_bits(), 0.75_f32.to_bits());
         assert!(matches!(ABOVE_ONE, Err(ProbabilityError::AboveOne(_))));
     }
@@ -348,18 +350,13 @@ mod probability_tests {
     }
 
     fn non_finite_strategy() -> impl Strategy<Value = f32> {
-        prop_oneof![
-            Just(f32::NAN),
-            Just(f32::INFINITY),
-            Just(f32::NEG_INFINITY),
-        ]
+        prop_oneof![Just(f32::NAN), Just(f32::INFINITY), Just(f32::NEG_INFINITY),]
     }
 
     // ===== Property-test helpers (generic over MIN_AS_BITS) =====
 
     fn check_accepts_in_range<const MIN_AS_BITS: u32>(v: f32) {
-        let p = Probability::<MIN_AS_BITS>::try_new(v)
-            .expect("v should be valid by construction");
+        let p = Probability::<MIN_AS_BITS>::try_new(v).expect("v should be valid by construction");
         assert_eq!(p.get().to_bits(), v.to_bits());
     }
 
@@ -387,23 +384,20 @@ mod probability_tests {
     fn check_serde_json_round_trip<const MIN_AS_BITS: u32>(v: f32) {
         let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         let json = serde_json::to_string(&p).expect("serialize");
-        let back: Probability<MIN_AS_BITS> =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: Probability<MIN_AS_BITS> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.get().to_bits(), v.to_bits());
     }
 
     fn check_serde_yaml_round_trip<const MIN_AS_BITS: u32>(v: f32) {
         let p = Probability::<MIN_AS_BITS>::try_new(v).expect("valid v");
         let yaml = serde_yaml::to_string(&p).expect("serialize");
-        let back: Probability<MIN_AS_BITS> =
-            serde_yaml::from_str(&yaml).expect("deserialize");
+        let back: Probability<MIN_AS_BITS> = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(back.get().to_bits(), v.to_bits());
     }
 
     fn check_serde_json_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
         let json = serde_json::to_string(&v).expect("serialize raw f32");
-        let err = serde_json::from_str::<Probability<MIN_AS_BITS>>(&json)
-            .expect_err("v < MIN");
+        let err = serde_json::from_str::<Probability<MIN_AS_BITS>>(&json).expect_err("v < MIN");
         assert!(
             err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
@@ -412,8 +406,7 @@ mod probability_tests {
 
     fn check_serde_yaml_rejects_below_min<const MIN_AS_BITS: u32>(v: f32) {
         let yaml = serde_yaml::to_string(&v).expect("serialize raw f32");
-        let err = serde_yaml::from_str::<Probability<MIN_AS_BITS>>(&yaml)
-            .expect_err("v < MIN");
+        let err = serde_yaml::from_str::<Probability<MIN_AS_BITS>>(&yaml).expect_err("v < MIN");
         assert!(
             err.to_string().contains("below lower bound"),
             "unexpected error: {err}"
