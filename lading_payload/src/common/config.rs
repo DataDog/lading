@@ -174,9 +174,14 @@ pub struct BoundedProbability<const MIN_AS_BITS: u32> {
 /// A probability in the closed unit interval `[0.0, 1.0]`. The most common bound.
 pub type Probability = BoundedProbability<{ f32::to_bits(0.0) }>;
 
-/// A probability or ratio in `[0.1, 1.0]`. Used for fields such as
-/// `unique_tag_ratio` that must avoid extreme low values.
+/// A probability or ratio in `[0.1, 1.0]`. Use for fields that must avoid
+/// extreme low values.
 pub type AtLeastOneTenth = BoundedProbability<{ f32::to_bits(0.1) }>;
+
+/// A probability or ratio in `[0.01, 1.0]`. Use for fields such as
+/// `unique_tag_ratio` that must avoid extreme low values but admit
+/// in-the-wild values below `0.1`.
+pub type AtLeastOneHundredth = BoundedProbability<{ f32::to_bits(0.01) }>;
 
 impl<const MIN_AS_BITS: u32> TryFrom<f32> for BoundedProbability<MIN_AS_BITS> {
     type Error = ProbabilityError;
