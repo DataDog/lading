@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use crate::{
     Serialize,
     common::{
-        config::ConfRange,
+        config::{ConfRange, Probability},
         strings,
         strings::{random_strings_with_length, random_strings_with_length_range},
     },
@@ -226,15 +226,15 @@ pub struct TimestampConfig {
     ///
     /// The `DogStatsD` protocol only supports this field for count and gauge metrics.
     pub range: ConfRange<u32>,
-    /// Probability between 0 and 1 that a generated count or gauge metric includes `|T`.
-    pub probability: f32,
+    /// Probability that a generated count or gauge metric includes `|T`.
+    pub probability: Probability,
 }
 
 impl Default for TimestampConfig {
     fn default() -> Self {
         Self {
             range: ConfRange::Constant(1),
-            probability: 0.0,
+            probability: Probability::try_new(0.0).expect("0.0 is in [0.0, 1.0]"),
         }
     }
 }
@@ -245,13 +245,7 @@ impl TimestampConfig {
         if !range_valid {
             return Result::Err(format!("Timestamp range is invalid: {reason}"));
         }
-        if !self.probability.is_finite() || self.probability < 0.0 || self.probability > 1.0 {
-            return Result::Err(format!(
-                "Timestamp probability {} must be finite and in range [0.0, 1.0]",
-                self.probability
-            ));
-        }
-        if self.probability > 0.0 && self.range.start() == 0 {
+        if self.probability.get() > 0.0 && self.range.start() == 0 {
             return Result::Err(
                 "Timestamp range start value cannot be 0 when timestamps are enabled".to_string(),
             );
@@ -450,7 +444,7 @@ impl MemberGenerator {
         external_data: Vec<String>,
         cardinality: Vec<String>,
         timestamp_range: ConfRange<u32>,
-        timestamp_probability: f32,
+        timestamp_probability: Probability,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -833,11 +827,15 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod test {
-    use super::{ConfRange, Config, KindWeights, MetricWeights, TimestampConfig};
+    use super::{ConfRange, Config, KindWeights, MetricWeights, Probability, TimestampConfig};
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{DogStatsD, Serialize};
+
+    fn prob(value: f32) -> Probability {
+        Probability::try_new(value).expect("value must be in [0.0, 1.0]")
+    }
 
     // Generate a batch of raw DogStatsD bytes using the given config and seed.
     fn generate_bytes(config: &Config, seed: u64) -> Vec<u8> {
@@ -942,7 +940,7 @@ mod test {
             metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
             timestamp: Box::new(TimestampConfig {
                 range: ConfRange::Constant(1_656_581_400),
-                probability: 1.0,
+                probability: prob(1.0),
             }),
             ..Default::default()
         };
@@ -956,7 +954,7 @@ mod test {
             metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
             timestamp: Box::new(TimestampConfig {
                 range: ConfRange::Constant(1_656_581_400),
-                probability: 0.0,
+                probability: prob(0.0),
             }),
             ..Default::default()
         };
@@ -974,7 +972,7 @@ mod test {
             metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
             timestamp: Box::new(TimestampConfig {
                 range: ConfRange::Inclusive { min: 10, max: 20 },
-                probability: 1.0,
+                probability: prob(1.0),
             }),
             ..Default::default()
         };
@@ -1001,7 +999,7 @@ mod test {
             metric_weights: MetricWeights::new(0, 0, 100, 0, 0, 0),
             timestamp: Box::new(TimestampConfig {
                 range: ConfRange::Constant(1_656_581_400),
-                probability: 1.0,
+                probability: prob(1.0),
             }),
             ..Default::default()
         };
@@ -1013,15 +1011,14 @@ mod test {
     }
 
     #[test]
-    fn timestamp_probability_must_be_valid() {
-        let config = Config {
-            timestamp: Box::new(TimestampConfig {
-                probability: 2.0,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        assert!(config.valid().is_err());
+    fn timestamp_probability_rejects_out_of_range_on_deserialize() {
+        let yaml = "range: !constant 1\nprobability: 2.0\n";
+        let err = serde_yaml::from_str::<TimestampConfig>(yaml)
+            .expect_err("probability 2.0 must be rejected at deserialize time");
+        assert!(
+            err.to_string().contains("exceeds 1.0"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -1029,7 +1026,7 @@ mod test {
         let config = Config {
             timestamp: Box::new(TimestampConfig {
                 range: ConfRange::Constant(0),
-                probability: 1.0,
+                probability: prob(1.0),
             }),
             ..Default::default()
         };
@@ -1064,7 +1061,7 @@ mod test {
                 metric_weights: MetricWeights::new(100, 100, 0, 0, 0, 0),
                 timestamp: Box::new(TimestampConfig {
                     range: ConfRange::Inclusive { min: 10, max: 20 },
-                    probability: 0.5,
+                    probability: prob(0.5),
                 }),
                 ..Default::default()
             };
