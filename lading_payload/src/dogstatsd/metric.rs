@@ -33,7 +33,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) timestamp_probability: Probability,
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count: ConfRange<u16>,
-    pub(crate) multivalue_pack_probability: f32,
+    pub(crate) multivalue_pack_probability: Probability,
     pub(crate) sampling: ConfRange<f32>,
     pub(crate) sampling_probability: Probability,
     pub(crate) num_value_generator: NumValueGenerator,
@@ -50,7 +50,7 @@ impl MetricGenerator {
         num_contexts: usize,
         name_length: ConfRange<u16>,
         multivalue_count: ConfRange<u16>,
-        multivalue_pack_probability: f32,
+        multivalue_pack_probability: Probability,
         sampling: ConfRange<f32>,
         sampling_probability: Probability,
         metric_weights: &WeightedIndex<u16>,
@@ -162,7 +162,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         values.push(value);
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
-        if prob < self.multivalue_pack_probability {
+        if prob < self.multivalue_pack_probability.get() {
             let num_desired_values = self.multivalue_count.sample(&mut rng) as usize;
             for _ in 1..num_desired_values {
                 values.push(self.num_value_generator.generate(&mut rng)?);

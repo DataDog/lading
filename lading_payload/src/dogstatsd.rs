@@ -162,9 +162,8 @@ pub struct Config {
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
     pub tags_per_msg: ConfRange<u8>,
-    /// Probability between 0 and 1 that a given dogstatsd msg
-    /// contains multiple values
-    pub multivalue_pack_probability: f32,
+    /// Probability that a given dogstatsd msg contains multiple values
+    pub multivalue_pack_probability: Probability,
     /// The count of values that will be generated if multi-value is chosen to
     /// be generated
     pub multivalue_count: ConfRange<u16>,
@@ -271,7 +270,7 @@ impl Default for Config {
             tag_length: ConfRange::Inclusive { min: 3, max: 100 },
             tags_per_msg: ConfRange::Inclusive { min: 2, max: 50 },
             multivalue_count: ConfRange::Inclusive { min: 2, max: 32 },
-            multivalue_pack_probability: 0.08,
+            multivalue_pack_probability: Probability::try_new(0.08).expect("0.08 is in [0.0, 1.0]"),
             sampling_range: ConfRange::Inclusive { min: 0.1, max: 1.0 },
             sampling_probability: Probability::try_new(0.5).expect("0.5 is in [0.0, 1.0]"),
             kind_weights: KindWeights::default(),
@@ -420,7 +419,7 @@ impl MemberGenerator {
         tag_length: ConfRange<u16>,
         tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
-        multivalue_pack_probability: f32,
+        multivalue_pack_probability: Probability,
         sampling: ConfRange<f32>,
         sampling_probability: Probability,
         kind_weights: KindWeights,
