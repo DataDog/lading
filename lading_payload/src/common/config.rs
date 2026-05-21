@@ -672,5 +672,4 @@ mod probability_tests {
             check_arbitrary_produces_valid::<{ f32::to_bits(1.0) }>(&bytes);
         }
     }
-
 }
