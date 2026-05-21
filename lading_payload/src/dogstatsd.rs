@@ -170,9 +170,9 @@ pub struct Config {
     pub multivalue_count: ConfRange<u16>,
     /// Range of possible values for the sampling rate sent in dogstatsd messages
     pub sampling_range: ConfRange<f32>,
-    /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
+    /// Probability that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
-    pub sampling_probability: f32,
+    pub sampling_probability: Probability,
     /// Defines the relative probability of each kind of `DogStatsD` kinds of
     /// payload.
     pub kind_weights: KindWeights,
@@ -273,7 +273,7 @@ impl Default for Config {
             multivalue_count: ConfRange::Inclusive { min: 2, max: 32 },
             multivalue_pack_probability: 0.08,
             sampling_range: ConfRange::Inclusive { min: 0.1, max: 1.0 },
-            sampling_probability: 0.5,
+            sampling_probability: Probability::try_new(0.5).expect("0.5 is in [0.0, 1.0]"),
             kind_weights: KindWeights::default(),
             metric_weights: MetricWeights::default(),
             value: ValueConf::default(),
@@ -371,16 +371,6 @@ impl Config {
             }
         }
 
-        if !self.sampling_probability.is_finite()
-            || self.sampling_probability < 0.0
-            || self.sampling_probability > 1.0
-        {
-            return Result::Err(format!(
-                "Sampling probability {} must be finite and in range [0.0, 1.0]",
-                self.sampling_probability
-            ));
-        }
-
         self.timestamp.valid()?;
 
         if self.kind_weights.metric == 0
@@ -432,7 +422,7 @@ impl MemberGenerator {
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         sampling: ConfRange<f32>,
-        sampling_probability: f32,
+        sampling_probability: Probability,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
