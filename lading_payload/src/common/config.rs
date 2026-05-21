@@ -2,7 +2,7 @@
 
 use rand::{RngExt, distr::uniform::SampleUniform};
 use serde::Deserialize;
-use std::{cmp, fmt, hash};
+use std::{cmp, fmt};
 
 /// Range expression for configuration
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -174,10 +174,6 @@ pub struct BoundedProbability<const MIN_AS_BITS: u32> {
 /// A probability in the closed unit interval `[0.0, 1.0]`. The most common bound.
 pub type Probability = BoundedProbability<{ f32::to_bits(0.0) }>;
 
-/// A probability or ratio in `[0.1, 1.0]`. Use for fields that must avoid
-/// extreme low values.
-pub type AtLeastOneTenth = BoundedProbability<{ f32::to_bits(0.1) }>;
-
 /// A probability or ratio in `[0.01, 1.0]`. Use for fields such as
 /// `unique_tag_ratio` that must avoid extreme low values but admit
 /// in-the-wild values below `0.1`.
@@ -197,41 +193,9 @@ impl<const MIN_AS_BITS: u32> From<BoundedProbability<MIN_AS_BITS>> for f32 {
     }
 }
 
-impl<const MIN_AS_BITS: u32> fmt::Display for BoundedProbability<MIN_AS_BITS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-// `Eq`, `Ord`, and `Hash` are sound because [`Self::try_new`] rejects NaN and
-// normalizes `-0.0` to `+0.0`, so every value in the valid range has a unique
-// bit pattern and an unambiguous numeric ordering. `Hash` works on the `u32`
-// bit pattern because `f32: !Hash`; the `Eq`/`Hash` contract is preserved
-// because numerically equal valid values share a bit pattern.
-
 impl<const MIN_AS_BITS: u32> PartialEq for BoundedProbability<MIN_AS_BITS> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
-    }
-}
-
-impl<const MIN_AS_BITS: u32> Eq for BoundedProbability<MIN_AS_BITS> {}
-
-impl<const MIN_AS_BITS: u32> Ord for BoundedProbability<MIN_AS_BITS> {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.value.total_cmp(&other.value)
-    }
-}
-
-impl<const MIN_AS_BITS: u32> PartialOrd for BoundedProbability<MIN_AS_BITS> {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<const MIN_AS_BITS: u32> hash::Hash for BoundedProbability<MIN_AS_BITS> {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.value.to_bits().hash(state);
     }
 }
 
@@ -295,19 +259,6 @@ impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
     #[must_use]
     pub const fn get(&self) -> f32 {
         self.value
-    }
-
-    /// Sample a Bernoulli trial with success probability `self.get()`.
-    ///
-    /// Returns `true` with probability `self.get()` and `false` otherwise.
-    /// The f32 <-> f64 conversion is exact for every f32 in `[+0.0, +1.0]`, so
-    /// the success probability is preserved bit-for-bit.
-    #[must_use]
-    pub fn sample_bernoulli<R>(&self, rng: &mut R) -> bool
-    where
-        R: rand::Rng + ?Sized,
-    {
-        rng.random_bool(f64::from(self.value))
     }
 }
 
@@ -394,7 +345,7 @@ mod probability_tests {
         }
     }
 
-    // ===== Unit tests: ordering / equality / hashing =====
+    // ===== Unit tests: equality =====
 
     #[test]
     fn equality_holds_for_same_bit_pattern() {
@@ -403,27 +354,6 @@ mod probability_tests {
         let c = AtLeastHalf::try_new(0.875).expect("valid");
         assert_eq!(a, b);
         assert_ne!(a, c);
-    }
-
-    #[test]
-    fn ordering_matches_numeric_ordering() {
-        let half = AtLeastHalf::try_new(0.5).expect("valid");
-        let three_quarters = AtLeastHalf::try_new(0.75).expect("valid");
-        let one = AtLeastHalf::try_new(1.0).expect("valid");
-        assert!(half < three_quarters);
-        assert!(three_quarters < one);
-        assert!(half < one);
-    }
-
-    #[test]
-    fn hash_agrees_with_eq() {
-        use std::collections::HashSet;
-        let mut set = HashSet::new();
-        set.insert(AtLeastHalf::try_new(0.75).expect("valid"));
-        // Re-inserting the equivalent value must hit the existing entry.
-        assert!(!set.insert(AtLeastHalf::try_new(0.75).expect("valid")));
-        assert!(set.insert(AtLeastHalf::try_new(0.875).expect("valid")));
-        assert_eq!(set.len(), 2);
     }
 
     // ===== Unit tests: wire-format pins =====
@@ -494,16 +424,6 @@ mod probability_tests {
             }
             other => panic!("expected BelowMin, got {other:?}"),
         }
-    }
-
-    fn check_display_matches<const MIN_AS_BITS: u32>(v: f32) {
-        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
-        assert_eq!(format!("{p}"), format!("{v}"));
-    }
-
-    fn check_display_precision<const MIN_AS_BITS: u32>(v: f32, n: usize) {
-        let p = BoundedProbability::<MIN_AS_BITS>::try_new(v).expect("valid v");
-        assert_eq!(format!("{p:.n$}"), format!("{v:.n$}"));
     }
 
     fn check_serde_json_round_trip<const MIN_AS_BITS: u32>(v: f32) {
@@ -597,72 +517,6 @@ mod probability_tests {
         fn rejects_any_non_finite(v in non_finite_strategy()) {
             let err = ZeroOrMore::try_new(v).expect_err("v is not finite");
             prop_assert!(matches!(err, ProbabilityError::NotFinite(_)));
-        }
-    }
-
-    // ===== Property tests: ordering agrees with f32 PartialOrd =====
-
-    proptest! {
-        #[test]
-        fn ord_matches_f32_partial_cmp(
-            a in valid_value_strategy(ZeroOrMore::MIN),
-            b in valid_value_strategy(ZeroOrMore::MIN),
-        ) {
-            let pa = ZeroOrMore::try_new(a).expect("valid");
-            let pb = ZeroOrMore::try_new(b).expect("valid");
-            prop_assert_eq!(
-                pa.cmp(&pb),
-                a.partial_cmp(&b).expect("no NaN in valid range")
-            );
-        }
-    }
-
-    // ===== Property tests: Display =====
-
-    proptest! {
-        #[test]
-        fn display_matches_inner_f32_for_valid_values_zero_or_more(
-            v in valid_value_strategy(ZeroOrMore::MIN),
-        ) {
-            check_display_matches::<{ f32::to_bits(0.0) }>(v);
-        }
-
-        #[test]
-        fn display_matches_inner_f32_for_valid_values_at_least_half(
-            v in valid_value_strategy(AtLeastHalf::MIN),
-        ) {
-            check_display_matches::<{ f32::to_bits(0.5) }>(v);
-        }
-
-        #[test]
-        fn display_matches_inner_f32_for_valid_values_at_least_one(
-            v in valid_value_strategy(AtLeastOne::MIN),
-        ) {
-            check_display_matches::<{ f32::to_bits(1.0) }>(v);
-        }
-
-        #[test]
-        fn display_propagates_precision_zero_or_more(
-            v in valid_value_strategy(ZeroOrMore::MIN),
-            n in 0_usize..=10,
-        ) {
-            check_display_precision::<{ f32::to_bits(0.0) }>(v, n);
-        }
-
-        #[test]
-        fn display_propagates_precision_at_least_half(
-            v in valid_value_strategy(AtLeastHalf::MIN),
-            n in 0_usize..=10,
-        ) {
-            check_display_precision::<{ f32::to_bits(0.5) }>(v, n);
-        }
-
-        #[test]
-        fn display_propagates_precision_at_least_one(
-            v in valid_value_strategy(AtLeastOne::MIN),
-            n in 0_usize..=10,
-        ) {
-            check_display_precision::<{ f32::to_bits(1.0) }>(v, n);
         }
     }
 
@@ -819,32 +673,4 @@ mod probability_tests {
         }
     }
 
-    // ===== Property tests: sample_bernoulli =====
-    //
-    // The degenerate `p = 0.0` and `p = 1.0` cases together pin both the
-    // wiring (no inversion of P(true) vs P(false)) and the absence of a
-    // panic from `random_bool`. A statistical test on intermediate values
-    // would only re-test `rand::Rng::random_bool`, so it is omitted.
-
-    proptest! {
-        #[test]
-        fn bernoulli_at_zero_never_succeeds(seed: u64) {
-            use rand::{SeedableRng, rngs::SmallRng};
-            let p = ZeroOrMore::try_new(0.0).expect("0.0 in [0, 1]");
-            let mut rng = SmallRng::seed_from_u64(seed);
-            for _ in 0..1024 {
-                prop_assert!(!p.sample_bernoulli(&mut rng));
-            }
-        }
-
-        #[test]
-        fn bernoulli_at_one_always_succeeds(seed: u64) {
-            use rand::{SeedableRng, rngs::SmallRng};
-            let p = AtLeastOne::try_new(1.0).expect("1.0 in [1, 1]");
-            let mut rng = SmallRng::seed_from_u64(seed);
-            for _ in 0..1024 {
-                prop_assert!(p.sample_bernoulli(&mut rng));
-            }
-        }
-    }
 }
