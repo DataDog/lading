@@ -35,7 +35,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
     pub(crate) sampling: ConfRange<f32>,
-    pub(crate) sampling_probability: f32,
+    pub(crate) sampling_probability: Probability,
     pub(crate) num_value_generator: NumValueGenerator,
     pub(crate) pools: StringPools,
     /// Tags for each template. Each position in this Vec corresponds to the
@@ -52,7 +52,7 @@ impl MetricGenerator {
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         sampling: ConfRange<f32>,
-        sampling_probability: f32,
+        sampling_probability: Probability,
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
         external_data: Vec<String>,
@@ -148,7 +148,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         let cardinality = choose_or_not_ref(&mut rng, &self.cardinality).map(String::as_str);
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
         let prob: f32 = OpenClosed01.sample(&mut rng);
-        let sample_rate = if prob < self.sampling_probability {
+        let sample_rate = if prob < self.sampling_probability.get() {
             let sample_rate = self.sampling.sample(&mut rng).clamp(0.0, 1.0);
             let sample_rate = common::ZeroToOne::try_from(sample_rate)
                 .expect("failed to convert sample rate to ZeroToOne");
