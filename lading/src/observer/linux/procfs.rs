@@ -287,9 +287,6 @@ impl Sampler {
                         if let Some(m) = measures.shmem_pmd_mapped {
                             gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.shared_hugetlb {
-                            gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
-                        }
                         if let Some(m) = measures.file_pmd_mapped {
                             gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
                         }
