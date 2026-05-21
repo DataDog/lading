@@ -297,9 +297,6 @@ impl Sampler {
                         if let Some(m) = measures.locked {
                             gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.swap_pss {
-                            gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
-                        }
                     }
                 }
                 Err(err) => {
