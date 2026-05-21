@@ -9,13 +9,14 @@ use rand::{SeedableRng, rngs::SmallRng};
 use tracing::warn;
 
 use crate::common::{
-    config::ConfRange,
+    config::{AtLeastOneHundredth, ConfRange},
     strings::{Pool, PoolKind},
 };
 
 use super::strings::Handle;
 
 pub(crate) const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
+#[cfg(test)]
 pub(crate) const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
 pub(crate) const WARN_UNIQUE_TAG_RATIO: f32 = 0.10;
 pub(crate) const MIN_TAG_LENGTH: u16 = 3;
@@ -120,13 +121,13 @@ impl TagGenerator {
 /// produce only a limited, deterministic set of tags while avoiding needing to
 /// allocate them all in one shot.
 ///
-/// The `unique_tag_ratio` is a value between 0.10 and 1.0. It represents the
-/// ratio of new tags to existing tags. If the value is 1.0, then all tags will
-/// be new. If the value 0.0 were allowed, it would conceptually mean "always
-/// use an existing tag", however this is a degenerate case as there would never
-/// be a new tag generated. Therefore a minimum value is enforced.  Despite this
-/// minimum, if the configuration is overly restrictive, it may result in
-/// non-unique tagsets.
+/// The `unique_tag_ratio` is the ratio of new tags to existing tags. If the
+/// value is 1.0, then all tags will be new. If the value 0.0 were allowed, it
+/// would conceptually mean "always use an existing tag", however this is a
+/// degenerate case as there would never be a new tag generated. The
+/// [`AtLeastOneHundredth`] type enforces a closed range of `[0.01, 1.0]`.
+/// Despite this minimum, if the configuration is overly restrictive, it may
+/// result in non-unique tagsets.
 ///
 /// As an example:
 /// `unique_tag_probability`: 0.10
@@ -147,7 +148,7 @@ pub(crate) struct Generator {
     num_tagsets: usize, // Maximum number of unique tagsets that will ever be generated
     tags_per_msg: ConfRange<u8>, // Maximum number of tags per individually generated tagset
     tags: TagGenerator,
-    unique_tag_probability: f32,
+    unique_tag_probability: AtLeastOneHundredth,
     tag_store: RefCell<TagStore>,
 }
 
@@ -165,7 +166,6 @@ impl Generator {
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
     /// - If `tag_length` is invalid or has minimum value less than 3
-    /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
@@ -173,7 +173,7 @@ impl Generator {
         num_tagsets: usize,
         str_pool: Rc<PoolKind>,
         tag_pool: Rc<PoolKind>,
-        unique_tag_probability: f32,
+        unique_tag_probability: AtLeastOneHundredth,
     ) -> Result<Self, Error> {
         let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
         if !tag_length_valid {
@@ -188,13 +188,7 @@ impl Generator {
             )));
         }
 
-        if !(MIN_UNIQUE_TAG_RATIO..=MAX_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            return Err(Error::InvalidConstruction(format!(
-                "Unique tag ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"
-            )));
-        }
-
-        if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
+        if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability.get()) {
             warn!(
                 "unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in non-unique tagsets"
             );
@@ -274,7 +268,7 @@ impl<'a> crate::Generator<'a> for Generator {
             // For remaining tags, decide whether to reuse existing tags or generate new ones
             while tagset.len() < tags_count {
                 let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
-                let should_reuse = choose_existing_prob > self.unique_tag_probability;
+                let should_reuse = choose_existing_prob > self.unique_tag_probability.get();
 
                 if should_reuse && !tag_store.is_empty() {
                     // Reuse an existing tag
@@ -305,7 +299,7 @@ mod test {
 
     use super::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, WARN_UNIQUE_TAG_RATIO};
     use crate::Generator;
-    use crate::common::config::ConfRange;
+    use crate::common::config::{AtLeastOneHundredth, ConfRange};
     use crate::common::strings::{Handle, PoolKind, RandomStringPool};
 
     proptest! {
@@ -331,7 +325,7 @@ mod test {
                 num_tagsets,
                 str_pool,
                 tag_pool,
-                1.0
+                AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"),
             ).expect("Tag generator to be valid");
 
             for _ in 0..num_tagsets {
@@ -370,7 +364,7 @@ mod test {
                 num_tagsets,
                 str_pool,
                 tag_pool,
-                1.0
+                AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"),
             ).expect("Tag generator to be valid");
 
             // First batch with fresh RNG
@@ -420,7 +414,8 @@ mod test {
                 desired_num_tagsets,
                 str_pool,
                 tag_pool,
-                unique_tag_ratio
+                AtLeastOneHundredth::try_new(unique_tag_ratio)
+                    .expect("unique_tag_ratio drawn from [WARN, MAX], which is within [0.01, 1.0]"),
             ).expect("Tag generator to be valid");
 
             let mut unique_tagsets: HashSet<Vec<(Handle, Handle)>> = HashSet::new();

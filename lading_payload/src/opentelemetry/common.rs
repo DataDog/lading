@@ -6,7 +6,10 @@ pub(crate) mod templates;
 
 use crate::{
     Error, Generator, SizedGenerator,
-    common::{config::ConfRange, strings, tags},
+    common::{
+        config::{AtLeastOneHundredth, ConfRange},
+        strings, tags,
+    },
 };
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use prost::Message;
@@ -24,7 +27,11 @@ pub enum GeneratorError {
 }
 
 /// Ratio of unique tags to use in tag generation
-pub(crate) const UNIQUE_TAG_RATIO: f32 = 0.75;
+pub(crate) const UNIQUE_TAG_RATIO: AtLeastOneHundredth =
+    match AtLeastOneHundredth::try_new(0.75) {
+        Ok(p) => p,
+        Err(_) => unreachable!(),
+    };
 
 /// Smallest useful `KeyValue` protobuf, determined by experimentation and enforced in tests
 pub(crate) const SMALLEST_KV_PROTOBUF: usize = 10;
@@ -41,14 +48,13 @@ impl TagGenerator {
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
     /// - If `tag_length` is invalid or has minimum value less than 3
-    /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
         str_pool: &Rc<strings::RandomStringPool>,
-        unique_tag_probability: f32,
+        unique_tag_probability: AtLeastOneHundredth,
     ) -> Result<Self, Error> {
         let str_pool_kind = Rc::new(strings::PoolKind::RandomStringPool((**str_pool).clone()));
         let tag_pool = Rc::clone(&str_pool_kind);
