@@ -113,15 +113,15 @@ impl Default for MetricWeights {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ValueConf {
-    /// Odds out of 256 that the value will be a float and not an integer.
-    float_probability: f32,
+    /// Probability that the value will be a float and not an integer.
+    float_probability: Probability,
     range: ConfRange<i64>,
 }
 
 impl ValueConf {
     /// Create a new instance of `ValueConf` according to the args
     #[must_use]
-    pub fn new(float_probability: f32, range: ConfRange<i64>) -> Self {
+    pub fn new(float_probability: Probability, range: ConfRange<i64>) -> Self {
         Self {
             float_probability,
             range,
@@ -136,7 +136,7 @@ impl ValueConf {
 impl Default for ValueConf {
     fn default() -> Self {
         Self {
-            float_probability: 0.5, // 50%
+            float_probability: Probability::try_new(0.5).expect("0.5 is in [0.0, 1.0]"),
             range: ConfRange::Inclusive {
                 min: i64::MIN,
                 max: i64::MAX,

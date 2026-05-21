@@ -6,7 +6,7 @@ use rand::{
     prelude::Distribution,
 };
 
-use crate::{Error, Generator};
+use crate::{Error, Generator, common::config::Probability};
 
 use super::{ConfRange, ValueConf};
 
@@ -21,12 +21,12 @@ pub enum NumValue {
 #[derive(Clone, Debug)]
 pub(crate) enum NumValueGenerator {
     Constant {
-        float_probability: f32,
+        float_probability: Probability,
         int: i64,
         float: f64,
     },
     Uniform {
-        float_probability: f32,
+        float_probability: Probability,
         int_distr: Uniform<i64>,
         float_distr: Uniform<f64>,
     },
@@ -67,7 +67,7 @@ impl<'a> Generator<'a> for NumValueGenerator {
                 int,
                 float,
             } => {
-                if prob < *float_probability {
+                if prob < float_probability.get() {
                     Ok(NumValue::Float(*float))
                 } else {
                     Ok(NumValue::Int(*int))
@@ -78,7 +78,7 @@ impl<'a> Generator<'a> for NumValueGenerator {
                 int_distr,
                 float_distr,
             } => {
-                if prob < *float_probability {
+                if prob < float_probability.get() {
                     Ok(NumValue::Float(float_distr.sample(rng)))
                 } else {
                     Ok(NumValue::Int(int_distr.sample(rng)))
