@@ -1,6 +1,9 @@
 //! Capture analysis tool for lading capture files.
 
 #![expect(clippy::print_stdout)]
+// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
+// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
+#![allow(clippy::expect_used)]
 
 mod analyze;
 
