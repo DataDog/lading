@@ -300,7 +300,7 @@ impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
     /// Sample a Bernoulli trial with success probability `self.get()`.
     ///
     /// Returns `true` with probability `self.get()` and `false` otherwise.
-    /// The f32 ↔ f64 conversion is exact for every f32 in `[+0.0, +1.0]`, so
+    /// The f32 <-> f64 conversion is exact for every f32 in `[+0.0, +1.0]`, so
     /// the success probability is preserved bit-for-bit.
     #[must_use]
     pub fn sample_bernoulli<R>(&self, rng: &mut R) -> bool
@@ -314,7 +314,7 @@ impl<const MIN_AS_BITS: u32> BoundedProbability<MIN_AS_BITS> {
 /// Generate a uniformly-distributed-over-bit-patterns value in `[MIN, +1.0]`
 /// by sampling a `u32` in `[MIN_AS_BITS, f32::to_bits(+1.0)]` and decoding it.
 ///
-/// This works because the f32 ↔ u32 ordering (documented on the type) is
+/// This works because the f32 <-> u32 ordering (documented on the type) is
 /// monotonic for non-negative finite values, so every bit pattern in that
 /// range decodes to a valid stored value. `-0.0`'s bit pattern is
 /// `0x8000_0000`, far above `f32::to_bits(+1.0) = 0x3f80_0000`, so it can
@@ -785,7 +785,7 @@ mod probability_tests {
         use arbitrary::{Arbitrary, Unstructured};
         let mut u = Unstructured::new(bytes);
         // `int_in_range` can fail with `NotEnoughData` on short inputs; that's
-        // fine — we only need to check that any `Ok` value is valid.
+        // fine -- we only need to check that any `Ok` value is valid.
         if let Ok(p) = BoundedProbability::<MIN_AS_BITS>::arbitrary(&mut u) {
             let v = p.get();
             assert!(v.is_finite());
