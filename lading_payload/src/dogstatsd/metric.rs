@@ -8,7 +8,11 @@ use rand::{
     seq::IteratorRandom,
 };
 
-use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
+use crate::{
+    Error, Generator,
+    common::{config::Probability, strings},
+    dogstatsd::metric::template::Template,
+};
 use tracing::debug;
 
 use self::strings::{Pool, choose_or_not_ref};
@@ -26,7 +30,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) external_data: Vec<String>,
     pub(crate) cardinality: Vec<String>,
     pub(crate) timestamp_range: ConfRange<u32>,
-    pub(crate) timestamp_probability: f32,
+    pub(crate) timestamp_probability: Probability,
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
@@ -54,7 +58,7 @@ impl MetricGenerator {
         external_data: Vec<String>,
         cardinality: Vec<String>,
         timestamp_range: ConfRange<u32>,
-        timestamp_probability: f32,
+        timestamp_probability: Probability,
         tags_generator: &mut common::tags::Generator,
         pools: &StringPools,
         value_conf: ValueConf,
@@ -109,12 +113,12 @@ impl MetricGenerator {
     where
         R: Rng + ?Sized,
     {
-        if self.timestamp_probability == 0.0 {
+        if self.timestamp_probability.get() == 0.0 {
             return None;
         }
 
         let prob: f32 = StandardUniform.sample(rng);
-        if prob < self.timestamp_probability {
+        if prob < self.timestamp_probability.get() {
             Some(self.timestamp_range.sample(rng))
         } else {
             None
