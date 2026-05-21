@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use crate::{
     Serialize,
     common::{
-        config::{ConfRange, Probability},
+        config::{AtLeastOneHundredth, ConfRange, Probability},
         strings,
         strings::{random_strings_with_length, random_strings_with_length_range},
     },
@@ -185,12 +185,12 @@ pub struct Config {
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
     pub length_prefix_framed: bool,
-    /// This is a ratio between 0.10 and 1.0 which determines how many
-    /// individual tags are unique vs re-used tags.
-    /// If this is 1, then every single tag will be unique.
-    /// If this is 0.10, then most of the tags (90%) will be re-used
-    /// from existing tags.
-    pub unique_tag_ratio: f32,
+    /// This is a ratio that determines how many individual tags are unique vs
+    /// re-used tags. If this is 1, then every single tag will be unique. If
+    /// this is 0.10, then most of the tags (90%) will be re-used from existing
+    /// tags. The type enforces the closed range `[0.01, 1.0]` at deserialize
+    /// time.
+    pub unique_tag_ratio: AtLeastOneHundredth,
     /// A list of possible metric names to generate
     pub metric_names: Vec<String>,
     /// A list of possible tag names to generate
@@ -278,7 +278,8 @@ impl Default for Config {
             value: ValueConf::default(),
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
-            unique_tag_ratio: 0.11,
+            unique_tag_ratio: AtLeastOneHundredth::try_new(0.11)
+                .expect("0.11 is in [0.01, 1.0]"),
             metric_names: Vec::default(),
             tag_names: Vec::default(),
             tag_values: Vec::default(),
@@ -425,7 +426,7 @@ impl MemberGenerator {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
-        unique_tag_ratio: f32,
+        unique_tag_ratio: AtLeastOneHundredth,
         metric_names: &[String],
         tag_names: &[String],
         tag_values: &[String],

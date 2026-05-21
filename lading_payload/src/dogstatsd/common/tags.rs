@@ -1,6 +1,6 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::PoolKind, tags},
+    common::{config::AtLeastOneHundredth, strings::PoolKind, tags},
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -29,7 +29,6 @@ impl Generator {
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
     /// - If `tag_length` is invalid or has minimum value less than 3
-    /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
@@ -37,7 +36,7 @@ impl Generator {
         num_tagsets: usize,
         key_pool: Rc<PoolKind>,
         tag_pool: Rc<PoolKind>,
-        unique_tag_probability: f32,
+        unique_tag_probability: AtLeastOneHundredth,
     ) -> Result<Self, Error> {
         // Adjust tag_length range to account for the colon separator
         let adjusted_tag_length = ConfRange::Inclusive {
@@ -86,6 +85,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::Generator;
+    use crate::common::config::AtLeastOneHundredth;
     use crate::common::strings::{Handle, PoolKind, RandomStringPool, StringListPool};
     use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
@@ -178,7 +178,7 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let tag_pool = Rc::clone(&str_pool);
             let generator =
-                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"))
                     .expect("Tag generator to be valid");
 
             let first_batch = (0..num_tagsets)
@@ -224,7 +224,7 @@ mod test {
                 .collect();
             let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&tag_list, 10_000).expect("valid patterns")));
             let generator =
-                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"))
                     .expect("Tag generator to be valid");
 
             let first_batch = (0..num_tagsets)
@@ -270,7 +270,7 @@ mod test {
                 desired_num_tagsets,
                 str_pool,
                 tag_pool,
-                1.0,
+                AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"),
             )
             .expect("Tag generator to be valid");
 
@@ -310,7 +310,8 @@ mod test {
                 desired_num_tagsets,
                 str_pool,
                 tag_pool,
-                unique_tag_ratio
+                AtLeastOneHundredth::try_new(unique_tag_ratio)
+                    .expect("unique_tag_ratio drawn from [WARN, MAX), which is within [0.01, 1.0]"),
             )
             .expect("Tag generator to be valid");
 
@@ -355,7 +356,7 @@ mod test {
                 desired_num_tagsets,
                 str_pool,
                 tag_pool,
-                1.0,
+                AtLeastOneHundredth::try_new(1.0).expect("1.0 is in [0.01, 1.0]"),
             )
             .expect("Tag generator to be valid");
 
@@ -404,7 +405,8 @@ mod test {
                 desired_num_tagsets,
                 str_pool,
                 tag_pool,
-                unique_tag_ratio
+                AtLeastOneHundredth::try_new(unique_tag_ratio)
+                    .expect("unique_tag_ratio drawn from [WARN, MAX), which is within [0.01, 1.0]"),
             )
             .expect("Tag generator to be valid");
 
