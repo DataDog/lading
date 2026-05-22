@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed no longer used `smaps.private_hugetlb.by_pathname` procfs observer
   metric.
 - Removed no longer used `smaps.swap_pss.by_pathname` procfs observer metric.
+- Removed no longer used `smaps.swap.by_pathname` procfs observer metric.
 
 ## [0.32.0]
 ## Changed
