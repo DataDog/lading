@@ -745,12 +745,9 @@ where
         // serializer.
         Err(SpinError::EmptyBlock)
     } else {
-        let total_bytes = NonZeroU32::new(
-            bytes
-                .len()
-                .try_into()
-                .expect("failed to get length of bytes"),
-        )
+        let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap_or_else(|_| {
+            unreachable!("bytes.len() fits in u32: blocks are sized by chunk_size: u32")
+        }))
         .ok_or(SpinError::Zero)?;
 
         let mut metadata = BlockMetadata::default();

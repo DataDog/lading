@@ -122,8 +122,10 @@ impl Pool for RandomStringPool {
             Handle::PosAndLength(
                 lower_idx
                     .try_into()
-                    .expect("must fit into u32 by construction"),
-                bytes.try_into().expect("must fit in u32 by construction"),
+                    .unwrap_or_else(|_| unreachable!("lower_idx < self.inner.len(), and self.inner.len() fits in u32 by the assert in with_size")),
+                bytes
+                    .try_into()
+                    .unwrap_or_else(|_| unreachable!("bytes < self.inner.len(), and self.inner.len() fits in u32 by the assert in with_size")),
             ),
         ))
     }
