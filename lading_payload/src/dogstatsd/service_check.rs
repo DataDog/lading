@@ -26,6 +26,10 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
     type Output = ServiceCheck<'a>;
     type Error = Error;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "self.names is validated non-empty at ServiceCheckGenerator construction; an empty names vector here is a serious upstream logic bug"
+    )]
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,

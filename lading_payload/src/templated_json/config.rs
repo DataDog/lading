@@ -285,7 +285,8 @@ pub(super) struct ArraySpec {
 /// between the outer quotation marks if `s` were serialized as a JSON string.
 /// Called once at parse time when pre-compiling a `!format` template.
 fn json_string_escape_content(s: &str) -> String {
-    let encoded = serde_json::to_string(s).expect("string serialization cannot fail");
+    let encoded = serde_json::to_string(s)
+        .unwrap_or_else(|_| unreachable!("serde_json::to_string on a &str cannot fail"));
     encoded[1..encoded.len() - 1].to_string()
 }
 
@@ -439,8 +440,11 @@ impl<'de> Deserialize<'de> for FormatSpec {
             )));
         }
 
-        let trailing_escaped =
-            json_string_escape_content(parts.last().expect("split yields at least one part"));
+        let trailing_escaped = json_string_escape_content(
+            parts
+                .last()
+                .unwrap_or_else(|| unreachable!("str::split always yields at least one part")),
+        );
 
         let segments = parts[..parts.len() - 1]
             .iter()

@@ -54,13 +54,13 @@ where
     R: rand::Rng + ?Sized,
 {
     match rng.random_range(0..2) {
-        0 => Message::Unstructured(
-            str_pool
-                .of_size_range(rng, 1_u8..16)
-                .expect("failed to generate string"),
-        ),
+        0 => Message::Unstructured(str_pool.of_size_range(rng, 1_u8..16).unwrap_or_else(|| {
+            unreachable!("str_pool is sized 1_000_000 by construction; 1..16 always fits")
+        })),
         1 => Message::Structured(
-            serde_json::to_string(&rng.random::<Structured>()).expect("failed to generate string"),
+            serde_json::to_string(&rng.random::<Structured>()).unwrap_or_else(|_| {
+                unreachable!("Structured is a struct of primitive fields with derived Serialize")
+            }),
         ),
         _ => unreachable!(),
     }

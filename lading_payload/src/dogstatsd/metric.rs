@@ -127,6 +127,10 @@ impl<'a> Generator<'a> for MetricGenerator {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::expect_used,
+        reason = "self.templates is validated non-empty at MetricGenerator construction; an empty templates vector here is a serious upstream logic bug"
+    )]
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
@@ -147,7 +151,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         let sample_rate = if prob < self.sampling_probability {
             let sample_rate = self.sampling.sample(&mut rng).clamp(0.0, 1.0);
             let sample_rate = common::ZeroToOne::try_from(sample_rate)
-                .expect("failed to convert sample rate to ZeroToOne");
+                .unwrap_or_else(|_| unreachable!("clamp(0.0, 1.0) guarantees ZeroToOne range"));
             Some(sample_rate)
         } else {
             None
@@ -260,7 +264,9 @@ impl<'a> Generator<'a> for MetricGenerator {
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Set(Set {
                     name,
-                    value: values.pop().expect("failed to pop value from Vec"),
+                    value: values
+                        .pop()
+                        .unwrap_or_else(|| unreachable!("values has at least one push above")),
                     tags,
                     pools: &self.pools,
                     container_id,

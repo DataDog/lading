@@ -126,17 +126,15 @@ where
     R: rand::Rng + ?Sized,
 {
     match rng.random_range(0..2) {
-        0 => RecordValue::String(
-            str_pool
-                .of_size_range(rng, 1_u8..16)
-                .expect("failed to generate string"),
-        ),
+        0 => RecordValue::String(str_pool.of_size_range(rng, 1_u8..16).unwrap_or_else(|| {
+            unreachable!("str_pool is sized by construction; 1..16 always fits")
+        })),
         1 => {
             let mut obj = BTreeMap::new();
             for _ in 0..rng.random_range(0..128) {
-                let key = str_pool
-                    .of_size_range(rng, 1_u8..16)
-                    .expect("failed to generate string");
+                let key = str_pool.of_size_range(rng, 1_u8..16).unwrap_or_else(|| {
+                    unreachable!("str_pool is sized by construction; 1..16 always fits")
+                });
                 let val = rng.random();
 
                 obj.insert(key, val);
