@@ -117,10 +117,16 @@ pub enum ConstructBlockCacheError {
 #[cfg(feature = "arbitrary")]
 impl<'a> arbitrary::Arbitrary<'a> for Block {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let total_bytes = u32::arbitrary(u)?;
-        let bytes = u.bytes(total_bytes as usize).map(Bytes::copy_from_slice)?;
+        // `u32::arbitrary` can legitimately produce 0, but `Block::total_bytes`
+        // is `NonZeroU32`. Reject zero-byte inputs via `IncorrectFormat` so the
+        // fuzzer skips them and tries another input.
+        let total_bytes =
+            NonZeroU32::new(u32::arbitrary(u)?).ok_or(arbitrary::Error::IncorrectFormat)?;
+        let bytes = u
+            .bytes(total_bytes.get() as usize)
+            .map(Bytes::copy_from_slice)?;
         Ok(Self {
-            total_bytes: NonZeroU32::new(total_bytes).expect("total_bytes must be non-zero"),
+            total_bytes,
             bytes,
             metadata: BlockMetadata::default(),
         })
@@ -764,5 +770,25 @@ where
             bytes,
             metadata,
         })
+    }
+}
+
+#[cfg(all(test, feature = "arbitrary"))]
+mod arbitrary_tests {
+    use super::Block;
+    use arbitrary::{Arbitrary, Unstructured};
+
+    /// Regression: prior to the fix, `Block::arbitrary` could panic via
+    /// `NonZeroU32::new(0).expect(...)` whenever `u32::arbitrary` produced 0.
+    /// The fixed version must reject zero-byte inputs via
+    /// `arbitrary::Error::IncorrectFormat` so the fuzzer skips them.
+    #[test]
+    fn arbitrary_rejects_zero_total_bytes() {
+        let data = [0u8; 16];
+        let mut u = Unstructured::new(&data);
+        match Block::arbitrary(&mut u) {
+            Err(arbitrary::Error::IncorrectFormat) => {}
+            other => panic!("expected IncorrectFormat, got {other:?}"),
+        }
     }
 }
