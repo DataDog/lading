@@ -38,7 +38,8 @@ fn default_parallel_connections() -> u16 {
 // Mimic the belief of Datadog Agent, although correctly we should be reading
 // sysctl values on Linux.
 fn maximum_block_size() -> Byte {
-    Byte::from_u64_with_unit(8_192, Unit::B).expect("catastrophic programming bug")
+    Byte::from_u64_with_unit(8_192, Unit::B)
+        .unwrap_or_else(|| unreachable!("8_192 bytes is a representable Byte value"))
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]

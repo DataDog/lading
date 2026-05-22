@@ -46,7 +46,8 @@ fn default_bind_addr() -> SocketAddr {
 
 // https://stackoverflow.com/a/42610200
 fn maximum_block_size() -> Byte {
-    Byte::from_u64_with_unit(65_507, Unit::B).expect("catastrophic programming bug")
+    Byte::from_u64_with_unit(65_507, Unit::B)
+        .unwrap_or_else(|| unreachable!("65_507 bytes is a representable Byte value"))
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]

@@ -32,11 +32,11 @@ use crate::neper::metrics::{self, ThreadMetrics};
 use crate::neper::thread;
 
 fn default_nonzero_u16() -> NonZeroU16 {
-    NonZeroU16::new(1).expect("1 is nonzero")
+    NonZeroU16::new(1).unwrap_or_else(|| unreachable!("1 is nonzero by construction"))
 }
 
 fn default_nonzero_usize() -> NonZeroUsize {
-    NonZeroUsize::new(1).expect("1 is nonzero")
+    NonZeroUsize::new(1).unwrap_or_else(|| unreachable!("1 is nonzero by construction"))
 }
 
 const fn default_true() -> bool {

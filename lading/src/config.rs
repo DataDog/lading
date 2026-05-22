@@ -250,7 +250,7 @@ impl Default for Telemetry {
         Self::Prometheus {
             addr: "0.0.0.0:9000"
                 .parse()
-                .expect("Not possible to parse to SocketAddr"),
+                .unwrap_or_else(|_| unreachable!("\"0.0.0.0:9000\" is a valid SocketAddr literal")),
             global_labels: FxHashMap::default(),
         }
     }
@@ -484,7 +484,9 @@ fn load_directory_configs(dir: &Path) -> Result<Config, Error> {
     }
 
     // Convert final merged PartialConfig to Config
-    Config::from_partial(merged_partial.expect("found_any ensures this is Some"))
+    Config::from_partial(
+        merged_partial.unwrap_or_else(|| unreachable!("the found_any guard above ensures Some")),
+    )
 }
 
 #[cfg(test)]

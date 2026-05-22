@@ -151,7 +151,9 @@ impl BlockThrottle {
     ) -> Result<(), lading_throttle::Error> {
         let tokens: NonZeroU32 = match self.mode {
             ThrottleMode::Bytes => block_cache.peek_next_size(handle),
-            ThrottleMode::Blocks => NonZeroU32::new(1).expect("non-zero"),
+            ThrottleMode::Blocks => {
+                NonZeroU32::new(1).unwrap_or_else(|| unreachable!("1 is nonzero by construction"))
+            }
         };
         self.inner.wait_for(tokens).await
     }

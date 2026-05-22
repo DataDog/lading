@@ -84,31 +84,31 @@ pub enum Error {
 }
 
 fn default_max_depth() -> NonZeroUsize {
-    NonZeroUsize::new(10).expect("default max depth given was 0")
+    NonZeroUsize::new(10).unwrap_or_else(|| unreachable!("10 is nonzero by construction"))
 }
 
 fn default_max_sub_folders() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("default max sub folders given was 0")
+    NonZeroU32::new(5).unwrap_or_else(|| unreachable!("5 is nonzero by construction"))
 }
 
 fn default_max_files() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("default max files given was 0")
+    NonZeroU32::new(5).unwrap_or_else(|| unreachable!("5 is nonzero by construction"))
 }
 
 fn default_max_nodes() -> NonZeroUsize {
-    NonZeroUsize::new(100).expect("default max nodes given was 0")
+    NonZeroUsize::new(100).unwrap_or_else(|| unreachable!("100 is nonzero by construction"))
 }
 
 fn default_name_len() -> NonZeroUsize {
-    NonZeroUsize::new(8).expect("default name len given was 0")
+    NonZeroUsize::new(8).unwrap_or_else(|| unreachable!("8 is nonzero by construction"))
 }
 
 fn default_open_per_second() -> NonZeroU32 {
-    NonZeroU32::new(8).expect("default open per second given was 0")
+    NonZeroU32::new(8).unwrap_or_else(|| unreachable!("8 is nonzero by construction"))
 }
 
 fn default_rename_per_name() -> NonZeroU32 {
-    NonZeroU32::new(1).expect("default rename per second given was 0")
+    NonZeroU32::new(1).unwrap_or_else(|| unreachable!("1 is nonzero by construction"))
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
