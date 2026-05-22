@@ -265,6 +265,10 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     }
 
     /// Record all current metrics from the registry and flush mature data
+    #[expect(
+        clippy::expect_used,
+        reason = "self.format is Some throughout the operating state of the state machine; a None here indicates a serious upstream logic bug"
+    )]
     fn record_captures(&mut self, now: Instant) -> Result<(), Error> {
         let tick = self.accumulator.current_tick;
 
@@ -323,6 +327,10 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     }
 
     /// Drain all accumulated metrics and write them to the capture file
+    #[expect(
+        clippy::expect_used,
+        reason = "self.format is Some throughout the operating state of the state machine; a None here indicates a serious upstream logic bug"
+    )]
     fn drain_and_write(&mut self) -> Result<(), Error> {
         // Replace the accumulator with a new one and consume the old one for draining
         // This is only called during shutdown, so we don't need the accumulator anymore
@@ -346,6 +354,10 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::expect_used,
+        reason = "self.format is Some throughout the operating state of the state machine; a None here indicates a serious upstream logic bug"
+    )]
     fn write_metric_line(
         &mut self,
         key: &Key,

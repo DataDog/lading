@@ -233,7 +233,11 @@ impl Clock for RealClock {
         let elapsed = now.duration_since(self.start_instant);
         (self.start_system_time + elapsed)
             .duration_since(UNIX_EPOCH)
-            .expect("system time is before UNIX_EPOCH")
+            .unwrap_or_else(|_| {
+                unreachable!(
+                    "RealClock::start_system_time is captured at program start in modern epochs, well after UNIX_EPOCH"
+                )
+            })
             .as_millis()
     }
 
@@ -353,6 +357,10 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
     ///
     /// Will return an error if there is already a global recorder set.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "self.shutdown is populated at CaptureManager construction and consumed exactly once here in start()"
+    )]
     pub async fn start(mut self) -> Result<(), Error> {
         // Initialize historical sender to allow generators to send metrics with
         // Instant timestamps. Manager converts these to ticks using clock.start()
