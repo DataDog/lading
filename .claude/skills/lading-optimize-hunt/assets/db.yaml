@@ -29,3 +29,9 @@ entries:
     status: success
     verdict: approved
     file: assets/db/datadog-logs-buffer-reuse.yaml
+  - id: trace-agent-buffer-reuse
+    target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+    technique: buffer-reuse
+    status: success
+    verdict: approved
+    file: assets/db/trace-agent-buffer-reuse.yaml
