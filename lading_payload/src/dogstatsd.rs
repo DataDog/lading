@@ -756,7 +756,8 @@ impl DogStatsD {
             let member: Member = self.member_generator.generate(&mut rng)?;
             member_buffer.clear();
             // Format into the temporary buffer - write! on Vec<u8> is infallible
-            write!(&mut member_buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            write!(&mut member_buffer, "{member}")
+                .unwrap_or_else(|_| unreachable!("io::Write on Vec<u8> never errors"));
             let line_length = member_buffer.len() + 1; // add one for the newline
             if content_buffer.len() + line_length > content_budget {
                 break;
@@ -807,7 +808,8 @@ impl DogStatsD {
             let member: Member = self.member_generator.generate(&mut rng)?;
             buffer.clear();
             // Format into the reusable buffer - write! on Vec<u8> is infallible
-            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            write!(&mut buffer, "{member}")
+                .unwrap_or_else(|_| unreachable!("io::Write on Vec<u8> never errors"));
             let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {

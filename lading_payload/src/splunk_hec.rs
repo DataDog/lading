@@ -53,17 +53,27 @@ impl Distribution<Attrs> for StandardUniform {
         R: Rng + ?Sized,
     {
         Attrs {
-            system_id: SYSTEM_IDS.choose(rng).expect("failed to choose system ids"),
-            stage: STAGES.choose(rng).expect("failed to choose stages"),
+            system_id: SYSTEM_IDS
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("SYSTEM_IDS is a non-empty const array")),
+            stage: STAGES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("STAGES is a non-empty const array")),
             event_type: EVENT_TYPES
                 .choose(rng)
-                .expect("failed to choose event types"),
-            c2c_service: SERVICES.choose(rng).expect("failed to choose services"),
-            c2c_partition: PARTITIONS.choose(rng).expect("failed to choose partitions"),
-            c2c_stage: STAGES.choose(rng).expect("failed to choose stages"),
+                .unwrap_or_else(|| unreachable!("EVENT_TYPES is a non-empty const array")),
+            c2c_service: SERVICES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("SERVICES is a non-empty const array")),
+            c2c_partition: PARTITIONS
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("PARTITIONS is a non-empty const array")),
+            c2c_stage: STAGES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("STAGES is a non-empty const array")),
             c2c_container_type: CONTAINER_TYPES
                 .choose(rng)
-                .expect("failed to choose container types"),
+                .unwrap_or_else(|| unreachable!("CONTAINER_TYPES is a non-empty const array")),
             aws_account: "verymodelofthemodernmajor",
         }
     }
@@ -83,7 +93,9 @@ impl Distribution<Event> for StandardUniform {
     {
         Event {
             timestamp: 1_606_215_269.333_915,
-            message: MESSAGES.choose(rng).expect("failed to choose messages"),
+            message: MESSAGES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("MESSAGES is a non-empty const array")),
             attrs: rng.random(),
         }
     }
@@ -105,8 +117,12 @@ impl Distribution<Member> for StandardUniform {
         Member {
             event: rng.random(),
             time: rng.random(),
-            host: SYSTEM_IDS.choose(rng).expect("failed to choose system ids"),
-            index: PARTITIONS.choose(rng).expect("failed to choose partitions"),
+            host: SYSTEM_IDS
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("SYSTEM_IDS is a non-empty const array")),
+            index: PARTITIONS
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("PARTITIONS is a non-empty const array")),
         }
     }
 }
@@ -166,7 +182,7 @@ impl crate::Serialize for SplunkHec {
                         timestamp = event.timestamp,
                         message = event.message
                     )
-                    .expect("formatting to Vec<u8> cannot fail");
+                    .unwrap_or_else(|_| unreachable!("io::Write on Vec<u8> never errors"));
                     serde_json::to_writer(&mut buffer, &event.attrs)?;
                 }
                 Encoding::Json => serde_json::to_writer(&mut buffer, &member)?,

@@ -113,14 +113,22 @@ impl<'a> Generator<'a> for DatadogLog {
     {
         Ok(Member {
             message: message(&mut rng, &self.str_pool),
-            status: STATUSES.choose(rng).expect("failed to generate status"),
+            status: STATUSES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("STATUSES is a non-empty const array")),
             timestamp: rng.random(),
-            hostname: HOSTNAMES.choose(rng).expect("failed to generate hostnames"),
-            service: SERVICES.choose(rng).expect("failed to generate services"),
-            ddsource: SOURCES.choose(rng).expect("failed to generate sources"),
+            hostname: HOSTNAMES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("HOSTNAMES is a non-empty const array")),
+            service: SERVICES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("SERVICES is a non-empty const array")),
+            ddsource: SOURCES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("SOURCES is a non-empty const array")),
             ddtags: TAG_OPTIONS
                 .choose(rng)
-                .expect("failed to generate tag options"),
+                .unwrap_or_else(|| unreachable!("TAG_OPTIONS is a non-empty const array")),
         })
     }
 }

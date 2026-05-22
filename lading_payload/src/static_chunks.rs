@@ -157,7 +157,7 @@ impl StaticChunks {
             let reader = self
                 .current_reader
                 .as_mut()
-                .expect("reader should be present after ensure_reader");
+                .unwrap_or_else(|| unreachable!("ensure_reader populates current_reader on Ok"));
 
             buf.clear();
             let read = reader.read_line(buf)?;
