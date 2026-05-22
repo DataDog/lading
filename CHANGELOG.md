@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Annotated 11 `lading_payload` functions that intentionally panic on
+  invariant violations with `#[expect(clippy::expect_used, reason = "...")]`.
+  Covered: `block::Cache::read_at` (documented `usize`/`u64` overflow
+  panic), `RandomStringPool::using_handle` and
+  `StringListPool::using_handle` (handle-type contract), and the
+  `Display::fmt` impls for `Event`, `ServiceCheck`, `Count`, `Gauge`,
+  `Timer`, `Dist`, `Set`, `Histogram` (tag-pool handle lookups). No
+  runtime behavior change; the `.expect()` calls remain in place.
 - Replaced 6 in-function-invariant `.expect()` sites in `lading_payload`
   with `.unwrap_or_else(|_| unreachable!("..."))` /
   `.unwrap_or_else(|| unreachable!("..."))`. Covered: `usize → u32`

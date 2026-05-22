@@ -131,6 +131,10 @@ impl Pool for RandomStringPool {
     }
 
     #[inline]
+    #[expect(
+        clippy::expect_used,
+        reason = "handle was issued by this pool earlier in the call chain; a non-PosAndLength handle indicates a cross-pool programming error"
+    )]
     fn using_handle(&self, handle: Handle) -> Option<&str> {
         let (offset, length) = handle
             .as_pos_and_length()

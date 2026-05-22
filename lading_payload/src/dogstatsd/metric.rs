@@ -339,6 +339,10 @@ pub struct Count<'a> {
 }
 
 impl fmt::Display for Count<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAGVALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -411,6 +415,10 @@ pub struct Gauge<'a> {
 }
 
 impl fmt::Display for Gauge<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -479,6 +487,10 @@ pub struct Timer<'a> {
 }
 
 impl fmt::Display for Timer<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -547,6 +559,10 @@ pub struct Dist<'a> {
 }
 
 impl fmt::Display for Dist<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -613,6 +629,10 @@ pub struct Set<'a> {
 }
 
 impl fmt::Display for Set<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|s|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         let name = &self.name;
@@ -674,6 +694,10 @@ pub struct Histogram<'a> {
 }
 
 impl fmt::Display for Histogram<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at metric construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|h|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|h|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>

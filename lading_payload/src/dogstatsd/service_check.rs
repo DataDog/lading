@@ -71,6 +71,10 @@ pub struct ServiceCheck<'a> {
 }
 
 impl fmt::Display for ServiceCheck<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at service-check construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         write!(

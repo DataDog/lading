@@ -102,6 +102,10 @@ pub struct Event<'a> {
 }
 
 impl fmt::Display for Event<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "tag handles were issued by self.pools at event construction; mismatched lookup indicates an internal invariant violation"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(
