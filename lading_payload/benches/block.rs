@@ -1,5 +1,9 @@
 //! Benchmarks for Block Cache operations.
 
+// `.expect()` is permitted in benches; workspace denies `clippy::expect_used`
+// for production code.
+#![allow(clippy::expect_used)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::Config;
 use lading_payload::block::Cache;

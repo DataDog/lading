@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Added `clippy::expect_used = "deny"` to the workspace-level lint set,
+  mirroring the existing `clippy::unwrap_used` policy, and set
+  `allow-expect-in-tests = true` in `clippy.toml`. Production `.expect()`
+  calls are now denied in library crates while `#[cfg(test)]` code is
+  unaffected. Crates with pre-existing production `.expect()` sites
+  (`lading`, `lading_capture`, `lading_payload`, `lading_throttle`) carry
+  a transitional `#![allow(clippy::expect_used)]` quarantine at their
+  crate roots; this allow will be removed crate-by-crate as the sites are
+  cleaned up.
 - Updated to rand 0.10.x
 - `dogstatsd` generator now supports configurable pools for the `|c:` (container
   ID), `|e:` (external data), and `|card:` (cardinality) origin detection
