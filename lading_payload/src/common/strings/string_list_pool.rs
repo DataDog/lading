@@ -250,13 +250,21 @@ fn range_len(range: &PatternRange) -> Result<usize, Error> {
 fn range_value_at(range: &PatternRange, idx: usize) -> String {
     match range {
         PatternRange::Char(start, _end) => char::from_u32(
-            *start as u32 + u32::try_from(idx).expect("pattern shouldn't be that big"),
+            *start as u32
+                + u32::try_from(idx).unwrap_or_else(|_| {
+                    unreachable!("idx is bounded by range length, which fits in u32")
+                }),
         )
-        .expect("idx is within range bounds")
+        .unwrap_or_else(|| {
+            unreachable!("char range expansion produces valid Unicode scalars by construction")
+        })
         .to_string(),
         PatternRange::Number(start, end) => {
             let numdigits = std::cmp::max(start.to_string().len(), end.to_string().len());
-            let n = start + u32::try_from(idx).expect("pattern shouldn't be that big");
+            let n = start
+                + u32::try_from(idx).unwrap_or_else(|_| {
+                    unreachable!("idx is bounded by range length, which fits in u32")
+                });
             format!("{n:0numdigits$}")
         }
     }

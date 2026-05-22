@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Replaced 6 in-function-invariant `.expect()` sites in `lading_payload`
+  with `.unwrap_or_else(|_| unreachable!("..."))` /
+  `.unwrap_or_else(|| unreachable!("..."))`. Covered: `usize → u32`
+  conversions in `block::construct_block`,
+  `random_string_pool::of_size_with_handle` (×2), and
+  `string_list_pool::range_value_at` (×2, plus one
+  `char::from_u32(...)` on values produced by char range expansion).
+  All sites are guarded by invariants established earlier in the same
+  function or at pool construction (`with_size` asserts pool length
+  fits in u32). No runtime behavior change.
 - Replaced 5 additional infallible-by-construction `.expect()` sites in
   `lading_payload` with `.unwrap_or_else(|_| unreachable!("..."))` /
   `.unwrap_or_else(|| unreachable!("..."))`. Covered: 4 sites in
