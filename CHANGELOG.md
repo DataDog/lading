@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Removed the transitional `#![allow(clippy::expect_used)]` quarantine from
+  `lading_throttle`. All `.expect()` sites in that crate are under
+  `#[cfg(test)]` or `#[cfg(kani)]`, so the workspace-level
+  `clippy::expect_used = "deny"` now applies without local overrides.
 - Added `clippy::expect_used = "deny"` to the workspace-level lint set,
   mirroring the existing `clippy::unwrap_used` policy, and set
   `allow-expect-in-tests = true` in `clippy.toml`. Production `.expect()`
