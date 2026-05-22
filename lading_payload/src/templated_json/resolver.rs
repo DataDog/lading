@@ -152,7 +152,7 @@ impl Resolver {
         self.grey[idx] = true;
         let vgen = self.raw_defs[idx]
             .take()
-            .expect("raw definition should exist");
+            .unwrap_or_else(|| unreachable!("raw_defs[idx] is Some when grey[idx] is first set"));
         let resolved = vgen.resolve(self)?;
         self.resolved_defs[idx] = Some(resolved);
         self.grey[idx] = false;

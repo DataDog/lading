@@ -174,12 +174,12 @@ impl StringListPool {
 
         // Validate that ranges are not backwards
         if start_is_num && end_is_num {
-            let start_num = start
-                .parse::<u32>()
-                .expect("start_is_num guarantees this parses");
-            let end_num = end
-                .parse::<u32>()
-                .expect("end_is_num guarantees this parses");
+            let start_num = start.parse::<u32>().unwrap_or_else(|_| {
+                unreachable!("start_is_num was set from start.parse::<u32>().is_ok()")
+            });
+            let end_num = end.parse::<u32>().unwrap_or_else(|_| {
+                unreachable!("end_is_num was set from end.parse::<u32>().is_ok()")
+            });
             if start_num > end_num {
                 return Err(Error::MalformedPattern {
                     pattern: format!("{{{{{start}-{end}}}}}"),
@@ -189,11 +189,11 @@ impl StringListPool {
             let start_char = start
                 .chars()
                 .next()
-                .expect("start_is_char guarantees non-empty");
+                .unwrap_or_else(|| unreachable!("start_is_char requires start.len() == 1"));
             let end_char = end
                 .chars()
                 .next()
-                .expect("end_is_char guarantees non-empty");
+                .unwrap_or_else(|| unreachable!("end_is_char requires end.len() == 1"));
             if start_char > end_char {
                 return Err(Error::MalformedPattern {
                     pattern: format!("{{{{{start}-{end}}}}}"),
