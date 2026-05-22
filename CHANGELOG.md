@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Replaced 5 additional infallible-by-construction `.expect()` sites in
+  `lading_payload` with `.unwrap_or_else(|_| unreachable!("..."))` /
+  `.unwrap_or_else(|| unreachable!("..."))`. Covered: 4 sites in
+  `string_list_pool::validate_range` (parse-and-chars-iter calls guarded by
+  flags set immediately above) and 1 site in
+  `templated_json::resolver::resolve_def` (take-from-`Option`-Vec inside a
+  three-color visit state machine). No runtime behavior change.
 - Replaced 26 infallible-by-construction `.expect()` sites in `lading_payload`
   with `.unwrap_or_else(|| unreachable!("..."))`, making the impossibility
   structural and explicit. Sites covered: 20 `CONST_ARR.choose(rng)` against
