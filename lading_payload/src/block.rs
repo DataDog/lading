@@ -506,6 +506,10 @@ impl Cache {
     /// # Panics
     ///
     /// Function will panic if reads are larger than machine word bytes wide.
+    #[expect(
+        clippy::expect_used,
+        reason = "u64-to-usize panic on overflow is the documented contract of this function"
+    )]
     pub fn read_at(&self, offset: u64, size: usize) -> Bytes {
         let mut data = BytesMut::with_capacity(size);
 

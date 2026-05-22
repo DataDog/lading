@@ -417,6 +417,10 @@ impl Pool for StringListPool {
         Some((&self.metric_names[idx], Handle::Index(idx)))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "handle was issued by this pool earlier in the call chain; a non-Index handle indicates a cross-pool programming error"
+    )]
     fn using_handle(&self, handle: Handle) -> Option<&str> {
         let idx = handle
             .as_index()
