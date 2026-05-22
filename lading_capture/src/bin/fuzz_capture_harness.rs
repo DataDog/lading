@@ -7,9 +7,6 @@
 
 #![expect(clippy::print_stderr)]
 #![allow(clippy::cast_precision_loss)]
-// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
-// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
-#![allow(clippy::expect_used)]
 
 use anyhow::{Context, Result};
 use arbitrary::Arbitrary;
@@ -389,7 +386,9 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
 
     // Rip through operations, tracking total time advanced
     while elapsed_ms < runtime_ms {
-        let op = op_iter.next().expect("infinite iterator");
+        let op = op_iter
+            .next()
+            .unwrap_or_else(|| unreachable!("OpIterator::next() always returns Some"));
         if let Op::AdvanceTime { millis } = op {
             elapsed_ms += millis;
         }

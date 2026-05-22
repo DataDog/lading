@@ -227,9 +227,11 @@ impl Iterator for DrainIter {
             if sketch.count() > 0 {
                 let mut dogsketch = Dogsketch::new();
                 sketch.merge_to_dogsketch(&mut dogsketch);
-                let sketch_bytes = dogsketch
-                    .write_to_bytes()
-                    .expect("protobuf serialization failed");
+                let sketch_bytes = dogsketch.write_to_bytes().unwrap_or_else(|_| {
+                    unreachable!(
+                        "prost::Message::write_to_bytes on an in-memory Dogsketch cannot fail"
+                    )
+                });
                 metrics.push((
                     key.clone(),
                     MetricValue::Histogram(sketch_bytes),
@@ -522,9 +524,11 @@ impl Accumulator {
             if sketch.count() > 0 {
                 let mut dogsketch = Dogsketch::new();
                 sketch.merge_to_dogsketch(&mut dogsketch);
-                let sketch_bytes = dogsketch
-                    .write_to_bytes()
-                    .expect("protobuf serialization failed");
+                let sketch_bytes = dogsketch.write_to_bytes().unwrap_or_else(|_| {
+                    unreachable!(
+                        "prost::Message::write_to_bytes on an in-memory Dogsketch cannot fail"
+                    )
+                });
                 metrics.push((
                     key.clone(),
                     MetricValue::Histogram(sketch_bytes),

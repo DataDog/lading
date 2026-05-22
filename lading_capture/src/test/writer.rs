@@ -30,6 +30,10 @@ impl InMemoryWriter {
     ///
     /// Panics if the mutex is poisoned
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "mutex poisoning in this test/fuzz helper is the documented contract above"
+    )]
     pub fn get_bytes(&self) -> Vec<u8> {
         self.buffer.lock().expect("mutex poisoned").clone()
     }
@@ -40,6 +44,10 @@ impl InMemoryWriter {
     ///
     /// Panics if the buffer contains invalid UTF-8
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "invalid UTF-8 in this test/fuzz helper is the documented contract above"
+    )]
     pub fn get_string(&self) -> String {
         String::from_utf8(self.get_bytes()).expect("buffer contains invalid UTF-8")
     }
@@ -53,6 +61,10 @@ impl InMemoryWriter {
     /// # Panics
     ///
     /// Panics if the mutex is poisoned
+    #[expect(
+        clippy::expect_used,
+        reason = "mutex poisoning in this test/fuzz helper is the documented contract above"
+    )]
     pub fn parse_lines(&self) -> Result<Vec<crate::line::Line>, serde_json::Error> {
         let buffer = self.buffer.lock().expect("mutex poisoned");
         let content_str = String::from_utf8_lossy(&buffer);
@@ -71,6 +83,10 @@ impl Default for InMemoryWriter {
 }
 
 impl Write for InMemoryWriter {
+    #[expect(
+        clippy::expect_used,
+        reason = "mutex poisoning in this test/fuzz helper is treated as a fatal error per the type's documented contract"
+    )]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.buffer
             .lock()

@@ -5,6 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Retired all production `.expect()` sites in `lading_capture` and dropped
+  both crate-root quarantines (`lading_capture/src/lib.rs` and
+  `lading_capture/src/bin/fuzz_capture_harness.rs`). Treatment mix:
+  7 fn-level `#[expect(clippy::expect_used, reason = "...")]` for
+  contract-style invariants (test/fuzz helper in `test/writer.rs`,
+  state-machine `format` field in `manager/state_machine.rs`,
+  `CaptureManager::start` consuming `self.shutdown`), and
+  4 site-level `.unwrap_or_else(... unreachable!("..."))` for
+  structural infallibles (`SystemTime` post-UNIX_EPOCH in
+  `RealClock::now_ms`, prost serialization of in-memory `Dogsketch`
+  values in `accumulator.rs` ×2, `OpIterator::next()` on an infinite
+  iterator in `bin/fuzz_capture_harness.rs`). No runtime behavior
+  change.
 - Retired the remaining 17 production `.expect()` sites in `lading_payload`
   and dropped the crate-root `#![allow(clippy::expect_used)]` quarantine.
   13 sites became `.unwrap_or_else(... unreachable!("..."))` (structural
