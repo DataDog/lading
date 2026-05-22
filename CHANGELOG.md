@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Fixed a latent panic in `lading_payload::block::Block::arbitrary`
+  (`#[cfg(feature = "arbitrary")]`). `u32::arbitrary` can legitimately
+  produce 0, but `Block::total_bytes` is `NonZeroU32`; the previous code
+  called `NonZeroU32::new(total_bytes).expect("total_bytes must be
+  non-zero")` and panicked on the zero case. The fix returns
+  `arbitrary::Error::IncorrectFormat` so the fuzzer rejects the input
+  and moves on. A regression test (`arbitrary_rejects_zero_total_bytes`)
+  pins the new behavior.
 - Annotated 11 `lading_payload` functions that intentionally panic on
   invariant violations with `#[expect(clippy::expect_used, reason = "...")]`.
   Covered: `block::Cache::read_at` (documented `usize`/`u64` overflow
