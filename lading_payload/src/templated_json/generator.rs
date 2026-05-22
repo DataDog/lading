@@ -183,7 +183,9 @@ impl Timestamp {
         let new_ms = base_ms.saturating_add(delta_ms);
         // base_ms >= TIMESTAMP_BASE_SECS_MIN * MS_PER_SEC and delta_ms >= 1,
         // so new_ms is always nonzero; the error branch is unreachable in practice.
-        let new_nz = NonZeroI64::new(new_ms).expect("operations above guarantee nonzero");
+        let new_nz = NonZeroI64::new(new_ms).unwrap_or_else(|| {
+            unreachable!("base_ms >= TIMESTAMP_BASE_SECS_MIN * MS_PER_SEC and delta_ms >= 1")
+        });
         self.0.set(Some(new_nz));
         // Emit only the whole-second part as RFC-3339.
         let dt = OffsetDateTime::from_unix_timestamp(new_ms / MS_PER_SEC)

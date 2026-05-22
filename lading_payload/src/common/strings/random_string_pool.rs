@@ -186,10 +186,9 @@ where
     let mut buf = Vec::with_capacity(total);
     for _ in 0..total {
         let sz = length_range.sample(&mut rng) as usize;
-        buf.push(String::from(
-            pool.of_size(&mut rng, sz)
-                .expect("failed to generate string"),
-        ));
+        buf.push(String::from(pool.of_size(&mut rng, sz).unwrap_or_else(
+            || unreachable!("pool is sized larger than length_range by caller convention"),
+        )));
     }
     buf
 }

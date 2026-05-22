@@ -34,6 +34,10 @@ pub(crate) enum NumValueGenerator {
 
 impl NumValueGenerator {
     #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "ConfRange::Inclusive { min, max } does not validate min <= max at deserialization; a misconfigured config with min > max will panic here with the existing diagnostic message"
+    )]
     pub(crate) fn new(conf: ValueConf) -> Self {
         match conf.range {
             ConfRange::Constant(c) => Self::Constant {

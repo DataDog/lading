@@ -5,6 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Retired the remaining 17 production `.expect()` sites in `lading_payload`
+  and dropped the crate-root `#![allow(clippy::expect_used)]` quarantine.
+  13 sites became `.unwrap_or_else(... unreachable!("..."))` (structural
+  infallibles: serde_json on simple structs, RFC-3339 of a known-valid
+  `OffsetDateTime`, `NonZeroI64` after a documented positivity invariant,
+  `parts.last()` after `str::split`, `Vec::pop` after a known push, etc.).
+  4 sites in `dogstatsd/{common,metric,service_check}.rs` are annotated
+  with fn-level `#[expect(clippy::expect_used, reason = "...")]` because
+  the panic is the documented contract when upstream config validation
+  is too loose (empty `templates`/`names` vec, `ConfRange::Inclusive`
+  with `min > max`). `lading_payload` is now fully covered by the
+  workspace-level `clippy::expect_used = "deny"`.
 - Fixed a latent panic in `lading_payload::block::Block::arbitrary`
   (`#[cfg(feature = "arbitrary")]`). `u32::arbitrary` can legitimately
   produce 0, but `Block::total_bytes` is `NonZeroU32`; the previous code

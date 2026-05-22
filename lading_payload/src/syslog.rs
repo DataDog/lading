@@ -73,8 +73,10 @@ impl Distribution<Member> for StandardUniform {
                 let range: i64 = 315_360_000; // ~10 years in seconds
                 let offset: i64 = rng.random_range(0..range);
                 let ts = OffsetDateTime::from_unix_timestamp(base_ts + offset)
-                    .expect("timestamp in valid range");
-                ts.format(&Rfc3339).expect("failed to format timestamp")
+                    .unwrap_or_else(|_| unreachable!("base_ts + offset stays within [2020, 2030] which is well inside the valid OffsetDateTime range"));
+                ts.format(&Rfc3339).unwrap_or_else(|_| {
+                    unreachable!("RFC-3339 formatting of a valid OffsetDateTime cannot fail")
+                })
             },
             hostname: HOSTNAMES
                 .choose(rng)
@@ -84,7 +86,9 @@ impl Distribution<Member> for StandardUniform {
                 .unwrap_or_else(|| unreachable!("APP_NAMES is a non-empty const array")),
             procid: rng.random_range(100..=9999),
             msgid: rng.random_range(1..=999),
-            message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
+            message: serde_json::to_string(&rng.random::<Message>()).unwrap_or_else(|_| {
+                unreachable!("Message is a struct of primitive fields with derived Serialize")
+            }),
         }
     }
 }
