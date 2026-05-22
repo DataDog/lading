@@ -6,9 +6,6 @@
 #![deny(clippy::cargo)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
-// Quarantine: workspace denies `clippy::expect_used`, but this crate still has
-// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
-#![allow(clippy::expect_used)]
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
