@@ -390,7 +390,7 @@ impl crate::Serialize for StaticTimestamped {
         let block = self
             .next_block
             .take()
-            .expect("fill_next_block guarantees a block");
+            .unwrap_or_else(|| unreachable!("fill_next_block populates next_block on Ok"));
 
         let mut bytes_written = 0usize;
         if block.lines.is_empty() {

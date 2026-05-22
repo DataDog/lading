@@ -28,7 +28,9 @@ impl Distribution<Member> for StandardUniform {
     where
         R: Rng + ?Sized,
     {
-        let max = *SIZES.choose(rng).expect("failed to choose size");
+        let max = *SIZES
+            .choose(rng)
+            .unwrap_or_else(|| unreachable!("SIZES is a non-empty const array"));
 
         // Pre-allocate and fill in one operation rather than iterator-collect.
         // Using fill() is faster than sample_iter().take().collect() because

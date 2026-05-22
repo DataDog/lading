@@ -143,13 +143,10 @@ pub fn default_cache_method() -> CacheMethod {
 
 /// The default block maximum size.
 ///
-/// # Panics
-///
-/// This function will panic if the byte unit conversion fails, which should never happen
-/// with the hardcoded value of 1 MiB.
 #[must_use]
 pub fn default_maximum_block_size() -> Byte {
-    Byte::from_u64_with_unit(1, Unit::MiB).expect("catastrophic programming bug")
+    Byte::from_u64_with_unit(1, Unit::MiB)
+        .unwrap_or_else(|| unreachable!("1 MiB is always a representable Byte value"))
 }
 
 #[derive(Debug)]

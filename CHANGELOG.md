@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Replaced 26 infallible-by-construction `.expect()` sites in `lading_payload`
+  with `.unwrap_or_else(|| unreachable!("..."))`, making the impossibility
+  structural and explicit. Sites covered: 20 `CONST_ARR.choose(rng)` against
+  non-empty `const` arrays, 5 `write!(&mut Vec<u8>, ...)` calls (io::Write on
+  `Vec<u8>` never errors), and 3 `Option`-after-guard sites
+  (`as_mut().expect(...)` post-`ensure_reader()`, `take().expect(...)`
+  post-`fill_next_block()`, `Byte::from_u64_with_unit(1, MiB)`). No runtime
+  behavior change.
 - Removed the transitional `#![allow(clippy::expect_used)]` quarantine from
   `lading_throttle`. All `.expect()` sites in that crate are under
   `#[cfg(test)]` or `#[cfg(kani)]`, so the workspace-level

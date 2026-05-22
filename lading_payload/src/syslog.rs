@@ -76,8 +76,12 @@ impl Distribution<Member> for StandardUniform {
                     .expect("timestamp in valid range");
                 ts.format(&Rfc3339).expect("failed to format timestamp")
             },
-            hostname: HOSTNAMES.choose(rng).expect("failed to choose hostname"),
-            app_name: APP_NAMES.choose(rng).expect("failed to choose app name"),
+            hostname: HOSTNAMES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("HOSTNAMES is a non-empty const array")),
+            app_name: APP_NAMES
+                .choose(rng)
+                .unwrap_or_else(|| unreachable!("APP_NAMES is a non-empty const array")),
             procid: rng.random_range(100..=9999),
             msgid: rng.random_range(1..=999),
             message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
@@ -115,7 +119,7 @@ impl crate::Serialize for Syslog5424 {
                 member.msgid,
                 member.message
             )
-            .expect("formatting to Vec<u8> cannot fail");
+            .unwrap_or_else(|_| unreachable!("io::Write on Vec<u8> never errors"));
 
             let line_length = buffer.len() + 1; // add one for the newline
 

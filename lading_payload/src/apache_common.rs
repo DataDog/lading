@@ -30,7 +30,7 @@ impl Distribution<StatusCode> for StandardUniform {
         StatusCode(
             *STATUS_CODES
                 .choose(rng)
-                .expect("failed to choose status codes"),
+                .unwrap_or_else(|| unreachable!("STATUS_CODES is a non-empty const array")),
         )
     }
 }
@@ -354,7 +354,8 @@ impl crate::Serialize for ApacheCommon {
             let member: Member = self.generate(&mut rng)?;
             buffer.clear();
             // Format into the reusable buffer - write! on Vec<u8> is infallible
-            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            write!(&mut buffer, "{member}")
+                .unwrap_or_else(|_| unreachable!("io::Write on Vec<u8> never errors"));
             let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
