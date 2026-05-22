@@ -1,0 +1,29 @@
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9100"
+      concurrent_requests_max: 1000
+      response_delay_millis: 100
+      headers:
+        content-type: "text/plain; version=0.0.4"
+      body_variant:
+        openmetrics:
+          metric_name_prefix: "om_scale"
+          include_help: true
+          include_type: true
+          counters:
+            count: 240
+          gauges:
+            count: 180
+          histograms:
+            count: 20
+            buckets: ["0.005", "0.01", "0.025", "0.05", "0.1", "0.25", "0.5", "1", "2.5", "5"]
+          summaries:
+            count: 40
+            quantiles: ["0.5", "0.75", "0.9", "0.95", "0.99"]
+          labels:
+            services: ["checkout", "catalog", "payments", "fulfillment", "search"]
+            regions: ["us-east-1", "us-west-2", "eu-central-1", "ap-southeast-1"]
+            methods: ["GET", "POST", "PUT", "DELETE"]
+            status_classes: ["2xx", "3xx", "4xx", "5xx"]
+            consumers: ["consumer-00", "consumer-01", "consumer-02", "consumer-03"]
+            route_count: 60
