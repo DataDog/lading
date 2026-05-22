@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dogstatsd` generator now supports DogStatsD protocol v1.3 `|T` timestamps
   for count and gauge metrics via `timestamp.range` and `timestamp.probability`.
 
+## Removed
+- Removed no longer used `smaps.private_hugetlb.by_pathname` procfs observer
+  metric.
+
 ## [0.32.0]
 ## Changed
 - Updated dependencies
