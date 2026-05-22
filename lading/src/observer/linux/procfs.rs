@@ -258,7 +258,6 @@ impl Sampler {
                         ];
                         gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
                         gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
-                        gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
                         gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
 
                         if let Some(m) = measures.private_clean {
