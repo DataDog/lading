@@ -207,6 +207,10 @@ impl FileTree {
     /// # Panics
     ///
     /// Function will panic if one node is not path is not populated properly
+    #[expect(
+        clippy::expect_used,
+        reason = "self.nodes is non-empty at construction and iter().cycle() never terminates"
+    )]
     pub async fn spin(mut self) -> Result<(), Error> {
         let mut iter = self.nodes.iter().cycle();
         let mut folders = Vec::with_capacity(self.total_folder);

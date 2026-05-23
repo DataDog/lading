@@ -226,6 +226,10 @@ impl Container {
     ///
     /// Panics if container index cannot be converted to u32.
     #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::expect_used,
+        reason = "u32::try_from on `idx` from enumerate(..self.concurrent_containers) which is u32 by config"
+    )]
     pub async fn spin(mut self) -> Result<(), Error> {
         info!(
             "Container generator running: {repository}:{tag}",
