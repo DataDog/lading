@@ -141,6 +141,10 @@ impl Http {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "OnceCell::set is called exactly once at HTTP generator startup"
+    )]
     pub fn new(
         general: General,
         config: Config,
@@ -212,6 +216,10 @@ impl Http {
     ///
     /// Function will panic if it is unable to create HTTP requests for the
     /// target.
+    #[expect(
+        clippy::expect_used,
+        reason = "OnceCell::get on a value set during `new`, and Semaphore::acquire panics only after `Semaphore::close`; we never close the throttle semaphore"
+    )]
     pub async fn spin(mut self) -> Result<(), Error> {
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(self.concurrency.connection_count() as usize)

@@ -192,6 +192,10 @@ impl SplunkHec {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "OnceCell::set is called exactly once at Splunk HEC generator startup"
+    )]
     pub fn new(
         general: General,
         config: Config,
@@ -267,6 +271,10 @@ impl SplunkHec {
     ///
     /// Function will panic if it is unable to create HTTP requests for the
     /// target.
+    #[expect(
+        clippy::expect_used,
+        reason = "channel iterator is constructed from a non-empty Vec; OnceCell::get and Semaphore::acquire follow the same contract as the HTTP generator"
+    )]
     pub async fn spin(mut self) -> Result<(), Error> {
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(self.parallel_connections as usize)
@@ -339,6 +347,10 @@ impl SplunkHec {
 }
 
 #[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::expect_used,
+    reason = "FIXME: server response parsing on Splunk HEC ack-id should surface as an Error variant rather than panic on malformed remote responses. Tracked for follow-up."
+)]
 async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,

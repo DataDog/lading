@@ -76,6 +76,10 @@ impl Resource {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "callers must set the name via `set_name` before calling `get_name`; this is a documented internal API contract"
+    )]
     pub(super) fn get_name(&self) -> &str {
         self.meta()
             .name

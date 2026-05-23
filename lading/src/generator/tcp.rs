@@ -131,6 +131,10 @@ impl Tcp {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "FIXME: config.addr is user-supplied; socket address parsing failures should surface as Error variants instead of panicking. Tracked for follow-up."
+    )]
     pub fn new(
         general: General,
         config: &Config,
@@ -168,9 +172,9 @@ impl Tcp {
         for i in 0..worker_count {
             let throttle =
                 create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?
-                    .divide(
-                        NonZeroU32::new(worker_count.into()).expect("worker_count is always >= 1"),
-                    )?;
+                    .divide(NonZeroU32::new(worker_count.into()).unwrap_or_else(|| {
+                        unreachable!("worker_count is NonZeroU16, always >= 1")
+                    }))?;
 
             let mut worker_labels = labels.clone();
             if worker_count > 1 {

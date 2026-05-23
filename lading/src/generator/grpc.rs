@@ -192,6 +192,10 @@ impl Grpc {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "FIXME: config.target_uri is user-supplied; parsing and the required path_and_query check should surface as Error variants instead of panicking. Tracked for follow-up."
+    )]
     pub fn new(
         general: General,
         config: Config,
@@ -241,6 +245,10 @@ impl Grpc {
     }
 
     /// Establish a connection with the configured RPC server
+    #[expect(
+        clippy::expect_used,
+        reason = "Uri::from_parts is reconstructing self.target_uri's parts after replacing path_and_query with an empty static; the parts already came from a valid Uri"
+    )]
     async fn connect(&self) -> Result<client::Grpc<transport::Channel>, Error> {
         let mut parts = self.target_uri.clone().into_parts();
         parts.path_and_query = Some(PathAndQuery::from_static(""));

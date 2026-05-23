@@ -52,6 +52,10 @@ impl Channel {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "callers route Some(ack_id) producers into Channel::Ack; the None branch is unreachable per the worker/ack-service contract"
+    )]
     pub(crate) async fn send<Fut>(&self, msg: Fut) -> Result<(), Error>
     where
         Fut: Future<Output = Option<AckId>>,

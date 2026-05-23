@@ -33,8 +33,10 @@ pub enum Error {
 
 fn default_copy_from_host() -> Vec<PathBuf> {
     vec![
-        PathBuf::from_str("/proc/uptime").expect("failed to convert /proc/uptime to PathBuf"),
-        PathBuf::from_str("/proc/stat").expect("failed to convert /proc/stat to PathBuf"),
+        PathBuf::from_str("/proc/uptime")
+            .unwrap_or_else(|_| unreachable!("\"/proc/uptime\" is a valid PathBuf")),
+        PathBuf::from_str("/proc/stat")
+            .unwrap_or_else(|_| unreachable!("\"/proc/stat\" is a valid PathBuf")),
     ]
 }
 
@@ -141,7 +143,8 @@ impl ProcFs {
         }
 
         // SAFETY: By construction this pathbuf cannot fail to be created.
-        let prefix = PathBuf::from_str("/proc").expect("failed to convert /proc to PathBuf");
+        let prefix = PathBuf::from_str("/proc")
+            .unwrap_or_else(|_| unreachable!("\"/proc\" is a valid PathBuf"));
 
         for path in &config.copy_from_host {
             let base = path.strip_prefix(&prefix)?;
