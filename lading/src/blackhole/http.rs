@@ -12,6 +12,7 @@ use bytes::Bytes;
 use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
+use lading_payload::openmetrics;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
@@ -39,6 +40,9 @@ pub enum Error {
     /// Failed to deserialize the configuration.
     #[error("Failed to deserialize the configuration: {0}")]
     Serde(#[from] serde_json::Error),
+    /// `OpenMetrics` payload generation failed.
+    #[error("OpenMetrics payload error: {0}")]
+    OpenMetrics(#[from] lading_payload::openmetrics::Error),
     /// Wrapper for [`crate::blackhole::common::Error`].
     #[error(transparent)]
     Common(#[from] crate::blackhole::common::Error),
@@ -75,6 +79,9 @@ pub enum BodyVariant {
     RawBytes,
     /// Respond with a hardcoded string value
     Static(String),
+    /// Respond with a generated `OpenMetrics` text exposition body.
+    #[serde(rename = "openmetrics")]
+    OpenMetrics(Box<openmetrics::Config>),
 }
 
 fn default_body_variant() -> BodyVariant {
@@ -111,6 +118,7 @@ pub struct Config {
     pub binding_addr: SocketAddr,
     /// the body variant to respond with, default nothing
     #[serde(default = "default_body_variant")]
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub body_variant: BodyVariant,
     /// Headers to include in the response; default is `Content-Type: application/json`
     #[serde(with = "http_serde::header_map", default = "default_headers")]
@@ -233,6 +241,7 @@ impl Http {
             BodyVariant::Nothing => vec![],
             BodyVariant::RawBytes => config.raw_bytes.clone(),
             BodyVariant::Static(val) => val.as_bytes().to_vec(),
+            BodyVariant::OpenMetrics(conf) => openmetrics::OpenMetrics::new(conf)?.into_bytes(),
         };
 
         Ok(Self {
@@ -338,5 +347,37 @@ raw_bytes: [0x01, 0x02, 0x10]
                 raw_bytes: vec![0x01, 0x02, 0x10],
             },
         );
+    }
+
+    #[test]
+    fn config_deserializes_openmetrics() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+body_variant:
+  openmetrics:
+    metric_name_prefix: "om_test"
+    counters:
+      count: 2
+    gauges:
+      count: 3
+    histograms:
+      count: 1
+      buckets: ["0.5", "1"]
+    summaries:
+      count: 1
+      quantiles: ["0.5", "0.99"]
+"#;
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
+        match config.body_variant {
+            BodyVariant::OpenMetrics(openmetrics) => {
+                assert_eq!(openmetrics.metric_name_prefix, "om_test");
+                assert_eq!(openmetrics.counters.count, 2);
+                assert_eq!(openmetrics.gauges.count, 3);
+                assert_eq!(openmetrics.histograms.count, 1);
+                assert_eq!(openmetrics.summaries.count, 1);
+            }
+            other => panic!("expected openmetrics body variant, got {other:?}"),
+        }
     }
 }
