@@ -2,9 +2,6 @@
 
 #![expect(clippy::print_stdout)]
 #![expect(clippy::print_stderr)]
-// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
-// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
-#![allow(clippy::expect_used)]
 
 /// Memory allocation tracking for payloadtool statistics.
 ///
@@ -284,6 +281,10 @@ struct Args {
     dump: Option<PathBuf>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "Byte::from_u128 only fails on 0; total_bytes is NonZeroU32, and the diagnostic-path total_generated_bytes path inherits the same invariant from the caller"
+)]
 fn generate_and_check(
     config: &lading_payload::Config,
     seed: [u8; 32],
@@ -367,6 +368,10 @@ fn generate_and_check(
 }
 
 #[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::expect_used,
+    reason = "FIXME: maximum_prebuild_cache_size_bytes is user-supplied config; a zero value should surface as a recoverable error rather than panicking. Tracked for follow-up."
+)]
 fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fingerprint>> {
     match &config.inner {
         generator::Inner::FileGen(g) => {

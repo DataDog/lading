@@ -441,6 +441,10 @@ impl Process {
 ///
 /// Function will panic if the process execution fails.
 ///
+#[expect(
+    clippy::expect_used,
+    reason = "the iterator is populated from the caller's pre-validated process tree; missing nodes or missing exit codes indicate a programming error in the tree construction"
+)]
 pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error> {
     let mut iter = nodes.iter().peekable();
     let mut pids_to_wait: FxHashSet<Pid> = FxHashSet::default();

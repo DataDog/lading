@@ -142,6 +142,10 @@ impl Udp {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::expect_used,
+        reason = "FIXME: config.addr is user-supplied; socket address parsing failures should surface as Error variants instead of panicking. Tracked for follow-up."
+    )]
     pub fn new(
         general: General,
         config: &Config,
@@ -179,9 +183,9 @@ impl Udp {
         for i in 0..worker_count {
             let throttle =
                 create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?
-                    .divide(
-                        NonZeroU32::new(worker_count.into()).expect("worker_count is always >= 1"),
-                    )?;
+                    .divide(NonZeroU32::new(worker_count.into()).unwrap_or_else(|| {
+                        unreachable!("worker_count is NonZeroU16, always >= 1")
+                    }))?;
 
             let mut worker_labels = labels.clone();
             if worker_count > 1 {
@@ -236,6 +240,10 @@ struct UdpWorker {
 }
 
 impl UdpWorker {
+    #[expect(
+        clippy::expect_used,
+        reason = "the wait_for_block branch is gated on `connection.is_some()` in the tokio::select! arm; the Option is guaranteed Some when this branch fires"
+    )]
     async fn spin(mut self) -> Result<(), Error> {
         debug!("UDP generator worker running");
         let mut connection = Option::<UdpSocket>::None;
