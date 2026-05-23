@@ -1,9 +1,5 @@
 //! Main lading binary for load testing.
 
-// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
-// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
-#![allow(clippy::expect_used)]
-
 use std::{
     env,
     fmt::{self, Display},
@@ -105,6 +101,10 @@ impl Display for CliKeyValues {
 impl FromStr for CliKeyValues {
     type Err = String;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "compile-time-constant regex literal; capture group 0 always exists on a successful match"
+    )]
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         // A key matches `[[:alnum:]_-]+` (letters, digits, underscores,
         // hyphens) and a value conforms to `[[:alpha:]_:,`. A key is always
@@ -307,6 +307,10 @@ fn validate_config(config_path: &str) -> Result<Config, Error> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "PIDs from --target-pid CLI argument fit in i32 on supported platforms; a failure indicates a platform invariant violation"
+)]
 fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error> {
     let mut config = if let Some(contents) = config {
         // Config provided via environment variable - parse as single file
@@ -401,6 +405,10 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
 }
 
 #[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::expect_used,
+    reason = "telemetry is validated in get_config before reaching inner_main; the metrics recorder and capture manager are global singletons whose set-once installation is part of the documented startup contract"
+)]
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,

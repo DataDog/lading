@@ -128,6 +128,10 @@ impl TcpRr {
     /// # Panics
     ///
     /// Panics if `addr` cannot be resolved to a socket address.
+    #[expect(
+        clippy::expect_used,
+        reason = "FIXME: config.addr is user-supplied; parse failure should surface as an Error variant instead of panicking. Tracked for follow-up."
+    )]
     pub async fn spin(self) -> Result<(), Error> {
         if self.config.threads > self.config.flows {
             return Err(Error::Config(format!(
@@ -233,6 +237,10 @@ impl TcpRr {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "mio Poll creation, nonblocking setup, and registry registration fail only on system resource exhaustion; documented contract for the per-thread client startup"
+)]
 fn client_thread_main(
     addr: SocketAddr,
     num_flows: u16,

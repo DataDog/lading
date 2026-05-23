@@ -1,9 +1,6 @@
 //! Capture analysis tool for lading capture files.
 
 #![expect(clippy::print_stdout)]
-// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
-// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
-#![allow(clippy::expect_used)]
 
 mod analyze;
 
@@ -75,6 +72,10 @@ pub enum Error {
 
 #[tokio::main(flavor = "current_thread")]
 #[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::expect_used,
+    reason = "FIXME: line read and JSON deserialization should surface as Error variants rather than panicking; tracked for follow-up. Task join panics are intentional propagation of inner panics."
+)]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)
@@ -230,6 +231,10 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "FIXME: line read and JSON deserialization should surface as Error variants rather than panicking; tracked for follow-up. Task join panics are intentional propagation of inner panics."
+)]
 async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
@@ -286,6 +291,10 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
     report_validation_result(&result, min_seconds)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "ValidationResult::first_error is Some whenever is_valid() returns false; the unreachable None branch indicates a programming error in the validator"
+)]
 fn report_validation_result(
     result: &lading_capture::validate::ValidationResult,
     min_seconds: Option<u64>,
