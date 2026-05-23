@@ -170,6 +170,10 @@ impl Server {
     /// # Panics
     ///
     /// Function will panic if the filesystem cannot be started.
+    #[expect(
+        clippy::expect_used,
+        reason = "FIXME: fuse_mount2 spawn failure should propagate as an Error variant rather than panic; tracked for follow-up"
+    )]
     pub fn new(
         _: generator::General,
         config: Config,
@@ -340,6 +344,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; poisoning indicates a panic during a prior callback and is unrecoverable"
+    )]
     fn lookup(&mut self, _: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
@@ -362,6 +370,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; poisoning indicates a panic during a prior callback and is unrecoverable"
+    )]
     fn getattr(&mut self, _: &Request, ino: u64, _: Option<u64>, reply: ReplyAttr) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
@@ -377,6 +389,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; poisoning indicates a panic during a prior callback and is unrecoverable"
+    )]
     fn read(
         &mut self,
         _: &Request,
@@ -416,6 +432,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; poisoning indicates a panic during a prior callback and is unrecoverable"
+    )]
     fn release(
         &mut self,
         _: &Request,
@@ -448,6 +468,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; mutex poisoning, parent-inode lookup, file-type lookup, and name lookup are all internal invariants maintained by the fs model"
+    )]
     fn readdir(&mut self, _: &Request, ino: u64, _: u64, offset: i64, mut reply: ReplyDirectory) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
@@ -510,6 +534,10 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, _req, reply))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the inner state mutex is held only briefly within fuse callbacks; poisoning indicates a panic during a prior callback and is unrecoverable"
+    )]
     fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");

@@ -653,6 +653,10 @@ impl State {
 
     #[inline]
     #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::expect_used,
+        reason = "node/inode lookups operate on entries the model itself just inserted; invariants enforced inside `State`"
+    )]
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
@@ -972,6 +976,10 @@ impl State {
     /// be advanced -- and a slice up to `size` bytes will be returned or `None`
     /// if no bytes are available to be read.
     #[tracing::instrument(skip(self))]
+    #[expect(
+        clippy::expect_used,
+        reason = "the bytes-written value is bounded by usize and cannot exceed a machine word here"
+    )]
     pub(crate) fn read(
         &mut self,
         file_handle: FileHandle,
