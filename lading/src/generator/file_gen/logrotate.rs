@@ -343,6 +343,10 @@ impl Child {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "self.names is constructed non-empty at LogrotateGenerator startup"
+    )]
     async fn spin(mut self) -> Result<(), Error> {
         let mut handle = self.block_cache.handle();
         let buffer_capacity = self
