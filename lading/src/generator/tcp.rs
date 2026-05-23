@@ -108,6 +108,18 @@ pub enum Error {
         #[source]
         source: Box<std::io::Error>,
     },
+    /// Failed to resolve `config.addr` to a socket address.
+    #[error("Failed to resolve TCP address {addr}: {source}")]
+    AddrParse {
+        /// User-supplied address string.
+        addr: String,
+        /// Underlying resolver error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// `config.addr` resolved to an empty set of socket addresses.
+    #[error("TCP address {0} resolved to no socket addresses")]
+    EmptyAddrResolution(String),
 }
 
 #[derive(Debug)]
@@ -124,17 +136,9 @@ impl Tcp {
     ///
     /// # Errors
     ///
-    /// Creation will fail if the underlying governor capacity exceeds u32.
-    ///
-    /// # Panics
-    ///
-    /// Function will panic if user has passed zero values for any byte
-    /// values. Sharp corners.
+    /// Creation will fail if the underlying governor capacity exceeds u32, or
+    /// if `config.addr` cannot be resolved to a socket address.
     #[expect(clippy::cast_possible_truncation)]
-    #[expect(
-        clippy::expect_used,
-        reason = "FIXME: config.addr is user-supplied; socket address parsing failures should surface as Error variants instead of panicking. Tracked for follow-up."
-    )]
     pub fn new(
         general: General,
         config: &Config,
@@ -158,9 +162,12 @@ impl Tcp {
         let addr = config
             .addr
             .to_socket_addrs()
-            .expect("could not convert to socket")
+            .map_err(|source| Error::AddrParse {
+                addr: config.addr.clone(),
+                source: Box::new(source),
+            })?
             .next()
-            .expect("could not convert to socket addr");
+            .ok_or_else(|| Error::EmptyAddrResolution(config.addr.clone()))?;
 
         let concurrency = ConcurrencyStrategy::new(
             NonZeroU16::new(config.parallel_connections),

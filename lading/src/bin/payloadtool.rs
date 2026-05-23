@@ -368,10 +368,6 @@ fn generate_and_check(
 }
 
 #[expect(clippy::too_many_lines)]
-#[expect(
-    clippy::expect_used,
-    reason = "FIXME: maximum_prebuild_cache_size_bytes is user-supplied config; a zero value should surface as a recoverable error rather than panicking. Tracked for follow-up."
-)]
 fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fingerprint>> {
     match &config.inner {
         generator::Inner::FileGen(g) => {
@@ -398,26 +394,26 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             };
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(cache_size.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(variant, seed, total_bytes, max_block_size, args)
         }
         generator::Inner::UnixDatagram(g) => {
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(&g.variant, g.seed, total_bytes, max_block_size, args)
         }
         generator::Inner::Tcp(g) => {
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::Udp(g) => {
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
             generate_and_check(&g.variant, g.seed, total_bytes, max_block_size, args)
         }
@@ -431,7 +427,7 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             };
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::SplunkHec(_) => {
@@ -451,19 +447,19 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
         generator::Inner::Grpc(g) => {
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::UnixStream(g) => {
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::PassthruFile(g) => {
             #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .expect("Non-zero max prebuild cache size");
+                .ok_or_else(|| anyhow!("maximum_prebuild_cache_size_bytes must be non-zero"))?;
             generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::ProcessTree(_) => {
