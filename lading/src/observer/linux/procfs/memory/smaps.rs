@@ -320,6 +320,10 @@ impl Regions {
         map.into_iter().collect()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "compile-time-constant regex literal; failure to compile is a programming error caught in tests"
+    )]
     fn into_region_strs(contents: &str) -> Vec<&str> {
         let mut str_regions = Vec::new();
         // Split the smaps file into regions

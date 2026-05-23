@@ -72,6 +72,10 @@ impl Expvar {
     /// # Panics
     ///
     /// None are known.
+    #[expect(
+        clippy::expect_used,
+        reason = "reqwest::ClientBuilder::build fails only on TLS backend setup; an unrecoverable bootstrap failure"
+    )]
     pub(crate) async fn run(self) -> Result<(), Error> {
         info!("Expvar target metrics scraper running, but waiting for warmup to complete");
         self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered

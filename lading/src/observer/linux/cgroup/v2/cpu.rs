@@ -41,6 +41,10 @@ impl Sampler {
     }
 
     // Read cgroup CPU data and calculate a percentage of usage.
+    #[expect(
+        clippy::expect_used,
+        reason = "cpu.stat lines from the kernel are guaranteed by the cgroup v2 interface to have key/value pairs; deviation indicates a kernel ABI break"
+    )]
     pub(crate) async fn poll(
         &mut self,
         group_prefix: &Path,

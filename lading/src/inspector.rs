@@ -123,6 +123,10 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
+    #[expect(
+        clippy::expect_used,
+        reason = "child.id() returning Some always fits in i32 on supported platforms; a failure here indicates a platform invariant violation"
+    )]
     pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<ExitStatus, Error> {
         let target_pid = pid_snd.recv().await?;
         drop(pid_snd);

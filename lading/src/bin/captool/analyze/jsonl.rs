@@ -38,6 +38,10 @@ pub(crate) fn list_metrics(lines: &[Line]) -> Vec<MetricInfo> {
 /// Returns statistics grouped by label set (context).
 #[must_use]
 #[expect(clippy::cast_precision_loss)]
+#[expect(
+    clippy::expect_used,
+    reason = "context_map and fetch_indices are populated together by the same loop; a missing fetch_indices entry indicates a programming error in the caller"
+)]
 pub(crate) fn analyze_metric(
     lines: &[Line],
     metric_name: &str,
