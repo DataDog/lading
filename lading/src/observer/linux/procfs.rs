@@ -186,6 +186,10 @@ impl Sampler {
         clippy::cast_possible_truncation,
         clippy::cast_possible_wrap
     )]
+    #[expect(
+        clippy::expect_used,
+        reason = "process_info is populated for every pid before handle_process is called; a missing entry here indicates a programming error in the sampler driver"
+    )]
     async fn handle_process(
         &mut self,
         process: Process,
@@ -375,6 +379,10 @@ async fn proc_comm(pid: i32) -> Result<String, Error> {
 
 /// Collect the 'name' of the process. This is pulled from `/proc/<pid>/exe` and
 /// we take the last part of that, like posix `top` does.
+#[expect(
+    clippy::expect_used,
+    reason = "Linux exe symlink targets are valid UTF-8 paths in all real-world cases; non-UTF-8 indicates a non-standard filesystem encoding"
+)]
 async fn proc_exe(pid: i32) -> Result<String, Error> {
     let exe_path = format!("/proc/{pid}/exe");
     let exe = tokio::fs::read_link(&exe_path).await?;

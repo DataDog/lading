@@ -201,6 +201,10 @@ impl Server {
 
     /// Watch a container running elsewhere on the system. lading will report an
     /// error if the container exits before the test completes.
+    #[expect(
+        clippy::expect_used,
+        reason = "container PIDs fit in i32 on supported platforms; a failure indicates a platform invariant violation"
+    )]
     async fn watch_container(
         config: DockerConfig,
         pid_snd: TargetPidSender,
@@ -374,6 +378,10 @@ impl Server {
 
     /// Execute a binary target. lading will attempt to gracefully terminate the
     /// process after the test has completed.
+    #[expect(
+        clippy::expect_used,
+        reason = "child PIDs returned by tokio::process::Command fit in i32 on supported platforms; a failure indicates a platform invariant violation"
+    )]
     async fn execute_binary(
         config: BinaryConfig,
         pid_snd: TargetPidSender,

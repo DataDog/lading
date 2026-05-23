@@ -15,6 +15,10 @@ use tracing::{error, info, trace, warn};
 
 // Regex to match Prometheus label pairs: label_name="label_value"
 // The value can be empty (e.g., label="")
+#[expect(
+    clippy::expect_used,
+    reason = "compile-time-constant regex literal; failure to compile is a programming error caught in tests"
+)]
 static LABEL_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"(\w+)="([^"]*)""#).expect("Failed to compile label regex"));
 
@@ -178,6 +182,10 @@ pub(crate) async fn scrape_metrics(
     clippy::too_many_lines,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "FIXME: this is an ad-hoc Prometheus parser that panics on malformed input; reported parse failures should surface as recoverable errors. Tracked for follow-up."
 )]
 pub(crate) fn parse_prometheus_metrics(
     text: &str,

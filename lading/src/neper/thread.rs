@@ -45,6 +45,10 @@ pub(crate) fn join_all<T>(handles: Vec<JoinHandle<T>>) -> Result<Vec<T>, ()> {
 }
 
 /// Spawn a named OS thread running `f`.
+#[expect(
+    clippy::expect_used,
+    reason = "thread::Builder::spawn fails only when the OS cannot allocate a thread; this is an unrecoverable resource exhaustion"
+)]
 pub(crate) fn spawn_named<F, T>(name: &str, f: F) -> JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,

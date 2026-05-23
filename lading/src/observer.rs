@@ -103,6 +103,10 @@ impl Server {
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
     )]
+    #[expect(
+        clippy::expect_used,
+        reason = "the observer requires the target PID to begin sampling; a missing PID at this point indicates an unrecoverable orchestration failure"
+    )]
     #[cfg(target_os = "linux")]
     pub async fn run(
         self,
