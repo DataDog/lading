@@ -167,13 +167,6 @@ impl Server {
     ///
     /// Function will error if block cache cannot be built.
     ///
-    /// # Panics
-    ///
-    /// Function will panic if the filesystem cannot be started.
-    #[expect(
-        clippy::expect_used,
-        reason = "FIXME: fuse_mount2 spawn failure should propagate as an Error variant rather than panic; tracked for follow-up"
-    )]
     pub fn new(
         _: generator::General,
         config: Config,
@@ -242,8 +235,7 @@ impl Server {
         ];
 
         // Mount the filesystem in the background
-        let background_session = spawn_mount2(fs, config.mount_point, &options)
-            .expect("Failed to mount FUSE filesystem");
+        let background_session = spawn_mount2(fs, config.mount_point, &options)?;
 
         Ok(Self {
             shutdown,

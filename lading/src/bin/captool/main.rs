@@ -74,7 +74,7 @@ pub enum Error {
 #[expect(clippy::too_many_lines)]
 #[expect(
     clippy::expect_used,
-    reason = "FIXME: line read and JSON deserialization should surface as Error variants rather than panicking; tracked for follow-up. Task join panics are intentional propagation of inner panics."
+    reason = "Remaining .expect() sites are on tokio::task::JoinHandle; a JoinError fires only when the blocking task itself panicked, and we intentionally propagate that inner panic."
 )]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
@@ -137,12 +137,14 @@ async fn main() -> Result<(), Error> {
                 };
 
                 let lines_vec: Vec<Line> = lines
-                    .map(|l| {
-                        let line_str = l.expect("failed to read line");
-                        serde_json::from_str(&line_str).expect("failed to deserialize line")
+                    .map(|l| -> Result<Line, Error> {
+                        let line_str = l?;
+                        Ok(serde_json::from_str(&line_str)?)
                     })
-                    .collect()
-                    .await;
+                    .collect::<Vec<Result<Line, Error>>>()
+                    .await
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 analyze::jsonl::list_metrics(&lines_vec)
             }
@@ -190,12 +192,14 @@ async fn main() -> Result<(), Error> {
                 };
 
                 let lines_vec: Vec<Line> = lines
-                    .map(|l| {
-                        let line_str = l.expect("failed to read line");
-                        serde_json::from_str(&line_str).expect("failed to deserialize line")
+                    .map(|l| -> Result<Line, Error> {
+                        let line_str = l?;
+                        Ok(serde_json::from_str(&line_str)?)
                     })
-                    .collect()
-                    .await;
+                    .collect::<Vec<Result<Line, Error>>>()
+                    .await
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 analyze::jsonl::analyze_metric(&lines_vec, metric_name)
             }
@@ -233,7 +237,7 @@ async fn main() -> Result<(), Error> {
 
 #[expect(
     clippy::expect_used,
-    reason = "FIXME: line read and JSON deserialization should surface as Error variants rather than panicking; tracked for follow-up. Task join panics are intentional propagation of inner panics."
+    reason = "Remaining .expect() site is on tokio::task::JoinHandle; a JoinError fires only when the blocking task itself panicked, and we intentionally propagate that inner panic."
 )]
 async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
@@ -272,16 +276,14 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
                 either::Either::Left(LinesStream::new(reader.lines()))
             };
 
-            let mut lines_vec = Vec::new();
-            let mut lines_stream = lines.map(|l| {
-                let line_str = l.expect("failed to read line");
-                let line: Line =
-                    serde_json::from_str(&line_str).expect("failed to deserialize line");
-                line
+            let mut lines_vec: Vec<Line> = Vec::new();
+            let mut lines_stream = lines.map(|l| -> Result<Line, Error> {
+                let line_str = l?;
+                Ok(serde_json::from_str(&line_str)?)
             });
 
             while let Some(line) = lines_stream.next().await {
-                lines_vec.push(line);
+                lines_vec.push(line?);
             }
 
             jsonl::validate_lines(&lines_vec, min_seconds)
