@@ -97,32 +97,33 @@ pub enum Error {
 }
 
 fn default_max_depth() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("default max depth given was 0")
+    NonZeroU32::new(10).unwrap_or_else(|| unreachable!("10 is nonzero by construction"))
 }
 
 // default to 100ms
 fn default_process_sleep_ns() -> NonZeroU32 {
-    NonZeroU32::new(100_000_000).expect("default process sleep ns given was 0")
+    NonZeroU32::new(100_000_000)
+        .unwrap_or_else(|| unreachable!("100_000_000 is nonzero by construction"))
 }
 
 fn default_max_children() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("default max children given was 0")
+    NonZeroU32::new(10).unwrap_or_else(|| unreachable!("10 is nonzero by construction"))
 }
 
 fn default_args_len() -> NonZeroUsize {
-    NonZeroUsize::new(10).expect("default args len given was 0")
+    NonZeroUsize::new(10).unwrap_or_else(|| unreachable!("10 is nonzero by construction"))
 }
 
 fn default_args_count() -> NonZeroU32 {
-    NonZeroU32::new(16).expect("default args count given was 0")
+    NonZeroU32::new(16).unwrap_or_else(|| unreachable!("16 is nonzero by construction"))
 }
 
 fn default_envs_len() -> NonZeroUsize {
-    NonZeroUsize::new(16).expect("default envs len given was 0")
+    NonZeroUsize::new(16).unwrap_or_else(|| unreachable!("16 is nonzero by construction"))
 }
 
 fn default_envs_count() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("default envs count given was 0")
+    NonZeroU32::new(10).unwrap_or_else(|| unreachable!("10 is nonzero by construction"))
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

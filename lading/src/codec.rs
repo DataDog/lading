@@ -66,7 +66,11 @@ pub(crate) fn decode(
                             .body(crate::full(format!(
                                 "Unsupported encoding type: {encoding}"
                             )))
-                            .expect("failed to build response"),
+                            .unwrap_or_else(|_| {
+                                unreachable!(
+                                    "Response::builder().body() on an OK builder cannot fail"
+                                )
+                            }),
                     ));
                 }
             }
@@ -85,5 +89,5 @@ fn encoding_error_to_response(
         .body(crate::full(format!(
             "failed to decode input as {encoding}: {error}"
         )))
-        .expect("failed to build response")
+        .unwrap_or_else(|_| unreachable!("Response::builder().body() on an OK builder cannot fail"))
 }

@@ -95,7 +95,7 @@ fn default_headers() -> HeaderMap {
         header::CONTENT_TYPE,
         "application/json"
             .parse()
-            .expect("Not possible to parse into HeaderMap"),
+            .unwrap_or_else(|_| unreachable!("\"application/json\" is a valid HeaderValue")),
     );
     map
 }
