@@ -92,6 +92,9 @@ pub enum Error {
     /// Invalid configuration.
     #[error("invalid config: {0}")]
     Config(String),
+    /// `config.addr` is not a valid IP address.
+    #[error("invalid addr: {0}")]
+    InvalidAddr(#[from] std::net::AddrParseError),
 }
 
 #[derive(Debug)]
@@ -123,15 +126,8 @@ impl TcpRr {
     ///
     /// # Errors
     ///
-    /// Returns an error if a worker thread panics.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `addr` cannot be resolved to a socket address.
-    #[expect(
-        clippy::expect_used,
-        reason = "FIXME: config.addr is user-supplied; parse failure should surface as an Error variant instead of panicking. Tracked for follow-up."
-    )]
+    /// Returns an error if `config.addr` is not a valid IP address or if a
+    /// worker thread panics.
     pub async fn spin(self) -> Result<(), Error> {
         if self.config.threads > self.config.flows {
             return Err(Error::Config(format!(
@@ -140,7 +136,7 @@ impl TcpRr {
             )));
         }
 
-        let ip: IpAddr = self.config.addr.parse().expect("invalid addr");
+        let ip: IpAddr = self.config.addr.parse()?;
         let data_addr = SocketAddr::new(ip, self.config.data_port);
         let control_addr = SocketAddr::new(ip, self.config.control_port);
 

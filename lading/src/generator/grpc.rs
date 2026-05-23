@@ -83,6 +83,15 @@ pub enum Error {
         #[source]
         source: Box<tonic::Status>,
     },
+    /// `config.target_uri` is not a valid URI, or is missing the required
+    /// path-and-query component.
+    #[error("invalid target_uri {uri}: {reason}")]
+    InvalidTargetUri {
+        /// User-supplied URI string.
+        uri: String,
+        /// Cause of rejection (URI parse error or missing path).
+        reason: String,
+    },
 }
 
 impl From<tonic::Status> for Error {
@@ -185,17 +194,16 @@ impl Grpc {
     ///
     /// # Errors
     ///
-    /// Creation will fail if the underlying governor capacity exceeds u32.
+    /// Creation will fail if the underlying governor capacity exceeds u32, or
+    /// returns [`Error::InvalidTargetUri`] when `config.target_uri` fails to
+    /// parse or has no path-and-query component (e.g. `http://host` with no
+    /// `/service/Method` suffix).
     ///
     /// # Panics
     ///
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[expect(clippy::cast_possible_truncation)]
-    #[expect(
-        clippy::expect_used,
-        reason = "FIXME: config.target_uri is user-supplied; parsing and the required path_and_query check should surface as Error variants instead of panicking. Tracked for follow-up."
-    )]
     pub fn new(
         general: General,
         config: Config,
@@ -227,12 +235,20 @@ impl Grpc {
             )?,
         };
 
-        let target_uri =
-            uri::Uri::try_from(config.target_uri.clone()).expect("target_uri must be valid");
-        let rpc_path = target_uri
-            .path_and_query()
-            .cloned()
-            .expect("target_uri should have an RPC path");
+        let target_uri = uri::Uri::try_from(config.target_uri.clone()).map_err(|source| {
+            Error::InvalidTargetUri {
+                uri: config.target_uri.clone(),
+                reason: source.to_string(),
+            }
+        })?;
+        let rpc_path =
+            target_uri
+                .path_and_query()
+                .cloned()
+                .ok_or_else(|| Error::InvalidTargetUri {
+                    uri: config.target_uri.clone(),
+                    reason: "missing path-and-query component".to_string(),
+                })?;
         Ok(Self {
             target_uri,
             rpc_path,
