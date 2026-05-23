@@ -183,10 +183,6 @@ pub(crate) async fn scrape_metrics(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-#[expect(
-    clippy::expect_used,
-    reason = "FIXME: this is an ad-hoc Prometheus parser that panics on malformed input; reported parse failures should surface as recoverable errors. Tracked for follow-up."
-)]
 pub(crate) fn parse_prometheus_metrics(
     text: &str,
     tags: Option<&FxHashMap<String, String>>,
@@ -207,9 +203,21 @@ pub(crate) fn parse_prometheus_metrics(
 
         if line.starts_with("# TYPE") {
             let mut parts = line.split_ascii_whitespace().skip(2);
-            let name = parts.next().expect("parts iterator is missing name");
-            let metric_type = parts.next().expect("parts iterator is missing metric type");
-            let metric_type: MetricType = metric_type.parse().expect("failed to parse metric type");
+            let Some(name) = parts.next() else {
+                warn!("malformed TYPE line missing metric name: {line}");
+                continue;
+            };
+            let Some(metric_type) = parts.next() else {
+                warn!("malformed TYPE line missing metric type: {line}");
+                continue;
+            };
+            let metric_type: MetricType = match metric_type.parse() {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!("failed to parse metric type {metric_type} on line {line}: {e:?}");
+                    continue;
+                }
+            };
             // summary and histogram metrics additionally report names suffixed with _sum, _count, _bucket
             if matches!(metric_type, MetricType::Histogram | MetricType::Summary) {
                 typemap.insert(format!("{name}_sum"), metric_type);
@@ -228,15 +236,18 @@ pub(crate) fn parse_prometheus_metrics(
         }
         .into_iter();
 
-        let name_and_labels = parts
-            .next()
-            .expect("parts iterator is missing name and labels");
-        let value = parts
-            .next()
-            .expect("parts iterator is missing value")
-            .split_ascii_whitespace()
-            .next()
-            .expect("parts iterator is missing value");
+        let Some(name_and_labels) = parts.next() else {
+            warn!("malformed metric line missing name and labels: {line}");
+            continue;
+        };
+        let Some(value_segment) = parts.next() else {
+            warn!("malformed metric line missing value: {line}");
+            continue;
+        };
+        let Some(value) = value_segment.split_ascii_whitespace().next() else {
+            warn!("malformed metric line missing value token: {line}");
+            continue;
+        };
 
         if value.contains('#') {
             trace!("Unknown format: {value}");
@@ -248,16 +259,15 @@ pub(crate) fn parse_prometheus_metrics(
                 let labels_str = labels_str.trim_end_matches('}');
                 let labels: Vec<(String, String)> = LABEL_REGEX
                     .captures_iter(labels_str)
-                    .map(|cap| {
-                        let label_name = cap
-                            .get(1)
-                            .expect("regex should have label name capture group")
-                            .as_str();
-                        let label_value = cap
-                            .get(2)
-                            .expect("regex should have label value capture group")
-                            .as_str();
-                        (label_name.to_owned(), label_value.to_owned())
+                    .filter_map(|cap| {
+                        let label_name = cap.get(1).map(|m| m.as_str());
+                        let label_value = cap.get(2).map(|m| m.as_str());
+                        if let (Some(n), Some(v)) = (label_name, label_value) {
+                            Some((n.to_owned(), v.to_owned()))
+                        } else {
+                            warn!("malformed label capture in line {line}; skipping label");
+                            None
+                        }
                     })
                     .collect();
                 (name, Some(labels))

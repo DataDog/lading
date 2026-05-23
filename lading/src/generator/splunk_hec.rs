@@ -143,6 +143,9 @@ pub enum Error {
         #[source]
         source: Box<hyper::Error>,
     },
+    /// Failed to parse the Splunk HEC server response body.
+    #[error("Failed to parse Splunk HEC response: {0}")]
+    ResponseParse(#[from] serde_json::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -347,10 +350,6 @@ impl SplunkHec {
 }
 
 #[expect(clippy::too_many_arguments)]
-#[expect(
-    clippy::expect_used,
-    reason = "FIXME: server response parsing on Splunk HEC ack-id should surface as an Error variant rather than panic on malformed remote responses. Tracked for follow-up."
-)]
 async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,
@@ -382,7 +381,7 @@ where
                         counter!("request_ok", &status_labels).increment(1);
                         let body_bytes = body.boxed().collect().await?.to_bytes();
                         let hec_ack_response =
-                            serde_json::from_slice::<HecResponse>(&body_bytes).expect("unable to parse response body");
+                            serde_json::from_slice::<HecResponse>(&body_bytes)?;
                         channel.send(ready(hec_ack_response.ack_id)).await?;
                     }
                     Err(source) => {
