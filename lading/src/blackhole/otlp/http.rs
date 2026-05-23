@@ -84,6 +84,10 @@ struct OtlpHttpHandler {
 }
 
 impl OtlpHttpHandler {
+    #[expect(
+        clippy::expect_used,
+        reason = "serde_json on default-constructed OTLP response protos is infallible"
+    )]
     fn new(response_delay: Duration, labels: &[(String, String)]) -> Self {
         // Pre-compute empty responses for both formats
         let empty_metrics = ExportMetricsServiceResponse::default();
@@ -105,10 +109,10 @@ impl OtlpHttpHandler {
 
         let content_type_proto = "application/x-protobuf"
             .parse()
-            .expect("application/x-protobuf is a valid MIME type");
+            .unwrap_or_else(|_| unreachable!("\"application/x-protobuf\" is a valid HeaderValue"));
         let content_type_json = "application/json"
             .parse()
-            .expect("application/json is a valid MIME type");
+            .unwrap_or_else(|_| unreachable!("\"application/json\" is a valid HeaderValue"));
 
         Self {
             labels: labels.to_vec(),
@@ -135,13 +139,15 @@ impl OtlpHttpHandler {
         }
 
         let mut response = Response::builder().status(StatusCode::OK);
-        let headers = response
-            .headers_mut()
-            .expect("Response builder should always provide headers_mut");
+        let headers = response.headers_mut().unwrap_or_else(|| {
+            unreachable!("Response::builder produces a builder with headers_mut available")
+        });
         headers.insert(hyper::header::CONTENT_TYPE, content_type.clone());
         Ok(response
             .body(crate::full(response_bytes))
-            .expect("Creating HTTP response should not fail"))
+            .unwrap_or_else(|_| {
+                unreachable!("Response::builder().body() on an OK builder cannot fail")
+            }))
     }
 
     #[expect(clippy::too_many_lines)]
@@ -156,7 +162,9 @@ impl OtlpHttpHandler {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(crate::full(Bytes::from_static(NOT_FOUND)))
-                .expect("Creating HTTP response should not fail"));
+                .unwrap_or_else(|_| {
+                    unreachable!("Response::builder().body() on an OK builder cannot fail")
+                }));
         }
 
         counter!("requests_received", &self.labels).increment(1);

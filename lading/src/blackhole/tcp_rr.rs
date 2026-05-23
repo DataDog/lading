@@ -151,6 +151,10 @@ impl TcpRr {
     ///
     /// Panics if the ready-barrier tokio task is cancelled.
     #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::expect_used,
+        reason = "set_nonblocking on a freshly bound TcpListener panics only on system resource exhaustion; documented contract for blackhole startup"
+    )]
     pub async fn run(self) -> Result<(), Error> {
         let shutdown_flag = thread::new_shutdown_flag();
         let num_threads = self.config.threads.get();
@@ -298,6 +302,10 @@ impl TcpRr {
 
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
 /// and (for thread 0) attaches the reuseport eBPF program.
+#[expect(
+    clippy::expect_used,
+    reason = "socket-setup syscalls (set_nonblocking/cloexec/reuse_addr/reuse_port/listen) panic on system resource exhaustion; documented contract for blackhole startup"
+)]
 fn create_listener(
     thread_index: u16,
     num_threads: u16,
@@ -349,6 +357,10 @@ fn create_listener(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::expect_used,
+    reason = "mio Poll/registry setup panics on system resource exhaustion; documented contract for the server thread"
+)]
 fn server_thread_main(
     thread_index: u16,
     num_threads: u16,
