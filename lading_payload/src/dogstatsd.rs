@@ -522,6 +522,14 @@ impl MemberGenerator {
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
+            // A `tag_length` config that collapses the range below the
+            // minimum is a user-facing configuration error, not an internal
+            // string-generation failure. Propagate it with its message intact
+            // so callers entering through `DogStatsD::new` see the actual
+            // cause rather than a misleading `StringGenerate`.
+            Err(e @ tags::Error::TagLengthEndTooSmall { .. }) => {
+                return Err(crate::Error::Validation(e.to_string()));
+            }
             Err(e) => {
                 warn!("Encountered error while constructing tag generator: {e}");
                 return Err(crate::Error::StringGenerate);
@@ -1052,6 +1060,30 @@ mod test {
             err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
             "Expected error about 0 contexts, got: {err}"
         );
+    }
+
+    // A `tag_length` whose end collapses to `MIN_TAG_LENGTH` after the
+    // colon-separator subtract must surface through the public `DogStatsD::new`
+    // path as a `Validation` error naming the cause, not a misleading
+    // `StringGenerate`.
+    #[test]
+    fn tag_length_at_min_surfaces_as_validation_error() {
+        let config = Config {
+            tag_length: ConfRange::Constant(3),
+            ..Default::default()
+        };
+        let mut rng = SmallRng::seed_from_u64(0);
+        let err = DogStatsD::new(&config, &mut rng)
+            .expect_err("expected DogStatsD::new to fail for tag_length Constant(3)");
+        match err {
+            crate::Error::Validation(msg) => {
+                assert!(
+                    msg.contains("tag_length.end()"),
+                    "expected validation message to name tag_length.end(), got: {msg}"
+                );
+            }
+            other => panic!("expected Error::Validation, got {other:?}"),
+        }
     }
 
     // For all seeds, generation with the same timestamp configuration and same seed

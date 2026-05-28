@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Inclusive { min: 3, max: 3 }`). The inner generator then rejected the range
   and the error surfaced as a misleading `Error::StringGenerate` upstream. The
   wrapper now validates upfront and returns `Error::TagLengthEndTooSmall` with
-  a message identifying the violated constraint.
+  a message identifying the violated constraint. Callers entering through the
+  public `DogStatsD::new` path now receive this as a `Validation` error with
+  the message intact, rather than the previous opaque `StringGenerate`.
 
 ## Removed
 - Removed no longer used `smaps.private_hugetlb.by_pathname` procfs observer
