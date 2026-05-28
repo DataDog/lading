@@ -335,5 +335,71 @@ mod tests {
                 );
             }
         }
+
+        /// Demonstrates the bucket.flush() upstream-flag bug.
+        ///
+        /// With Path C (CombiningAggregator) and a UTF-16-LE encoded line that
+        /// the framer truncates, the post-parse byte count is under the
+        /// aggregator's threshold. `bucket.flush()` only checks size, not the
+        /// upstream `IsTruncated` flag, so the marker and tag are dropped.
+        ///
+        /// Expected: this test FAILS on the current agent (bug exists).
+        /// When the bug is fixed, the test will start passing.
+        #[test]
+        fn truncation_flag_main(_ in proptest::strategy::Just(())) {
+            let config = orchestrator_config();
+            let actions = crate::scenario::truncation_flag::build_actions();
+            let properties = crate::scenario::truncation_flag::build_properties();
+            let log_source = crate::scenario::truncation_flag::log_source_config_main();
+
+            let result = run_async(
+                orchestrator::run_action_sequence(
+                    &config,
+                    log_source,
+                    Some(crate::scenario::truncation_flag::MAX_MESSAGE_BYTES),
+                    &actions,
+                    properties,
+                )
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
+
+        /// Control: same input but with Path A (SingleLineHandler) instead
+        /// of CombiningAggregator. The SingleLineHandler honors the upstream
+        /// `IsTruncated` flag, so the marker and tag should be present.
+        ///
+        /// Expected: this test PASSES.
+        #[test]
+        fn truncation_flag_control(_ in proptest::strategy::Just(())) {
+            let config = orchestrator_config();
+            let actions = crate::scenario::truncation_flag::build_actions();
+            let properties = crate::scenario::truncation_flag::build_properties();
+            let log_source = crate::scenario::truncation_flag::log_source_config_control();
+
+            let result = run_async(
+                orchestrator::run_action_sequence(
+                    &config,
+                    log_source,
+                    Some(crate::scenario::truncation_flag::MAX_MESSAGE_BYTES),
+                    &actions,
+                    properties,
+                )
+            ).expect("test infrastructure failure");
+
+            for prop_result in &result.property_results {
+                prop_assert!(
+                    prop_result.is_ok(),
+                    "{}",
+                    diagnostics::format_failure(&result),
+                );
+            }
+        }
     }
 }

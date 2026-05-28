@@ -267,8 +267,12 @@ async fn write_log_batch(path: &Path, batch: &LogBatch) -> Result<(), std::io::E
 /// A step in an action sequence.
 #[derive(Debug, Clone)]
 pub enum Action {
-    /// Append lines to the log file.
+    /// Append lines to the log file (UTF-8, newline-separated).
     WriteLines(Vec<LogLine>),
+    /// Append raw bytes to the log file. Used for non-UTF-8 encodings
+    /// (e.g., UTF-16-LE). The caller is responsible for including any
+    /// terminator bytes.
+    WriteRawBytes(Vec<u8>),
     /// Sleep for a duration (e.g., to allow credit refill).
     Sleep(Duration),
 }
@@ -357,6 +361,15 @@ pub async fn run_action_sequence(
                 total_lines_written += lines.len();
                 all_lines.extend_from_slice(lines);
             }
+            Action::WriteRawBytes(bytes) => {
+                append_raw_bytes(&log_file, bytes).await?;
+                summary_lines.push(format!(
+                    "Step {step_idx}: Write {} raw bytes",
+                    bytes.len(),
+                ));
+                info!("wrote {} raw bytes to {}", bytes.len(), log_file.display());
+                total_lines_written += 1;
+            }
             Action::Sleep(duration) => {
                 summary_lines.push(format!("Step {step_idx}: Sleep {duration:?}"));
                 info!("sleeping {:?}", duration);
@@ -434,6 +447,19 @@ async fn append_lines(path: &Path, lines: &[LogLine]) -> Result<(), std::io::Err
         file.write_all(line.content.as_bytes()).await?;
         file.write_all(b"\n").await?;
     }
+    file.flush().await?;
+    Ok(())
+}
+
+/// Append raw bytes to an existing file (or create it).
+async fn append_raw_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    use tokio::fs::OpenOptions;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    file.write_all(bytes).await?;
     file.flush().await?;
     Ok(())
 }

@@ -753,3 +753,124 @@ impl Property for AdaptiveSamplingModel {
         }
     }
 }
+
+// --- Truncation Flag Propagation Properties ---
+
+/// Asserts that every output entry contains the `...TRUNCATED...` marker.
+///
+/// Use this when the test input was framer-truncated and the agent should
+/// reflect that in the output. If the property fails, either no truncation
+/// occurred or the marker was dropped along the pipeline.
+#[derive(Debug, Copy, Clone)]
+pub struct OutputHasTruncationMarker;
+
+impl Property for OutputHasTruncationMarker {
+    fn name(&self) -> &'static str {
+        "output_has_truncation_marker"
+    }
+
+    fn check(
+        &self,
+        _input: &LogBatch,
+        output: &[ReceivedLogEntry],
+    ) -> Result<(), PropertyFailure> {
+        if output.is_empty() {
+            return Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: "no output entries to check".to_string(),
+                details: vec![],
+            });
+        }
+
+        let missing: Vec<usize> = output
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.message.contains("...TRUNCATED..."))
+            .map(|(i, _)| i)
+            .collect();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            let sample = output
+                .iter()
+                .enumerate()
+                .take(3)
+                .map(|(i, e)| {
+                    let preview: String = e.message.chars().take(80).collect();
+                    format!("[{i}] {preview}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: format!(
+                    "{} of {} output entries missing '...TRUNCATED...' marker",
+                    missing.len(),
+                    output.len(),
+                ),
+                details: vec![("sample".to_string(), sample)],
+            })
+        }
+    }
+}
+
+/// Asserts that every output entry has a `truncated:<reason>` tag in `ddtags`.
+#[derive(Debug, Clone)]
+pub struct OutputHasTruncationTag {
+    /// The expected reason (`single_line` or `auto_multiline`).
+    pub reason: String,
+}
+
+impl Property for OutputHasTruncationTag {
+    fn name(&self) -> &'static str {
+        "output_has_truncation_tag"
+    }
+
+    fn check(
+        &self,
+        _input: &LogBatch,
+        output: &[ReceivedLogEntry],
+    ) -> Result<(), PropertyFailure> {
+        if output.is_empty() {
+            return Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: "no output entries to check".to_string(),
+                details: vec![],
+            });
+        }
+
+        let expected_tag = format!("truncated:{}", self.reason);
+        let missing: Vec<(usize, String)> = output
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                !e.ddtags
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains(&expected_tag)
+            })
+            .map(|(i, e)| (i, e.ddtags.clone().unwrap_or_default()))
+            .collect();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            let sample = missing
+                .iter()
+                .take(3)
+                .map(|(i, tags)| format!("[{i}] ddtags={tags}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Err(PropertyFailure {
+                property_name: self.name().to_string(),
+                description: format!(
+                    "{} of {} output entries missing '{expected_tag}' tag",
+                    missing.len(),
+                    output.len(),
+                ),
+                details: vec![("sample".to_string(), sample)],
+            })
+        }
+    }
+}

@@ -8,6 +8,7 @@ pub mod json_multiline;
 pub mod mixed_multiline;
 pub mod multiline;
 pub mod truncation;
+pub mod truncation_flag;
 
 use proptest::prelude::*;
 

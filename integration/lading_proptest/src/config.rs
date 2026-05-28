@@ -34,6 +34,16 @@ pub enum LogSourceConfig {
         /// Credits refilled per second per pattern.
         rate_limit: f64,
     },
+    /// UTF-16-LE encoded file with optional auto multiline detection.
+    /// Used to test truncation flag propagation — the parser shrinks
+    /// byte count post-framer, creating a gap between framer's
+    /// `contentLenLimit` and aggregator's effective `maxContentSize`.
+    Utf16LeEncoded {
+        /// If true, enable auto multiline detection (Path C
+        /// `CombiningAggregator`). If false, use the `SingleLineHandler`
+        /// path (Path A) as a control.
+        auto_multi_line: bool,
+    },
 }
 
 /// Parameters for generating agent configuration.
@@ -88,6 +98,7 @@ logs_config:
   batch_max_size: 100
   open_files_limit: 100
   max_message_size_bytes: {max_message_size_bytes}
+  tag_truncated_logs: true
 {adaptive_sampling_config}
 apm_config:
   enabled: false
@@ -180,6 +191,17 @@ compliance_config:
         LogSourceConfig::AdaptiveSampling { .. } => {
             format!(
                 "logs:\n  - type: file\n    path: \"{log_path}\"\n    service: proptest\n    source: proptest\n    experimental_adaptive_sampling:\n      enabled: true\n",
+                log_path = params.log_file_path,
+            )
+        }
+        LogSourceConfig::Utf16LeEncoded { auto_multi_line } => {
+            let aml_line = if *auto_multi_line {
+                "    auto_multi_line_detection: true\n"
+            } else {
+                ""
+            };
+            format!(
+                "logs:\n  - type: file\n    path: \"{log_path}\"\n    service: proptest\n    source: proptest\n    encoding: utf-16-le\n{aml_line}",
                 log_path = params.log_file_path,
             )
         }
