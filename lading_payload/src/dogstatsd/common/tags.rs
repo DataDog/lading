@@ -459,11 +459,22 @@ mod test {
         }
     }
 
-    fn small_string_pool() -> Rc<PoolKind> {
+    /// Construct a wrapper `Generator` for the given `tag_length`, holding
+    /// every other argument fixed. Used by the `tag_length` boundary tests.
+    fn generator_with_tag_length(tag_length: ConfRange<u16>) -> Result<tags::Generator, Error> {
         let mut rng = SmallRng::seed_from_u64(0);
-        Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(
+        let pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(
             &mut rng, 1024,
-        )))
+        )));
+        tags::Generator::new(
+            0,
+            ConfRange::Inclusive { min: 0, max: 2 },
+            tag_length,
+            10,
+            Rc::clone(&pool),
+            pool,
+            1.0,
+        )
     }
 
     /// `tag_length.end() == MIN_TAG_LENGTH` would, prior to the
@@ -472,17 +483,7 @@ mod test {
     /// The wrapper now rejects this with `TagLengthEndTooSmall`.
     #[test]
     fn tag_length_constant_at_min_rejected() {
-        let pool = small_string_pool();
-        let result = tags::Generator::new(
-            0,
-            ConfRange::Inclusive { min: 0, max: 2 },
-            ConfRange::Constant(MIN_TAG_LENGTH),
-            10,
-            Rc::clone(&pool),
-            pool,
-            1.0,
-        );
-        match result {
+        match generator_with_tag_length(ConfRange::Constant(MIN_TAG_LENGTH)) {
             Err(Error::TagLengthEndTooSmall { end, min }) => {
                 assert_eq!(end, MIN_TAG_LENGTH);
                 assert_eq!(min, MIN_TAG_LENGTH);
@@ -496,19 +497,10 @@ mod test {
     /// also be rejected by the upfront check.
     #[test]
     fn tag_length_inclusive_min_equals_max_at_min_rejected() {
-        let pool = small_string_pool();
-        let result = tags::Generator::new(
-            0,
-            ConfRange::Inclusive { min: 0, max: 2 },
-            ConfRange::Inclusive {
-                min: MIN_TAG_LENGTH,
-                max: MIN_TAG_LENGTH,
-            },
-            10,
-            Rc::clone(&pool),
-            pool,
-            1.0,
-        );
+        let result = generator_with_tag_length(ConfRange::Inclusive {
+            min: MIN_TAG_LENGTH,
+            max: MIN_TAG_LENGTH,
+        });
         assert!(matches!(result, Err(Error::TagLengthEndTooSmall { .. })));
     }
 
@@ -518,19 +510,10 @@ mod test {
     /// which the inner generator accepts.
     #[test]
     fn tag_length_at_min_plus_one_accepted() {
-        let pool = small_string_pool();
-        let result = tags::Generator::new(
-            0,
-            ConfRange::Inclusive { min: 0, max: 2 },
-            ConfRange::Inclusive {
-                min: MIN_TAG_LENGTH,
-                max: MIN_TAG_LENGTH + 1,
-            },
-            10,
-            Rc::clone(&pool),
-            pool,
-            1.0,
-        );
+        let result = generator_with_tag_length(ConfRange::Inclusive {
+            min: MIN_TAG_LENGTH,
+            max: MIN_TAG_LENGTH + 1,
+        });
         assert!(result.is_ok(), "{:?}", result.err());
     }
 }
