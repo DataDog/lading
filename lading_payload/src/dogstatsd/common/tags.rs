@@ -1,6 +1,9 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::PoolKind, tags},
+    common::{
+        strings::PoolKind,
+        tags::{self, MIN_TAG_LENGTH},
+    },
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -21,6 +24,24 @@ pub(crate) enum Error {
     /// Invalid construction
     #[error("Invalid construction: {0}")]
     InvalidConstruction(#[from] crate::common::tags::Error),
+
+    /// The on-wire `tag_length` range cannot accommodate the `:`
+    /// separator. On-wire dogstatsd tags are `key:value`, so this
+    /// wrapper reserves one byte for the separator -- forwarding
+    /// `Inclusive { min: start, max: end - 1 }` to the inner
+    /// generator, which requires a non-empty range whose max is at
+    /// least `MIN_TAG_LENGTH`. The adjusted range collapses to empty
+    /// or sub-minimum whenever `end` is not strictly greater than
+    /// both `start` and `MIN_TAG_LENGTH` -- e.g. any constant or
+    /// single-value range such as `Constant(3)`, `Constant(4)`, or
+    /// `Inclusive { min: 100, max: 100 }`. Caught here so the failure
+    /// names the configured range rather than the adjusted one.
+    #[error(
+        "tag_length end ({end}) must be strictly greater than both start ({start}) and \
+         MIN_TAG_LENGTH ({min}) so the range remains valid after reserving one byte for the \
+         ':' separator"
+    )]
+    TagLengthRangeTooNarrow { start: u16, end: u16, min: u16 },
 }
 
 impl Generator {
@@ -28,7 +49,17 @@ impl Generator {
     ///
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
-    /// - If `tag_length` is invalid or has minimum value less than 3
+    /// - If `tag_length.start()` is less than `MIN_TAG_LENGTH` (forwarded
+    ///   from the inner generator's `Error::InvalidConstruction`)
+    /// - If `tag_length.end()` is not strictly greater than both
+    ///   `tag_length.start()` and `MIN_TAG_LENGTH`, returned as
+    ///   `Error::TagLengthRangeTooNarrow`. This catches every range that
+    ///   would collapse after the colon-separator subtract on `max` -- any
+    ///   constant or single-value range such as `ConfRange::Constant(N)`
+    ///   or `Inclusive { min: N, max: N }`, as well as `end` values at or
+    ///   below `MIN_TAG_LENGTH` -- which would otherwise yield an inner
+    ///   range with `min > max` and surface as a misleading inner
+    ///   construction error.
     /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
@@ -39,7 +70,19 @@ impl Generator {
         tag_pool: Rc<PoolKind>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        // Adjust tag_length range to account for the colon separator
+        if tag_length.end() <= MIN_TAG_LENGTH || tag_length.end() <= tag_length.start() {
+            return Err(Error::TagLengthRangeTooNarrow {
+                start: tag_length.start(),
+                end: tag_length.end(),
+                min: MIN_TAG_LENGTH,
+            });
+        }
+
+        // Reserve one byte for the `:` separator before forwarding to the
+        // inner generator. The checks above guarantee the adjusted range is
+        // non-empty (`start <= end - 1`) and that its `max` stays at or above
+        // `MIN_TAG_LENGTH`. The inner generator still validates that the
+        // adjusted `min` (`start`) is itself at least `MIN_TAG_LENGTH`.
         let adjusted_tag_length = ConfRange::Inclusive {
             min: tag_length.start(),
             max: tag_length.end().saturating_sub(1),
@@ -87,7 +130,8 @@ mod test {
 
     use crate::Generator;
     use crate::common::strings::{Handle, PoolKind, RandomStringPool, StringListPool};
-    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
+    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, Tag, WARN_UNIQUE_TAG_RATIO};
+    use crate::dogstatsd::common::tags::Error;
     use crate::dogstatsd::{ConfRange, tags};
 
     /// Given a list of tagsets, count unique contexts.
@@ -420,5 +464,90 @@ mod test {
             let num_contexts = count_num_contexts(&tagsets);
             assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
         }
+    }
+
+    /// Construct a wrapper `Generator` for the given `tag_length`, holding
+    /// every other argument fixed. Used by the `tag_length` boundary tests.
+    fn generator_with_tag_length(tag_length: ConfRange<u16>) -> Result<tags::Generator, Error> {
+        let mut rng = SmallRng::seed_from_u64(0);
+        let pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(
+            &mut rng, 1024,
+        )));
+        tags::Generator::new(
+            0,
+            ConfRange::Inclusive { min: 0, max: 2 },
+            tag_length,
+            10,
+            Rc::clone(&pool),
+            pool,
+            1.0,
+        )
+    }
+
+    /// `tag_length.end() == MIN_TAG_LENGTH` would, prior to the
+    /// upfront validation, produce an adjusted range with `min >
+    /// max` and surface as a misleading inner construction error.
+    /// The wrapper now rejects this with `TagLengthRangeTooNarrow`.
+    #[test]
+    fn tag_length_constant_at_min_rejected() {
+        match generator_with_tag_length(ConfRange::Constant(MIN_TAG_LENGTH)) {
+            Err(Error::TagLengthRangeTooNarrow { start, end, min }) => {
+                assert_eq!(start, MIN_TAG_LENGTH);
+                assert_eq!(end, MIN_TAG_LENGTH);
+                assert_eq!(min, MIN_TAG_LENGTH);
+            }
+            other => panic!("expected TagLengthRangeTooNarrow, got {other:?}"),
+        }
+    }
+
+    /// `Inclusive { min: MIN_TAG_LENGTH, max: MIN_TAG_LENGTH }` is
+    /// the same problematic shape as the constant case and must
+    /// also be rejected by the upfront check.
+    #[test]
+    fn tag_length_inclusive_min_equals_max_at_min_rejected() {
+        let result = generator_with_tag_length(ConfRange::Inclusive {
+            min: MIN_TAG_LENGTH,
+            max: MIN_TAG_LENGTH,
+        });
+        assert!(matches!(result, Err(Error::TagLengthRangeTooNarrow { .. })));
+    }
+
+    /// A constant range *above* the minimum still collapses: after
+    /// reserving the separator byte the adjusted range is
+    /// `Inclusive { min: N, max: N - 1 }`. It must be rejected with
+    /// `TagLengthRangeTooNarrow`, not fall through to the inner
+    /// generator's misleading construction error.
+    #[test]
+    fn tag_length_constant_above_min_rejected() {
+        match generator_with_tag_length(ConfRange::Constant(MIN_TAG_LENGTH + 1)) {
+            Err(Error::TagLengthRangeTooNarrow { start, end, min }) => {
+                assert_eq!(start, MIN_TAG_LENGTH + 1);
+                assert_eq!(end, MIN_TAG_LENGTH + 1);
+                assert_eq!(min, MIN_TAG_LENGTH);
+            }
+            other => panic!("expected TagLengthRangeTooNarrow, got {other:?}"),
+        }
+    }
+
+    /// A single-value `Inclusive` range well above the minimum
+    /// (`min == max`) collapses for the same reason and must also be
+    /// rejected.
+    #[test]
+    fn tag_length_inclusive_single_value_above_min_rejected() {
+        let result = generator_with_tag_length(ConfRange::Inclusive { min: 100, max: 100 });
+        assert!(matches!(result, Err(Error::TagLengthRangeTooNarrow { .. })));
+    }
+
+    /// `tag_length.end() == MIN_TAG_LENGTH + 1` is the smallest
+    /// accepted end value. The adjusted inner range becomes
+    /// `Inclusive { min: MIN_TAG_LENGTH, max: MIN_TAG_LENGTH }`,
+    /// which the inner generator accepts.
+    #[test]
+    fn tag_length_at_min_plus_one_accepted() {
+        let result = generator_with_tag_length(ConfRange::Inclusive {
+            min: MIN_TAG_LENGTH,
+            max: MIN_TAG_LENGTH + 1,
+        });
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 }

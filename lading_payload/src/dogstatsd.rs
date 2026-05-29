@@ -522,6 +522,14 @@ impl MemberGenerator {
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
+            // A `tag_length` config whose range collapses after reserving a
+            // byte for the `:` separator is a user-facing configuration error,
+            // not an internal string-generation failure. Propagate it with its
+            // message intact so callers entering through `DogStatsD::new` see
+            // the actual cause rather than a misleading `StringGenerate`.
+            Err(e @ tags::Error::TagLengthRangeTooNarrow { .. }) => {
+                return Err(crate::Error::Validation(e.to_string()));
+            }
             Err(e) => {
                 warn!("Encountered error while constructing tag generator: {e}");
                 return Err(crate::Error::StringGenerate);
@@ -1052,6 +1060,39 @@ mod test {
             err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
             "Expected error about 0 contexts, got: {err}"
         );
+    }
+
+    // Any `tag_length` whose range collapses after reserving a byte for the
+    // `:` separator -- a value at or below the minimum, or any constant /
+    // single-value range -- must surface through the public `DogStatsD::new`
+    // path as a `Validation` error naming the cause, not a misleading
+    // `StringGenerate`.
+    #[test]
+    fn collapsing_tag_length_surfaces_as_validation_error() {
+        let collapsing = [
+            ConfRange::Constant(3),
+            ConfRange::Constant(4),
+            ConfRange::Inclusive { min: 100, max: 100 },
+        ];
+        for tag_length in collapsing {
+            let config = Config {
+                tag_length,
+                ..Default::default()
+            };
+            let mut rng = SmallRng::seed_from_u64(0);
+            let err = DogStatsD::new(&config, &mut rng).expect_err(&format!(
+                "expected DogStatsD::new to fail for {tag_length:?}"
+            ));
+            match err {
+                crate::Error::Validation(msg) => {
+                    assert!(
+                        msg.contains("tag_length"),
+                        "expected validation message to name tag_length, got: {msg}"
+                    );
+                }
+                other => panic!("expected Error::Validation for {tag_length:?}, got {other:?}"),
+            }
+        }
     }
 
     // For all seeds, generation with the same timestamp configuration and same seed
