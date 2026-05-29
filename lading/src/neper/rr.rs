@@ -1,0 +1,691 @@
+//! Shared client/server machinery for neper-style request/response workloads.
+//!
+//! Provides [`run_client`] and [`run_server`] entry points used by `tcp_rr`
+//! (and forthcoming `tcp_crr`). The shared code owns the mio event loops, flow
+//! lifecycle, control-port synchronization, and per-thread metrics plumbing;
+//! per-variant modules build the [`ClientParams`] / [`ServerParams`] and
+//! call in.
+
+use std::io::{self, ErrorKind, Read, Write};
+use std::net::{self, SocketAddr};
+use std::os::fd::AsRawFd;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::time::{Duration, Instant};
+
+use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Interest, Poll, Token};
+use tokio::sync::mpsc;
+use tracing::{info, trace, warn};
+
+use crate::neper::bpf;
+use crate::neper::flow::{self, Action, Flow, FlowMap};
+use crate::neper::metrics::{self, ThreadMetrics};
+use crate::neper::thread;
+
+/// Errors produced by [`run_client`] and [`run_server`].
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// IO error.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// Failed to bind a listener.
+    #[error("Failed to bind TCP listener to {addr}: {source}")]
+    Bind {
+        /// Binding address.
+        addr: SocketAddr,
+        /// Underlying IO error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// A worker thread panicked.
+    #[error("Worker thread panicked")]
+    ThreadPanicked,
+    /// Invalid configuration.
+    #[error("invalid config: {0}")]
+    Config(String),
+}
+
+/// Parameters for [`run_client`].
+pub(crate) struct ClientParams {
+    /// Address of the server's data port.
+    pub(crate) data_addr: SocketAddr,
+    /// Address of the server's control port.
+    pub(crate) control_addr: SocketAddr,
+    /// Number of OS threads.
+    pub(crate) threads: u16,
+    /// Total number of TCP flows.
+    pub(crate) flows: u16,
+    /// Bytes per request.
+    pub(crate) request_size: usize,
+    /// Bytes per response.
+    pub(crate) response_size: usize,
+    /// Whether to set `TCP_NODELAY`.
+    pub(crate) no_delay: bool,
+}
+
+/// Parameters for [`run_server`].
+pub(crate) struct ServerParams {
+    /// Address to bind the data listener on.
+    pub(crate) data_addr: SocketAddr,
+    /// Address to bind the control listener on.
+    pub(crate) control_addr: SocketAddr,
+    /// Number of OS server threads.
+    pub(crate) threads: u16,
+    /// Bytes to read per request.
+    pub(crate) request_size: usize,
+    /// Bytes to send per response.
+    pub(crate) response_size: usize,
+    /// Whether to set `TCP_NODELAY` on accepted connections.
+    pub(crate) no_delay: bool,
+    /// Listener backlog.
+    pub(crate) backlog: i32,
+}
+
+enum ClientState {
+    SendRequest,
+    RecvResponse,
+}
+
+enum ServerState {
+    RecvRequest,
+    SendResponse,
+}
+
+const LISTENER_TOKEN: Token = Token(0);
+
+/// Run the neper-style client (generator side).
+///
+/// Connects `flows` TCP flows distributed across `threads` OS threads, then
+/// runs a request/response loop on each until `shutdown` fires.
+///
+/// `thread_prefix` is used to name OS threads (`{prefix}-metrics`,
+/// `{prefix}-client-{i}`) so multiple variants can coexist in `top -H`.
+///
+/// # Errors
+///
+/// Returns an error if configuration is invalid, the blackhole control port
+/// is never reachable, or a worker thread panics.
+pub(crate) async fn run_client(
+    params: ClientParams,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+    thread_prefix: &'static str,
+) -> Result<(), Error> {
+    if params.threads > params.flows {
+        return Err(Error::Config(format!(
+            "threads ({}) must be <= flows ({})",
+            params.threads, params.flows
+        )));
+    }
+
+    let shutdown_flag = thread::new_shutdown_flag();
+
+    // Wait for the blackhole to be ready by connecting to its control port.
+    info!(
+        "waiting for blackhole control port at {}",
+        params.control_addr
+    );
+    let deadline = Instant::now() + Duration::from_secs(300);
+    {
+        let flag = Arc::clone(&shutdown_flag);
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            shutdown.recv().await;
+            flag.store(true, Relaxed);
+        });
+    }
+    loop {
+        if shutdown_flag.load(Relaxed) {
+            return Err(Error::Io(io::Error::new(
+                ErrorKind::ConnectionRefused,
+                format!(
+                    "shutdown before blackhole control port {} became reachable",
+                    params.control_addr
+                ),
+            )));
+        }
+        match net::TcpStream::connect(params.control_addr) {
+            Ok(_conn) => {
+                info!("blackhole ready, starting flows");
+                break;
+            }
+            Err(e) => {
+                if Instant::now() >= deadline {
+                    return Err(Error::Io(io::Error::new(
+                        ErrorKind::TimedOut,
+                        format!(
+                            "blackhole control port {} not reachable after 5 minutes: {e}",
+                            params.control_addr
+                        ),
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+
+    let flow_dist = thread::distribute_flows(params.flows, params.threads);
+
+    let thread_metrics = Arc::new(
+        (0..params.threads)
+            .map(|_| ThreadMetrics::new())
+            .collect::<Vec<_>>(),
+    );
+
+    let metrics_handle = {
+        let tm = Arc::clone(&thread_metrics);
+        let labels = metric_labels.clone();
+        let flag = Arc::clone(&shutdown_flag);
+        thread::spawn_named(&format!("{thread_prefix}-metrics"), move || {
+            metrics::run_metrics_thread(&tm, &labels, &flag);
+        })
+    };
+
+    let data_addr = params.data_addr;
+    let request_size = params.request_size;
+    let response_size = params.response_size;
+    let no_delay = params.no_delay;
+    let mut worker_handles = Vec::with_capacity(params.threads as usize);
+    for i in 0..params.threads {
+        let thread_flows = flow_dist[i as usize];
+        let flag = Arc::clone(&shutdown_flag);
+        let tm = Arc::clone(&thread_metrics);
+        let handle = thread::spawn_named(&format!("{thread_prefix}-client-{i}"), move || {
+            client_thread_main(
+                data_addr,
+                thread_flows,
+                request_size,
+                response_size,
+                no_delay,
+                &flag,
+                &tm[i as usize],
+            );
+        });
+        worker_handles.push(handle);
+    }
+
+    shutdown.recv().await;
+    info!("shutdown signal received");
+    shutdown_flag.store(true, Relaxed);
+
+    worker_handles.push(metrics_handle);
+    thread::join_all(worker_handles).map_err(|()| Error::ThreadPanicked)?;
+
+    Ok(())
+}
+
+fn client_thread_main(
+    addr: SocketAddr,
+    num_flows: u16,
+    request_size: usize,
+    response_size: usize,
+    no_delay: bool,
+    shutdown_flag: &AtomicBool,
+    metrics: &ThreadMetrics,
+) {
+    let mut poll = Poll::new().expect("failed to create mio::Poll");
+    let mut events = Events::with_capacity(num_flows as usize);
+    let request_buf = vec![0u8; request_size];
+    let mut response_buf = vec![0u8; response_size];
+    let mut flows: FlowMap<ClientState> = FlowMap::new();
+    let mut next_token: usize = 0;
+
+    for _ in 0..num_flows {
+        match net::TcpStream::connect(addr) {
+            Ok(std_stream) => {
+                let _ = std_stream.set_nodelay(no_delay);
+                std_stream
+                    .set_nonblocking(true)
+                    .expect("failed to set nonblocking");
+                let mut stream = TcpStream::from_std(std_stream);
+                let token = Token(next_token);
+                next_token += 1;
+                poll.registry()
+                    .register(&mut stream, token, Interest::WRITABLE)
+                    .expect("failed to register flow");
+                flows.insert(Flow {
+                    stream,
+                    token,
+                    state: ClientState::SendRequest,
+                    xfer: request_size,
+                });
+            }
+            Err(e) => {
+                trace!("connection to {addr} failed: {e}");
+                metrics.connections_failed.add(1);
+            }
+        }
+    }
+
+    loop {
+        let _ = poll.poll(&mut events, Some(Duration::from_millis(100)));
+        if shutdown_flag.load(Relaxed) {
+            break;
+        }
+        for event in &events {
+            let token = event.token();
+            let Some(fl) = flows.get_mut(token) else {
+                continue;
+            };
+            let action = handle_client_event(fl, &request_buf, &mut response_buf, metrics);
+            flow::apply_action(action, token, &mut flows, poll.registry());
+        }
+    }
+}
+
+fn handle_client_event(
+    flow: &mut Flow<ClientState>,
+    request_buf: &[u8],
+    response_buf: &mut [u8],
+    metrics: &ThreadMetrics,
+) -> Action {
+    match flow.state {
+        ClientState::SendRequest => {
+            let offset = request_buf.len() - flow.xfer;
+            match flow.stream.write(&request_buf[offset..]) {
+                Ok(n) => {
+                    flow.xfer -= n;
+                    if flow.xfer == 0 {
+                        flow.xfer = response_buf.len();
+                        flow.state = ClientState::RecvResponse;
+                        metrics.requests_sent.add(1);
+                        metrics.bytes_written.add(request_buf.len() as u64);
+                        Action::Reregister(Interest::READABLE)
+                    } else {
+                        Action::Continue
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) => {
+                    trace!("write error: {e}");
+                    Action::Remove
+                }
+            }
+        }
+        ClientState::RecvResponse => {
+            let offset = response_buf.len() - flow.xfer;
+            match flow.stream.read(&mut response_buf[offset..]) {
+                Ok(0) => Action::Remove,
+                Ok(n) => {
+                    flow.xfer -= n;
+                    if flow.xfer == 0 {
+                        flow.xfer = request_buf.len();
+                        flow.state = ClientState::SendRequest;
+                        metrics.responses_received.add(1);
+                        metrics.bytes_read.add(response_buf.len() as u64);
+                        Action::Reregister(Interest::WRITABLE)
+                    } else {
+                        Action::Continue
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) => {
+                    trace!("read error: {e}");
+                    Action::Remove
+                }
+            }
+        }
+    }
+}
+
+/// Run the neper-style server (blackhole side).
+///
+/// Binds a data listener (with `SO_REUSEPORT` + reuseport eBPF when
+/// `threads > 1`), then accepts and services request/response flows until
+/// `shutdown` fires.
+///
+/// `thread_prefix` is used to name OS threads (`{prefix}-bh-metrics`,
+/// `{prefix}-server-{i}`).
+///
+/// # Errors
+///
+/// Returns an error if binding fails or a worker thread panics.
+///
+/// # Panics
+///
+/// Panics if the ready-barrier tokio task is cancelled.
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn run_server(
+    params: ServerParams,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+    thread_prefix: &'static str,
+) -> Result<(), Error> {
+    let shutdown_flag = thread::new_shutdown_flag();
+    let num_threads = params.threads;
+
+    let thread_metrics = Arc::new(
+        (0..num_threads)
+            .map(|_| ThreadMetrics::new())
+            .collect::<Vec<_>>(),
+    );
+
+    let metrics_handle = {
+        let tm = Arc::clone(&thread_metrics);
+        let labels = metric_labels.clone();
+        let flag = Arc::clone(&shutdown_flag);
+        thread::spawn_named(&format!("{thread_prefix}-bh-metrics"), move || {
+            metrics::run_metrics_thread(&tm, &labels, &flag);
+        })
+    };
+
+    // Pre-build thread 0's listener here so the BPF program is attached to the
+    // reuseport group before any other thread calls bind(). This removes the
+    // need for a cross-thread BPF barrier — if bind fails or panics, it
+    // propagates as an error directly from this task.
+    let binding_addr = params.data_addr;
+    let thread0_listener = if num_threads > 1 {
+        Some(create_listener(0, num_threads, binding_addr, params.backlog))
+    } else {
+        None
+    };
+
+    // Each thread sends a ready signal via this channel after binding. If a
+    // thread panics before signaling, its sender drops; once all senders are
+    // gone, recv() returns None and we detect the failure instead of hanging
+    // forever.
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel::<()>();
+
+    let mut handles = Vec::with_capacity(num_threads as usize);
+    let mut thread0_listener = thread0_listener;
+    for i in 0..num_threads {
+        let request_size = params.request_size;
+        let response_size = params.response_size;
+        let no_delay = params.no_delay;
+        let backlog = params.backlog;
+        let flag = Arc::clone(&shutdown_flag);
+        let tm = Arc::clone(&thread_metrics);
+        let prebuilt = if i == 0 {
+            thread0_listener.take()
+        } else {
+            None
+        };
+        let tx = ready_tx.clone();
+        let handle = thread::spawn_named(&format!("{thread_prefix}-server-{i}"), move || {
+            server_thread_main(
+                i,
+                num_threads,
+                binding_addr,
+                prebuilt,
+                backlog,
+                request_size,
+                response_size,
+                no_delay,
+                &flag,
+                &tm[i as usize],
+                tx,
+            );
+        });
+        handles.push(handle);
+    }
+    // Drop our own copy so the channel closes when all worker threads exit.
+    drop(ready_tx);
+
+    // Wait for each thread to signal ready. If a sender drops without
+    // signaling (thread panicked), recv() eventually returns None.
+    for _ in 0..num_threads {
+        if ready_rx.recv().await.is_none() {
+            shutdown_flag.store(true, Relaxed);
+            thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+            return Err(Error::ThreadPanicked);
+        }
+    }
+
+    // All data listeners are up. Open control port so the generator can
+    // connect and know we're ready.
+    let control_addr = params.control_addr;
+    let control_listener = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
+        addr: control_addr,
+        source: Box::new(source),
+    })?;
+    control_listener
+        .set_nonblocking(true)
+        .expect("failed to set control listener nonblocking");
+    info!("control port listening on {control_addr}, waiting for generator");
+
+    handles.push(metrics_handle);
+
+    let flag = Arc::clone(&shutdown_flag);
+    let shutdown_clone = shutdown.clone();
+    tokio::spawn(async move {
+        shutdown_clone.recv().await;
+        flag.store(true, Relaxed);
+    });
+    let mut generator_connected = false;
+    loop {
+        if shutdown_flag.load(Relaxed) {
+            info!("shutdown before generator connected");
+            break;
+        }
+        match control_listener.accept() {
+            Ok((_conn, peer)) => {
+                info!("generator connected from {peer}, data threads running");
+                generator_connected = true;
+                break;
+            }
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => {
+                return Err(Error::Bind {
+                    addr: control_addr,
+                    source: Box::new(e),
+                });
+            }
+        }
+    }
+    drop(control_listener);
+
+    if generator_connected {
+        shutdown.recv().await;
+        info!("shutdown signal received");
+    }
+    shutdown_flag.store(true, Relaxed);
+
+    thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+
+    Ok(())
+}
+
+/// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
+/// and (for thread 0) attaches the reuseport eBPF program.
+fn create_listener(
+    thread_index: u16,
+    num_threads: u16,
+    binding_addr: SocketAddr,
+    backlog: i32,
+) -> net::TcpListener {
+    let domain = if binding_addr.is_ipv4() {
+        socket2::Domain::IPV4
+    } else {
+        socket2::Domain::IPV6
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
+        .expect("failed to create socket");
+    socket
+        .set_nonblocking(true)
+        .expect("failed to set nonblocking");
+    socket
+        .set_cloexec(true)
+        .expect("failed to set close-on-exec");
+    socket
+        .set_reuse_address(true)
+        .expect("failed to set SO_REUSEADDR");
+
+    if num_threads > 1 {
+        socket
+            .set_reuse_port(true)
+            .expect("failed to set SO_REUSEPORT");
+
+        if thread_index == 0 {
+            match bpf::load_reuseport_ebpf(u32::from(num_threads)) {
+                Ok(prog) => {
+                    if let Err(e) = bpf::attach_reuseport_ebpf(socket.as_raw_fd(), &prog) {
+                        warn!("failed to attach reuseport eBPF: {e}, falling back to kernel hash");
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to load reuseport eBPF: {e}, falling back to kernel hash");
+                }
+            }
+        }
+    }
+
+    socket
+        .bind(&binding_addr.into())
+        .unwrap_or_else(|e| panic!("failed to bind to {binding_addr}: {e}"));
+    socket.listen(backlog).expect("failed to listen");
+
+    socket.into()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn server_thread_main(
+    thread_index: u16,
+    num_threads: u16,
+    binding_addr: SocketAddr,
+    prebuilt_listener: Option<net::TcpListener>,
+    backlog: i32,
+    request_size: usize,
+    response_size: usize,
+    no_delay: bool,
+    shutdown_flag: &AtomicBool,
+    metrics: &ThreadMetrics,
+    ready_tx: mpsc::UnboundedSender<()>,
+) {
+    // Thread 0 uses the pre-built listener (with BPF already attached); others
+    // bind their own sockets that join the existing reuseport group.
+    let std_listener = prebuilt_listener
+        .unwrap_or_else(|| create_listener(thread_index, num_threads, binding_addr, backlog));
+
+    // Signal that this thread's listener is bound and ready. If this send
+    // fails the receiver has gone away (blackhole is shutting down).
+    let _ = ready_tx.send(());
+    drop(ready_tx);
+
+    let mut listener = TcpListener::from_std(std_listener);
+    let mut poll = Poll::new().expect("failed to create mio::Poll");
+    let mut events = Events::with_capacity(256);
+
+    poll.registry()
+        .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)
+        .expect("failed to register listener");
+
+    let mut request_buf = vec![0u8; request_size];
+    let response_buf = vec![0u8; response_size];
+    let mut flows: FlowMap<ServerState> = FlowMap::new();
+    let mut next_token: usize = 1;
+
+    loop {
+        let _ = poll.poll(&mut events, Some(Duration::from_millis(100)));
+        if shutdown_flag.load(Relaxed) {
+            break;
+        }
+
+        let mut attempts = 0;
+        for event in &events {
+            if event.token() == LISTENER_TOKEN {
+                loop {
+                    match listener.accept() {
+                        Ok((stream, _addr)) => {
+                            set_nodelay_mio(&stream, no_delay);
+                            let token = Token(next_token);
+                            next_token += 1;
+                            let mut mio_stream = stream;
+                            poll.registry()
+                                .register(&mut mio_stream, token, Interest::READABLE)
+                                .expect("failed to register flow");
+                            flows.insert(Flow {
+                                stream: mio_stream,
+                                token,
+                                state: ServerState::RecvRequest,
+                                xfer: request_size,
+                            });
+                            metrics.connections_accepted.add(1);
+                        }
+                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+                        Err(e) => {
+                            if attempts > 2 {
+                                break;
+                            }
+                            warn!("accept error: {e}");
+                            attempts += 1;
+                            std::thread::sleep(Duration::from_millis(1000));
+                        }
+                    }
+                }
+            } else {
+                let token = event.token();
+                let Some(fl) = flows.get_mut(token) else {
+                    continue;
+                };
+                let action = handle_server_event(fl, &mut request_buf, &response_buf, metrics);
+                flow::apply_action(action, token, &mut flows, poll.registry());
+            }
+        }
+    }
+}
+
+/// Set `TCP_NODELAY` on a mio [`TcpStream`] via a borrowed `socket2::SockRef`.
+fn set_nodelay_mio(stream: &TcpStream, no_delay: bool) {
+    let sock = socket2::SockRef::from(stream);
+    if let Err(e) = sock.set_tcp_nodelay(no_delay) {
+        trace!("failed to set TCP_NODELAY: {e}");
+    }
+}
+
+fn handle_server_event(
+    flow: &mut Flow<ServerState>,
+    request_buf: &mut [u8],
+    response_buf: &[u8],
+    metrics: &ThreadMetrics,
+) -> Action {
+    match flow.state {
+        ServerState::RecvRequest => {
+            let offset = request_buf.len() - flow.xfer;
+            match flow.stream.read(&mut request_buf[offset..]) {
+                Ok(0) => Action::Remove,
+                Ok(n) => {
+                    flow.xfer -= n;
+                    if flow.xfer == 0 {
+                        flow.xfer = response_buf.len();
+                        flow.state = ServerState::SendResponse;
+                        metrics.requests_received.add(1);
+                        metrics.bytes_received.add(request_buf.len() as u64);
+                        Action::Reregister(Interest::WRITABLE)
+                    } else {
+                        Action::Continue
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) => {
+                    trace!("read error: {e}");
+                    Action::Remove
+                }
+            }
+        }
+        ServerState::SendResponse => {
+            let offset = response_buf.len() - flow.xfer;
+            match flow.stream.write(&response_buf[offset..]) {
+                Ok(n) => {
+                    flow.xfer -= n;
+                    if flow.xfer == 0 {
+                        flow.xfer = request_buf.len();
+                        flow.state = ServerState::RecvRequest;
+                        metrics.responses_sent.add(1);
+                        metrics.bytes_written.add(response_buf.len() as u64);
+                        Action::Reregister(Interest::READABLE)
+                    } else {
+                        Action::Continue
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) => {
+                    trace!("write error: {e}");
+                    Action::Remove
+                }
+            }
+        }
+    }
+}
