@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "integration/lading_proptest",
   "integration/sheepdog",
   "integration/ducks",
   "lading",
