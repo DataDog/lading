@@ -48,6 +48,10 @@ fn default_data_port() -> u16 {
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_rr` generator.
+///
+/// Flow count is *not* configured here — it is owned by the
+/// `tcp_rr` blackhole and communicated to the generator over the control port
+/// during startup.
 pub struct Config {
     /// The IP address of the `tcp_rr` server.
     pub addr: String,
@@ -60,9 +64,6 @@ pub struct Config {
     /// Number of OS threads (neper -T). Default 1.
     #[serde(default = "default_nonzero_u16")]
     pub threads: NonZeroU16,
-    /// Total number of TCP flows/connections (neper -F). Default 1.
-    #[serde(default = "default_nonzero_u16")]
-    pub flows: NonZeroU16,
     /// Bytes per request. Default 1.
     #[serde(default = "default_nonzero_usize")]
     pub request_size: NonZeroUsize,
@@ -117,7 +118,6 @@ impl TcpRr {
             data_addr: SocketAddr::new(ip, self.config.data_port),
             control_addr: SocketAddr::new(ip, self.config.control_port),
             threads: self.config.threads.get(),
-            flows: self.config.flows.get(),
             request_size: self.config.request_size.get(),
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,

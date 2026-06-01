@@ -61,9 +61,14 @@ pub struct Config {
     #[serde(default = "default_control_port")]
     pub control_port: u16,
     /// Number of OS server threads. Default 1. When > 1, uses `SO_REUSEPORT`
-    /// with an eBPF program for load balancing
+    /// with an eBPF program for load balancing.
     #[serde(default = "default_nonzero_u16")]
     pub threads: NonZeroU16,
+    /// Total number of TCP flows the generator should open.
+    /// Default 1. Sent to the generator over the control connection at
+    /// startup; the generator does not configure this independently.
+    #[serde(default = "default_nonzero_u16")]
+    pub flows: NonZeroU16,
     /// Bytes to read per request. Default 1.
     #[serde(default = "default_nonzero_usize")]
     pub request_size: NonZeroUsize,
@@ -123,6 +128,7 @@ impl TcpRr {
             data_addr: SocketAddr::new(self.config.addr, self.config.data_port),
             control_addr: SocketAddr::new(self.config.addr, self.config.control_port),
             threads: self.config.threads.get(),
+            flows: self.config.flows.get(),
             request_size: self.config.request_size.get(),
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,

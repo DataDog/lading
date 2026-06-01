@@ -47,6 +47,9 @@ pub enum Error {
 }
 
 /// Parameters for [`run_client`].
+///
+/// Flow count is *not* a client parameter — it is owned by the server and
+/// communicated to the client over the control connection during startup.
 pub(crate) struct ClientParams {
     /// Address of the server's data port.
     pub(crate) data_addr: SocketAddr,
@@ -54,8 +57,6 @@ pub(crate) struct ClientParams {
     pub(crate) control_addr: SocketAddr,
     /// Number of OS threads.
     pub(crate) threads: u16,
-    /// Total number of TCP flows.
-    pub(crate) flows: u16,
     /// Bytes per request.
     pub(crate) request_size: usize,
     /// Bytes per response.
@@ -72,6 +73,9 @@ pub(crate) struct ServerParams {
     pub(crate) control_addr: SocketAddr,
     /// Number of OS server threads.
     pub(crate) threads: u16,
+    /// Total number of TCP flows the client should open. Sent to the client
+    /// over the control connection during startup.
+    pub(crate) flows: u16,
     /// Bytes to read per request.
     pub(crate) request_size: usize,
     /// Bytes to send per response.
@@ -94,6 +98,12 @@ enum ServerState {
 
 const LISTENER_TOKEN: Token = Token(0);
 
+/// Control-channel handshake: server writes `flows` to the accepted control
+/// connection as a 2-byte big-endian `u16` and closes; client reads the same
+/// 2 bytes after connecting. Internal protocol — no magic / version byte.
+const HANDSHAKE_LEN: usize = 2;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Run the neper-style client (generator side).
 ///
 /// Connects `flows` TCP flows distributed across `threads` OS threads, then
@@ -112,16 +122,10 @@ pub(crate) async fn run_client(
     shutdown: lading_signal::Watcher,
     thread_prefix: &'static str,
 ) -> Result<(), Error> {
-    if params.threads > params.flows {
-        return Err(Error::Config(format!(
-            "threads ({}) must be <= flows ({})",
-            params.threads, params.flows
-        )));
-    }
-
     let shutdown_flag = thread::new_shutdown_flag();
 
-    // Wait for the blackhole to be ready by connecting to its control port.
+    // Wait for the blackhole to be ready by connecting to its control port,
+    // then read the flow count over that connection.
     info!(
         "waiting for blackhole control port at {}",
         params.control_addr
@@ -135,7 +139,7 @@ pub(crate) async fn run_client(
             flag.store(true, Relaxed);
         });
     }
-    loop {
+    let flows: u16 = loop {
         if shutdown_flag.load(Relaxed) {
             return Err(Error::Io(io::Error::new(
                 ErrorKind::ConnectionRefused,
@@ -146,9 +150,14 @@ pub(crate) async fn run_client(
             )));
         }
         match net::TcpStream::connect(params.control_addr) {
-            Ok(_conn) => {
-                info!("blackhole ready, starting flows");
-                break;
+            Ok(mut conn) => {
+                conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+                    .expect("set_read_timeout on connected TcpStream must succeed");
+                let mut buf = [0u8; HANDSHAKE_LEN];
+                conn.read_exact(&mut buf)?;
+                let received = u16::from_be_bytes(buf);
+                info!("blackhole ready, {received} flows to open");
+                break received;
             }
             Err(e) => {
                 if Instant::now() >= deadline {
@@ -163,9 +172,16 @@ pub(crate) async fn run_client(
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
+    };
+
+    if params.threads > flows {
+        return Err(Error::Config(format!(
+            "threads ({}) must be <= flows received from blackhole ({flows})",
+            params.threads
+        )));
     }
 
-    let flow_dist = thread::distribute_flows(params.flows, params.threads);
+    let flow_dist = thread::distribute_flows(flows, params.threads);
 
     let thread_metrics = Arc::new(
         (0..params.threads)
@@ -389,6 +405,7 @@ pub(crate) async fn run_server(
 
     let mut handles = Vec::with_capacity(num_threads as usize);
     let mut thread0_listener = thread0_listener;
+    let flows = params.flows;
     for i in 0..num_threads {
         let request_size = params.request_size;
         let response_size = params.response_size;
@@ -409,6 +426,7 @@ pub(crate) async fn run_server(
                 binding_addr,
                 prebuilt,
                 backlog,
+                flows,
                 request_size,
                 response_size,
                 no_delay,
@@ -453,14 +471,24 @@ pub(crate) async fn run_server(
         flag.store(true, Relaxed);
     });
     let mut generator_connected = false;
+    let flows_bytes = params.flows.to_be_bytes();
     loop {
         if shutdown_flag.load(Relaxed) {
             info!("shutdown before generator connected");
             break;
         }
         match control_listener.accept() {
-            Ok((_conn, peer)) => {
-                info!("generator connected from {peer}, data threads running");
+            Ok((mut conn, peer)) => {
+                // accept(2) on Linux returns a blocking socket regardless of
+                // the listener's O_NONBLOCK; a small write_timeout guards
+                // against a generator that connects but never reads.
+                conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+                    .expect("set_write_timeout on accepted TcpStream must succeed");
+                conn.write_all(&flows_bytes)?;
+                info!(
+                    "generator connected from {peer}, sent flows={}, data threads running",
+                    params.flows
+                );
                 generator_connected = true;
                 break;
             }
@@ -547,6 +575,7 @@ fn server_thread_main(
     binding_addr: SocketAddr,
     prebuilt_listener: Option<net::TcpListener>,
     backlog: i32,
+    num_flows: u16,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
@@ -566,7 +595,9 @@ fn server_thread_main(
 
     let mut listener = TcpListener::from_std(std_listener);
     let mut poll = Poll::new().expect("failed to create mio::Poll");
-    let mut events = Events::with_capacity(256);
+    // Worst case under SO_REUSEPORT: every flow lands on this thread, so size
+    // for the total flow count plus the listener token.
+    let mut events = Events::with_capacity(num_flows as usize + 1);
 
     poll.registry()
         .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)
