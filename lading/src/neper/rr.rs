@@ -46,6 +46,15 @@ pub enum Error {
     Config(String),
 }
 
+/// Which neper-style protocol the client is driving.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Mode {
+    /// `tcp_rr`: persistent connection, request/response loop forever.
+    Rr,
+    /// `tcp_crr`: connect, request/response, close, reconnect, repeat.
+    Crr,
+}
+
 /// Parameters for [`run_client`].
 pub(crate) struct ClientParams {
     /// Address of the server's data port.
@@ -62,6 +71,8 @@ pub(crate) struct ClientParams {
     pub(crate) response_size: usize,
     /// Whether to set `TCP_NODELAY`.
     pub(crate) no_delay: bool,
+    /// RR or CRR.
+    pub(crate) mode: Mode,
 }
 
 /// Parameters for [`run_server`].
@@ -83,8 +94,24 @@ pub(crate) struct ServerParams {
 }
 
 enum ClientState {
+    /// CRR only: waiting for a non-blocking `connect(2)` to complete. The
+    /// `WRITABLE` readiness event signals connect completion; `take_error()`
+    /// then tells us if it succeeded.
+    Connecting,
     SendRequest,
     RecvResponse,
+}
+
+/// Actions returned by [`handle_client_event`]. Supersets [`flow::Action`]
+/// with [`ClientAction::Reconnect`] for CRR's per-transaction reconnect.
+#[derive(Clone, Copy)]
+enum ClientAction {
+    Continue,
+    Reregister(Interest),
+    /// CRR: response complete — close this socket and open a new one with the
+    /// same `Token`. Handled by [`apply_client_action`].
+    Reconnect,
+    Remove,
 }
 
 enum ServerState {
@@ -186,6 +213,7 @@ pub(crate) async fn run_client(
     let request_size = params.request_size;
     let response_size = params.response_size;
     let no_delay = params.no_delay;
+    let mode = params.mode;
     let mut worker_handles = Vec::with_capacity(params.threads as usize);
     for i in 0..params.threads {
         let thread_flows = flow_dist[i as usize];
@@ -198,6 +226,7 @@ pub(crate) async fn run_client(
                 request_size,
                 response_size,
                 no_delay,
+                mode,
                 &flag,
                 &tm[i as usize],
             );
@@ -215,12 +244,14 @@ pub(crate) async fn run_client(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn client_thread_main(
     addr: SocketAddr,
     num_flows: u16,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
+    mode: Mode,
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
 ) {
@@ -250,6 +281,7 @@ fn client_thread_main(
                     state: ClientState::SendRequest,
                     xfer: request_size,
                 });
+                metrics.connections_initiated.add(1);
             }
             Err(e) => {
                 trace!("connection to {addr} failed: {e}");
@@ -268,19 +300,107 @@ fn client_thread_main(
             let Some(fl) = flows.get_mut(token) else {
                 continue;
             };
-            let action = handle_client_event(fl, &request_buf, &mut response_buf, metrics);
-            flow::apply_action(action, token, &mut flows, poll.registry());
+            let action =
+                handle_client_event(fl, mode, &request_buf, &mut response_buf, metrics);
+            apply_client_action(action, token, &mut flows, &poll, addr, no_delay, metrics);
+        }
+    }
+}
+
+/// Apply a [`ClientAction`] to the flow map. Handles the CRR
+/// reconnect transition (deregister old stream, open a new
+/// non-blocking connect, reregister with the same token).
+fn apply_client_action(
+    action: ClientAction,
+    token: Token,
+    flows: &mut FlowMap<ClientState>,
+    poll: &Poll,
+    addr: SocketAddr,
+    no_delay: bool,
+    metrics: &ThreadMetrics,
+) {
+    let registry = poll.registry();
+    match action {
+        ClientAction::Continue => {}
+        ClientAction::Reregister(interest) => {
+            if let Some(flow) = flows.get_mut(token) {
+                let _ = registry.reregister(&mut flow.stream, flow.token, interest);
+            }
+        }
+        ClientAction::Reconnect => {
+            let Some(flow) = flows.get_mut(token) else {
+                return;
+            };
+            let _ = registry.deregister(&mut flow.stream);
+            match TcpStream::connect(addr) {
+                Ok(mut new_stream) => {
+                    {
+                        let sock = socket2::SockRef::from(&new_stream);
+                        if let Err(e) = sock.set_tcp_nodelay(no_delay) {
+                            trace!("failed to set TCP_NODELAY on reconnect: {e}");
+                        }
+                    }
+                    if let Err(e) =
+                        registry.register(&mut new_stream, flow.token, Interest::WRITABLE)
+                    {
+                        trace!("reconnect register failed: {e}");
+                        metrics.connections_failed.add(1);
+                        let _ = flows.remove(token);
+                    } else {
+                        flow.stream = new_stream;
+                        flow.state = ClientState::Connecting;
+                        flow.xfer = 0;
+                    }
+                }
+                Err(e) => {
+                    trace!("reconnect to {addr} failed: {e}");
+                    metrics.connections_failed.add(1);
+                    let _ = flows.remove(token);
+                }
+            }
+        }
+        ClientAction::Remove => {
+            if let Some(mut flow) = flows.remove(token) {
+                let _ = registry.deregister(&mut flow.stream);
+            }
         }
     }
 }
 
 fn handle_client_event(
     flow: &mut Flow<ClientState>,
+    mode: Mode,
     request_buf: &[u8],
     response_buf: &mut [u8],
     metrics: &ThreadMetrics,
-) -> Action {
+) -> ClientAction {
+    // Connecting → SendRequest transition: mio is edge-triggered, so the
+    // single WRITABLE event that signaled connect completion is also the
+    // event that must drive the first write. Transition state and fall
+    // through to SendRequest in the same call.
+    if matches!(flow.state, ClientState::Connecting) {
+        match flow.stream.take_error() {
+            Ok(None) => {
+                flow.state = ClientState::SendRequest;
+                flow.xfer = request_buf.len();
+                metrics.connections_initiated.add(1);
+                // fall through
+            }
+            Ok(Some(e)) => {
+                trace!("connect failed: {e}");
+                metrics.connections_failed.add(1);
+                return ClientAction::Reconnect;
+            }
+            Err(e) => {
+                trace!("take_error failed: {e}");
+                metrics.connections_failed.add(1);
+                return ClientAction::Reconnect;
+            }
+        }
+    }
+
     match flow.state {
+        ClientState::Connecting => unreachable!("transitioned out of Connecting above"),
         ClientState::SendRequest => {
             let offset = request_buf.len() - flow.xfer;
             match flow.stream.write(&request_buf[offset..]) {
@@ -291,38 +411,43 @@ fn handle_client_event(
                         flow.state = ClientState::RecvResponse;
                         metrics.requests_sent.add(1);
                         metrics.bytes_written.add(request_buf.len() as u64);
-                        Action::Reregister(Interest::READABLE)
+                        ClientAction::Reregister(Interest::READABLE)
                     } else {
-                        Action::Continue
+                        ClientAction::Continue
                     }
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
-                    Action::Remove
+                    ClientAction::Remove
                 }
             }
         }
         ClientState::RecvResponse => {
             let offset = response_buf.len() - flow.xfer;
             match flow.stream.read(&mut response_buf[offset..]) {
-                Ok(0) => Action::Remove,
+                Ok(0) => ClientAction::Remove,
                 Ok(n) => {
                     flow.xfer -= n;
                     if flow.xfer == 0 {
-                        flow.xfer = request_buf.len();
-                        flow.state = ClientState::SendRequest;
                         metrics.responses_received.add(1);
                         metrics.bytes_read.add(response_buf.len() as u64);
-                        Action::Reregister(Interest::WRITABLE)
+                        match mode {
+                            Mode::Rr => {
+                                flow.xfer = request_buf.len();
+                                flow.state = ClientState::SendRequest;
+                                ClientAction::Reregister(Interest::WRITABLE)
+                            }
+                            Mode::Crr => ClientAction::Reconnect,
+                        }
                     } else {
-                        Action::Continue
+                        ClientAction::Continue
                     }
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
-                    Action::Remove
+                    ClientAction::Remove
                 }
             }
         }
@@ -645,7 +770,10 @@ fn handle_server_event(
         ServerState::RecvRequest => {
             let offset = request_buf.len() - flow.xfer;
             match flow.stream.read(&mut request_buf[offset..]) {
-                Ok(0) => Action::Remove,
+                Ok(0) => {
+                    metrics.connections_closed.add(1);
+                    Action::Remove
+                }
                 Ok(n) => {
                     flow.xfer -= n;
                     if flow.xfer == 0 {
@@ -661,6 +789,7 @@ fn handle_server_event(
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
+                    metrics.connections_closed.add(1);
                     Action::Remove
                 }
             }
@@ -683,6 +812,7 @@ fn handle_server_event(
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
+                    metrics.connections_closed.add(1);
                     Action::Remove
                 }
             }
