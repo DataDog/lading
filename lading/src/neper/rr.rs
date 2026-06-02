@@ -282,7 +282,7 @@ static PORT_RANGE_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
 /// lower 16 bits.
 ///
 /// This is done to reduce `EADDRNOTAVAIL` errors when a large number of flows are
-/// created especially for tcp_crr workload.
+/// created especially for `tcp_crr` workload.
 /// Since port ranges are specific to network namespaces, this should not cause issues
 /// for other daemons coming online on lower port ranges when lading is launched in its own
 /// namespace.
