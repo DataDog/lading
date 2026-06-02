@@ -179,7 +179,7 @@ pub(crate) async fn run_client(
                 ),
             )));
         }
-        match net::TcpStream::connect(params.control_addr) {
+        match generator_connect_blocking(params.control_addr) {
             Ok(mut conn) => {
                 conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
                     .expect("set_read_timeout on connected TcpStream must succeed");
@@ -263,6 +263,103 @@ pub(crate) async fn run_client(
     Ok(())
 }
 
+/// `IP_LOCAL_PORT_RANGE` socket option (Linux >= 6.3). Not yet exposed by the
+/// `libc` crate, so it is defined here from `<linux/in.h>`.
+const IP_LOCAL_PORT_RANGE: libc::c_int = 51;
+/// Lowest ephemeral local port the generator may use for its sockets.
+const LOCAL_PORT_LOW: u16 = 1024;
+/// Highest ephemeral local port the generator may use for its sockets.
+const LOCAL_PORT_HIGH: u16 = 60999;
+
+/// Set once the kernel is found not to support `IP_LOCAL_PORT_RANGE`, so the
+/// "unsupported, falling back" warning is logged a single time rather than on
+/// every socket the generator opens.
+static PORT_RANGE_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
+
+/// Increase `socket`'s automatic source-port selection to
+/// `[LOCAL_PORT_LOW, LOCAL_PORT_HIGH]` via `IP_LOCAL_PORT_RANGE`. The option
+/// value packs the high port in the upper 16 bits and the low port in the
+/// lower 16 bits.
+///
+/// This is done to reduce `EADDRNOTAVAIL` errors when a large number of flows are
+/// created especially for tcp_crr workload.
+/// Since port ranges are specific to network namespaces, this should not cause issues
+/// for other daemons coming online on lower port ranges when lading is launched in its own
+/// namespace.
+fn set_local_port_range(socket: &socket2::Socket) -> io::Result<()> {
+    let value: u32 = (u32::from(LOCAL_PORT_HIGH) << 16) | u32::from(LOCAL_PORT_LOW);
+    // SAFETY: `socket` owns a valid fd for the duration of the borrow, and we
+    // pass a pointer to a correctly sized `u32` as the option value, exactly as
+    // `IP_LOCAL_PORT_RANGE` expects.
+    let ret = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            IP_LOCAL_PORT_RANGE,
+            std::ptr::addr_of!(value).cast::<libc::c_void>(),
+            std::mem::size_of::<u32>()
+                .try_into()
+                .expect("u32 size fits in socklen_t"),
+        )
+    };
+    if ret != 0 {
+        let err = io::Error::last_os_error();
+        // ENOPROTOOPT / EOPNOTSUPP means the running kernel predates
+        // IP_LOCAL_PORT_RANGE (< 6.3). Degrade gracefully: fall back to the
+        // system-wide ephemeral range rather than failing the connection.
+        if matches!(
+            err.raw_os_error(),
+            Some(libc::ENOPROTOOPT | libc::EOPNOTSUPP)
+        ) {
+            if !PORT_RANGE_UNSUPPORTED.swap(true, Relaxed) {
+                warn!(
+                    "IP_LOCAL_PORT_RANGE not supported by this kernel; \
+                     falling back to the system ephemeral port range"
+                );
+            }
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// Create a TCP socket for the generator with its local port range constrained
+/// to `[LOCAL_PORT_LOW, LOCAL_PORT_HIGH]`.
+fn new_generator_socket(addr: SocketAddr) -> io::Result<socket2::Socket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    set_local_port_range(&socket)?;
+    Ok(socket)
+}
+
+/// Blocking connect to `addr` using a port-range-constrained generator socket.
+fn generator_connect_blocking(addr: SocketAddr) -> io::Result<net::TcpStream> {
+    let socket = new_generator_socket(addr)?;
+    socket.connect(&addr.into())?;
+    Ok(net::TcpStream::from(socket))
+}
+
+/// Non-blocking connect to `addr` using a port-range-constrained generator
+/// socket, returning a mio stream whose connect is in progress (completion is
+/// signalled by a `WRITABLE` readiness event).
+fn generator_connect_nonblocking(addr: SocketAddr) -> io::Result<TcpStream> {
+    let socket = new_generator_socket(addr)?;
+    socket.set_nonblocking(true)?;
+    // A non-blocking connect reports in-progress as EINPROGRESS / WouldBlock;
+    // that is expected and not an error.
+    match socket.connect(&addr.into()) {
+        Ok(()) => {}
+        Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+        Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+        Err(e) => return Err(e),
+    }
+    Ok(TcpStream::from_std(net::TcpStream::from(socket)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn client_thread_main(
     addr: SocketAddr,
@@ -282,7 +379,7 @@ fn client_thread_main(
     let mut next_token: usize = 0;
 
     for _ in 0..num_flows {
-        match net::TcpStream::connect(addr) {
+        match generator_connect_blocking(addr) {
             Ok(std_stream) => {
                 let _ = std_stream.set_nodelay(no_delay);
                 std_stream
@@ -352,7 +449,7 @@ fn apply_client_action(
                 return;
             };
             let _ = registry.deregister(&mut flow.stream);
-            match TcpStream::connect(addr) {
+            match generator_connect_nonblocking(addr) {
                 Ok(mut new_stream) => {
                     {
                         let sock = socket2::SockRef::from(&new_stream);
