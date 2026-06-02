@@ -67,15 +67,31 @@ impl<S> FlowMap<S> {
     }
 
     /// Get a mutable reference to the flow at the given token.
+    ///
+    /// Returns `None` for an empty slot. A slot occupied by a flow with a
+    /// different token indicates a token-collision bug (tokens congruent
+    /// modulo capacity share a slot), so it is asserted against.
     pub(crate) fn get_mut(&mut self, token: Token) -> Option<&mut Flow<S>> {
         let idx = token.0 % self.inner.capacity();
-        self.inner.get_mut(idx).and_then(|slot| slot.as_mut())
+        let flow = self.inner.get_mut(idx).and_then(|slot| slot.as_mut())?;
+        assert_eq!(
+            flow.token, token,
+            "FlowMap slot {idx} holds a flow with a mismatched token"
+        );
+        Some(flow)
     }
 
     /// Remove and return the flow at the given token.
+    ///
+    /// Returns `None` for an empty slot; asserts the occupant's token matches.
     pub(crate) fn remove(&mut self, token: Token) -> Option<Flow<S>> {
         let idx = token.0 % self.inner.capacity();
-        self.inner.get_mut(idx).and_then(Option::take)
+        let flow = self.inner.get_mut(idx).and_then(Option::take)?;
+        assert_eq!(
+            flow.token, token,
+            "FlowMap slot {idx} holds a flow with a mismatched token"
+        );
+        Some(flow)
     }
 }
 
