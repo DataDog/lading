@@ -95,6 +95,8 @@ pub(crate) struct ServerParams {
     pub(crate) no_delay: bool,
     /// Listener backlog.
     pub(crate) backlog: i32,
+    /// RR or CRR.
+    pub(crate) mode: Mode,
 }
 
 enum ClientState {
@@ -121,6 +123,7 @@ enum ClientAction {
 enum ServerState {
     RecvRequest,
     SendResponse,
+    CloseStream,
 }
 
 const LISTENER_TOKEN: Token = Token(0);
@@ -275,7 +278,7 @@ fn client_thread_main(
     let mut events = Events::with_capacity(num_flows as usize);
     let request_buf = vec![0u8; request_size];
     let mut response_buf = vec![0u8; response_size];
-    let mut flows: FlowMap<ClientState> = FlowMap::new();
+    let mut flows: FlowMap<ClientState> = FlowMap::new(num_flows as usize);
     let mut next_token: usize = 0;
 
     for _ in 0..num_flows {
@@ -291,12 +294,14 @@ fn client_thread_main(
                 poll.registry()
                     .register(&mut stream, token, Interest::WRITABLE)
                     .expect("failed to register flow");
-                flows.insert(Flow {
-                    stream,
-                    token,
-                    state: ClientState::SendRequest,
-                    xfer: request_size,
-                });
+                flows
+                    .insert(Flow {
+                        stream,
+                        token,
+                        state: ClientState::SendRequest,
+                        xfer: request_size,
+                    })
+                    .expect("client should never be able to exceed FlowMap capacity");
                 metrics.connections_initiated.add(1);
             }
             Err(e) => {
@@ -564,6 +569,7 @@ pub(crate) async fn run_server(
                 &flag,
                 &tm[i as usize],
                 tx,
+                params.mode,
             );
         });
         handles.push(handle);
@@ -713,6 +719,7 @@ fn server_thread_main(
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
     ready_tx: mpsc::UnboundedSender<()>,
+    mode: Mode,
 ) {
     // Thread 0 uses the pre-built listener (with BPF already attached); others
     // bind their own sockets that join the existing reuseport group.
@@ -736,7 +743,7 @@ fn server_thread_main(
 
     let mut request_buf = vec![0u8; request_size];
     let response_buf = vec![0u8; response_size];
-    let mut flows: FlowMap<ServerState> = FlowMap::new();
+    let mut flows: FlowMap<ServerState> = FlowMap::new(num_flows as usize);
     let mut next_token: usize = 1;
 
     loop {
@@ -754,16 +761,22 @@ fn server_thread_main(
                             set_nodelay_mio(&stream, no_delay);
                             let token = Token(next_token);
                             next_token += 1;
-                            let mut mio_stream = stream;
-                            poll.registry()
-                                .register(&mut mio_stream, token, Interest::READABLE)
-                                .expect("failed to register flow");
-                            flows.insert(Flow {
-                                stream: mio_stream,
+                            // Insert first: `insert` takes the flow by value and
+                            // drops it (closing the fd) on failure, so there is
+                            // nothing registered to clean up on the error path.
+                            if let Err(err) = flows.insert(Flow {
+                                stream,
                                 token,
                                 state: ServerState::RecvRequest,
                                 xfer: request_size,
-                            });
+                            }) {
+                                warn!("failed to insert flow in server FlowMap: {err}");
+                                break;
+                            }
+                            let flow = flows.get_mut(token).expect("flow was just inserted");
+                            poll.registry()
+                                .register(&mut flow.stream, token, Interest::READABLE)
+                                .expect("failed to register flow");
                             metrics.connections_accepted.add(1);
                         }
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
@@ -782,7 +795,8 @@ fn server_thread_main(
                 let Some(fl) = flows.get_mut(token) else {
                     continue;
                 };
-                let action = handle_server_event(fl, &mut request_buf, &response_buf, metrics);
+                let action =
+                    handle_server_event(fl, &mut request_buf, &response_buf, metrics, mode);
                 flow::apply_action(action, token, &mut flows, poll.registry());
             }
         }
@@ -802,6 +816,7 @@ fn handle_server_event(
     request_buf: &mut [u8],
     response_buf: &[u8],
     metrics: &ThreadMetrics,
+    mode: Mode,
 ) -> Action {
     match flow.state {
         ServerState::RecvRequest => {
@@ -838,7 +853,10 @@ fn handle_server_event(
                     flow.xfer -= n;
                     if flow.xfer == 0 {
                         flow.xfer = request_buf.len();
-                        flow.state = ServerState::RecvRequest;
+                        match mode {
+                            Mode::Rr => flow.state = ServerState::RecvRequest,
+                            Mode::Crr => flow.state = ServerState::CloseStream,
+                        }
                         metrics.responses_sent.add(1);
                         metrics.bytes_written.add(response_buf.len() as u64);
                         Action::Reregister(Interest::READABLE)
@@ -854,5 +872,6 @@ fn handle_server_event(
                 }
             }
         }
+        ServerState::CloseStream => Action::Remove,
     }
 }
