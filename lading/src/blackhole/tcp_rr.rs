@@ -1,4 +1,4 @@
-//! TCP request/response (`tcp_rr`) blackhole — the server side.
+//! TCP request/response (`tcp_rr`) blackhole - the server side.
 //! Based on <https://github.com/google/neper>
 //!
 //! Listens for incoming connections and, for each flow, reads a fixed-size
