@@ -458,10 +458,14 @@ pub(crate) async fn run_server(
     // All data listeners are up. Open control port so the generator can
     // connect and know we're ready.
     let control_addr = params.control_addr;
-    let control_listener = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
+    let ctrl_res = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
         addr: control_addr,
         source: Box::new(source),
-    })?;
+    });
+    if ctrl_res.is_err() {
+        shutdown_flag.store(true, Relaxed);
+    }
+    let control_listener = ctrl_res?;
     control_listener
         .set_nonblocking(true)
         .expect("failed to set control listener nonblocking");
@@ -489,7 +493,10 @@ pub(crate) async fn run_server(
                 // against a generator that connects but never reads.
                 conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
                     .expect("set_write_timeout on accepted TcpStream must succeed");
-                conn.write_all(&flows_bytes)?;
+                if let Err(err) = conn.write_all(&flows_bytes) {
+                    shutdown_flag.store(true, Relaxed);
+                    return Err(err.into());
+                }
                 info!(
                     "generator connected from {peer}, sent flows={}, data threads running",
                     params.flows
@@ -501,6 +508,7 @@ pub(crate) async fn run_server(
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => {
+                shutdown_flag.store(true, Relaxed);
                 return Err(Error::Bind {
                     addr: control_addr,
                     source: Box::new(e),
