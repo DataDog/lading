@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use tokio::sync::mpsc;
-use tracing::{info, trace, warn};
+use tracing::{info, warn};
 
 use crate::neper::bpf;
 use crate::neper::flow::{self, Action, Flow, FlowMap};
@@ -305,7 +305,7 @@ fn client_thread_main(
                 metrics.connections_initiated.add(1);
             }
             Err(e) => {
-                trace!("connection to {addr} failed: {e}");
+                warn!("connection to {addr} failed: {e}");
                 metrics.connections_failed.add(1);
             }
         }
@@ -357,13 +357,13 @@ fn apply_client_action(
                     {
                         let sock = socket2::SockRef::from(&new_stream);
                         if let Err(e) = sock.set_tcp_nodelay(no_delay) {
-                            trace!("failed to set TCP_NODELAY on reconnect: {e}");
+                            warn!("failed to set TCP_NODELAY on reconnect: {e}");
                         }
                     }
                     if let Err(e) =
                         registry.register(&mut new_stream, flow.token, Interest::WRITABLE)
                     {
-                        trace!("reconnect register failed: {e}");
+                        warn!("reconnect register failed: {e}");
                         metrics.connections_failed.add(1);
                         let _ = flows.remove(token);
                     } else {
@@ -373,7 +373,7 @@ fn apply_client_action(
                     }
                 }
                 Err(e) => {
-                    trace!("reconnect to {addr} failed: {e}");
+                    warn!("reconnect to {addr} failed: {e}");
                     metrics.connections_failed.add(1);
                     let _ = flows.remove(token);
                 }
@@ -407,12 +407,12 @@ fn handle_client_event(
                 // fall through
             }
             Ok(Some(e)) => {
-                trace!("connect failed: {e}");
+                warn!("connect failed: {e}");
                 metrics.connections_failed.add(1);
                 return ClientAction::Reconnect;
             }
             Err(e) => {
-                trace!("take_error failed: {e}");
+                warn!("take_error failed: {e}");
                 metrics.connections_failed.add(1);
                 return ClientAction::Reconnect;
             }
@@ -438,7 +438,7 @@ fn handle_client_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
-                    trace!("write error: {e}");
+                    warn!("write error: {e}");
                     ClientAction::Remove
                 }
             }
@@ -468,7 +468,7 @@ fn handle_client_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
-                    trace!("read error: {e}");
+                    warn!("read error: {e}");
                     ClientAction::Remove
                 }
             }
@@ -807,7 +807,7 @@ fn server_thread_main(
 fn set_nodelay_mio(stream: &TcpStream, no_delay: bool) {
     let sock = socket2::SockRef::from(stream);
     if let Err(e) = sock.set_tcp_nodelay(no_delay) {
-        trace!("failed to set TCP_NODELAY: {e}");
+        warn!("failed to set TCP_NODELAY: {e}");
     }
 }
 
@@ -840,7 +840,7 @@ fn handle_server_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
-                    trace!("read error: {e}");
+                    warn!("read error: {e}");
                     metrics.connections_closed.add(1);
                     Action::Remove
                 }
@@ -866,7 +866,7 @@ fn handle_server_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
-                    trace!("write error: {e}");
+                    warn!("write error: {e}");
                     metrics.connections_closed.add(1);
                     Action::Remove
                 }
