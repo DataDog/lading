@@ -1,4 +1,4 @@
-//! TCP request/response (`tcp_rr`) generator — the client side.
+//! TCP request/response (`tcp_rr`) generator - the client side.
 //! Based on <https://github.com/google/neper>
 //!
 //! Implements neper's `tcp_rr` protocol: each flow sends a fixed-size request,
@@ -49,7 +49,7 @@ fn default_data_port() -> u16 {
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_rr` generator.
 ///
-/// Flow count is *not* configured here — it is owned by the
+/// Flow count is *not* configured here - it is owned by the
 /// `tcp_rr` blackhole and communicated to the generator over the control port
 /// during startup.
 pub struct Config {

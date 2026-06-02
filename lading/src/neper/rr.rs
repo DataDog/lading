@@ -48,7 +48,7 @@ pub enum Error {
 
 /// Parameters for [`run_client`].
 ///
-/// Flow count is *not* a client parameter — it is owned by the server and
+/// Flow count is *not* a client parameter - it is owned by the server and
 /// communicated to the client over the control connection during startup.
 pub(crate) struct ClientParams {
     /// Address of the server's data port.
@@ -100,7 +100,7 @@ const LISTENER_TOKEN: Token = Token(0);
 
 /// Control-channel handshake: server writes `flows` to the accepted control
 /// connection as a 2-byte big-endian `u16` and closes; client reads the same
-/// 2 bytes after connecting. Internal protocol — no magic / version byte.
+/// 2 bytes after connecting. Internal protocol - no magic / version byte.
 const HANDSHAKE_LEN: usize = 2;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -388,7 +388,7 @@ pub(crate) async fn run_server(
 
     // Pre-build thread 0's listener here so the BPF program is attached to the
     // reuseport group before any other thread calls bind(). This removes the
-    // need for a cross-thread BPF barrier — if bind fails or panics, it
+    // need for a cross-thread BPF barrier - if bind fails or panics, it
     // propagates as an error directly from this task.
     let binding_addr = params.data_addr;
     let thread0_listener = if num_threads > 1 {

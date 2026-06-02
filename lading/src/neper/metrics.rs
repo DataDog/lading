@@ -42,7 +42,7 @@ impl ThreadCounter {
 macro_rules! define_thread_metrics {
     ($($name:ident),* $(,)?) => {
         /// Per-thread counters.
-        /// Fields are a superset used across all modes — unused fields stay at 0.
+        /// Fields are a superset used across all modes - unused fields stay at 0.
         #[repr(C, align(128))]
         pub(crate) struct ThreadMetrics {
             $(pub(crate) $name: ThreadCounter,)*

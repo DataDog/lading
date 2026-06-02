@@ -31,7 +31,7 @@ pub(crate) enum Action {
 /// Token-indexed flow storage.
 ///
 /// Flows are stored in a `Vec` indexed by token value. Removed slots become
-/// `None` and are not reused — tokens are monotonically increasing, matching
+/// `None` and are not reused - tokens are monotonically increasing, matching
 /// neper's behavior.
 pub(crate) struct FlowMap<S> {
     inner: Vec<Option<Flow<S>>>,
