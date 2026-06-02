@@ -392,7 +392,12 @@ pub(crate) async fn run_server(
     // propagates as an error directly from this task.
     let binding_addr = params.data_addr;
     let thread0_listener = if num_threads > 1 {
-        Some(create_listener(0, num_threads, binding_addr, params.backlog))
+        Some(create_listener(
+            0,
+            num_threads,
+            binding_addr,
+            params.backlog,
+        ))
     } else {
         None
     };
