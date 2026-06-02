@@ -55,7 +55,7 @@ impl<S> FlowMap<S> {
     /// Insert a flow.
     pub(crate) fn insert(&mut self, flow: Flow<S>) -> Result<(), FlowMapError> {
         let idx = flow.token.0 % self.inner.capacity();
-        if self.inner.len() < idx {
+        if self.inner.len() <= idx {
             self.inner.resize_with(idx + 1, || None);
         }
         if self.inner[idx].is_none() {
