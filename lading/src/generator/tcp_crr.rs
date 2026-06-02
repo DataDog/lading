@@ -9,14 +9,6 @@
 //! The event-loop machinery lives in [`crate::neper::rr`]; this module is a
 //! thin wrapper that supplies configuration and selects [`Mode::Crr`].
 //!
-//! ## Ephemeral port / `TIME_WAIT`
-//!
-//! Each transaction consumes one client-side ephemeral port for the duration
-//! of `TIME_WAIT` (~60s by default on Linux). At even a few thousand
-//! transactions/sec the ~28k usable port range exhausts in seconds. Widen
-//! `net.ipv4.ip_local_port_range` and consider lowering `tcp_fin_timeout`
-//! before running sustained CRR workloads.
-//!
 //! ## Metrics
 //!
 //! `connections_initiated`: Successful client-side connect completions
