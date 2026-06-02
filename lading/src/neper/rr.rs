@@ -380,6 +380,7 @@ fn apply_client_action(
             }
         }
         ClientAction::Remove => {
+            metrics.connections_closed.add(1);
             if let Some(mut flow) = flows.remove(token) {
                 let _ = registry.deregister(&mut flow.stream);
             }
