@@ -9,6 +9,10 @@
 //! which exercises every `ValueGenerator` tag so the numbers reflect realistic
 //! template complexity.
 
+// `.expect()` is permitted in benches; workspace denies `clippy::expect_used`
+// for production code.
+#![allow(clippy::expect_used)]
+
 use std::path::Path;
 use std::time::Duration;
 

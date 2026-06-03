@@ -1,5 +1,9 @@
 //! Main lading binary for load testing.
 
+// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
+// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
+#![allow(clippy::expect_used)]
+
 use std::{
     env,
     fmt::{self, Display},

@@ -1,8 +1,11 @@
 # https://rust-lang.github.io/rust-clippy/master/index.html#doc_markdown
 doc-valid-idents = ["OpenTelemetry", "gRPC", ".."]
 
-# Allow unwrap() and print!/println! in test code without per-module suppressions
+# Allow unwrap()/expect() and print!/println! in test code without per-module
+# suppressions. `allow-expect-in-tests` mirrors `allow-unwrap-in-tests`; the
+# corresponding `clippy::expect_used` lint is set in the workspace Cargo.toml.
 allow-unwrap-in-tests = true
+allow-expect-in-tests = true
 allow-print-in-tests = true
 
 # https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_types

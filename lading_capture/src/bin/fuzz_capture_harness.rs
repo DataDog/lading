@@ -7,6 +7,9 @@
 
 #![expect(clippy::print_stderr)]
 #![allow(clippy::cast_precision_loss)]
+// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
+// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
+#![allow(clippy::expect_used)]
 
 use anyhow::{Context, Result};
 use arbitrary::Arbitrary;

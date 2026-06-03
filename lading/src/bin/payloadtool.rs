@@ -2,6 +2,9 @@
 
 #![expect(clippy::print_stdout)]
 #![expect(clippy::print_stderr)]
+// Quarantine: workspace denies `clippy::expect_used`, but this binary still has
+// production `.expect()` sites awaiting cleanup. Remove once cleaned up.
+#![allow(clippy::expect_used)]
 
 /// Memory allocation tracking for payloadtool statistics.
 ///

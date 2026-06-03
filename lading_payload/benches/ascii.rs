@@ -3,6 +3,10 @@
 //! Paired with SMP regression experiments in `experiments/regression/cases/http_ascii_*`.
 //! If throughput sizes here change, update the corresponding SMP experiments and vice versa.
 
+// `.expect()` is permitted in benches; workspace denies `clippy::expect_used`
+// for production code.
+#![allow(clippy::expect_used)]
+
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::{Serialize, ascii};
 use rand::{SeedableRng, rngs::SmallRng};

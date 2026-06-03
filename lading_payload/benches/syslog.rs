@@ -1,5 +1,9 @@
 //! Benchmarks for Syslog 5424 payload generation.
 
+// `.expect()` is permitted in benches; workspace denies `clippy::expect_used`
+// for production code.
+#![allow(clippy::expect_used)]
+
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::{Serialize, Syslog5424};
 use rand::{SeedableRng, rngs::SmallRng};
