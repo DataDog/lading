@@ -221,7 +221,7 @@ pub(crate) async fn run_client(
 
     let flow_dist = thread::distribute_flows(flows, params.threads);
     let mut port_dist = Vec::new();
-    for i  in 0..params.threads {
+    for i in 0..params.threads {
         port_dist.insert(i as usize, flow_dist[..i as usize].iter().sum());
     }
 
@@ -954,7 +954,10 @@ fn server_thread_main(
                                 xfer: request_size,
                                 port: 0,
                             }) {
-                                warn!("failed to insert flow in server FlowMap: {err} {0}", token.0);
+                                warn!(
+                                    "failed to insert flow in server FlowMap: {err} {0}",
+                                    token.0
+                                );
                                 break;
                             }
                             let flow = flows.get_mut(token).expect("flow was just inserted");
