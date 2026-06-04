@@ -15,7 +15,6 @@ pub(crate) struct Flow<S> {
     pub(crate) state: S,
     /// Remaining bytes for the current I/O operation.
     pub(crate) xfer: usize,
-    pub(crate) port: u16,
 }
 
 /// What the event loop should do after processing a flow event.

@@ -44,9 +44,6 @@ pub enum Error {
     /// Invalid configuration.
     #[error("invalid config: {0}")]
     Config(String),
-    // Too many flows
-    #[error("too many flows will cause port exhaustion: {0}")]
-    TooManyFlows(u16),
 }
 
 /// Which neper-style protocol the client is driving.
@@ -183,7 +180,7 @@ pub(crate) async fn run_client(
                 ),
             )));
         }
-        match generator_connect_blocking(params.control_addr, None) {
+        match generator_connect_blocking(params.control_addr) {
             Ok(mut conn) => {
                 conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
                     .expect("set_read_timeout on connected TcpStream must succeed");
@@ -215,17 +212,7 @@ pub(crate) async fn run_client(
         )));
     }
 
-    if flows > (LOCAL_PORT_HIGH - LOCAL_PORT_LOW) {
-        return Err(Error::TooManyFlows(flows));
-    }
-
     let flow_dist = thread::distribute_flows(flows, params.threads);
-    let mut port_dist = Vec::new();
-    for i in 0..params.threads {
-        port_dist.insert(i as usize, flow_dist[..i as usize].iter().sum());
-    }
-
-    let port_dist = port_dist;
 
     let thread_metrics = Arc::new(
         (0..params.threads)
@@ -250,14 +237,12 @@ pub(crate) async fn run_client(
     let mut worker_handles = Vec::with_capacity(params.threads as usize);
     for i in 0..params.threads {
         let thread_flows = flow_dist[i as usize];
-        let ports_base = port_dist[i as usize];
         let flag = Arc::clone(&shutdown_flag);
         let tm = Arc::clone(&thread_metrics);
         let handle = thread::spawn_named(&format!("{thread_prefix}-client-{i}"), move || {
             client_thread_main(
                 data_addr,
                 thread_flows,
-                ports_base,
                 request_size,
                 response_size,
                 no_delay,
@@ -354,18 +339,10 @@ fn new_generator_socket(addr: SocketAddr) -> io::Result<socket2::Socket> {
 
 /// Blocking connect to `addr` using a port-range-constrained generator socket.
 ///
-/// When `port` is `Some`, the socket is bound to that local source port (on the
-/// wildcard address for `addr`'s family) before connecting; otherwise the
-/// kernel picks a source port from the constrained range.
-fn generator_connect_blocking(addr: SocketAddr, port: Option<u16>) -> io::Result<net::TcpStream> {
+/// The kernel picks the source port from the constrained ephemeral range (see
+/// [`set_local_port_range`]); the generator does not manage source ports itself.
+fn generator_connect_blocking(addr: SocketAddr) -> io::Result<net::TcpStream> {
     let socket = new_generator_socket(addr)?;
-    if let Some(port) = port {
-        let bind_addr = match addr {
-            SocketAddr::V4(_) => SocketAddr::from((net::Ipv4Addr::UNSPECIFIED, port)),
-            SocketAddr::V6(_) => SocketAddr::from((net::Ipv6Addr::UNSPECIFIED, port)),
-        };
-        socket.bind(&bind_addr.into())?;
-    }
     socket.connect(&addr.into())?;
     Ok(net::TcpStream::from(socket))
 }
@@ -374,18 +351,10 @@ fn generator_connect_blocking(addr: SocketAddr, port: Option<u16>) -> io::Result
 /// socket, returning a mio stream whose connect is in progress (completion is
 /// signalled by a `WRITABLE` readiness event).
 ///
-/// When `port` is `Some`, the socket is bound to that local source port (on the
-/// wildcard address for `addr`'s family) before connecting; otherwise the
-/// kernel picks a source port from the constrained range.
-fn generator_connect_nonblocking(addr: SocketAddr, port: Option<u16>) -> io::Result<TcpStream> {
+/// The kernel picks the source port from the constrained ephemeral range (see
+/// [`set_local_port_range`]); the generator does not manage source ports itself.
+fn generator_connect_nonblocking(addr: SocketAddr) -> io::Result<TcpStream> {
     let socket = new_generator_socket(addr)?;
-    if let Some(port) = port {
-        let bind_addr = match addr {
-            SocketAddr::V4(_) => SocketAddr::from((net::Ipv4Addr::UNSPECIFIED, port)),
-            SocketAddr::V6(_) => SocketAddr::from((net::Ipv6Addr::UNSPECIFIED, port)),
-        };
-        socket.bind(&bind_addr.into())?;
-    }
     socket.set_nonblocking(true)?;
     // A non-blocking connect reports in-progress as EINPROGRESS / WouldBlock;
     // that is expected and not an error.
@@ -402,7 +371,6 @@ fn generator_connect_nonblocking(addr: SocketAddr, port: Option<u16>) -> io::Res
 fn client_thread_main(
     addr: SocketAddr,
     num_flows: u16,
-    ports_base: u16,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
@@ -417,22 +385,9 @@ fn client_thread_main(
     let mut flows: FlowMap<ClientState> = FlowMap::new(num_flows as usize);
     let mut next_token: usize = 0;
 
-    let mut f = 0;
-    let mut backwards = 0;
-    loop {
-        if f >= num_flows {
-            break;
-        }
-
-        f += 1;
-
+    for _ in 0..num_flows {
         let token = Token(next_token);
-        let port = if backwards > 0 {
-            LOCAL_PORT_HIGH - ports_base - f - (backwards - 1)
-        } else {
-            LOCAL_PORT_LOW + ports_base + f
-        };
-        match generator_connect_blocking(addr, Some(port)) {
+        match generator_connect_blocking(addr) {
             Ok(std_stream) => {
                 let _ = std_stream.set_nodelay(no_delay);
                 std_stream
@@ -447,22 +402,15 @@ fn client_thread_main(
                     .insert(Flow {
                         stream,
                         token,
-                        port,
                         state: ClientState::SendRequest,
                         xfer: request_size,
                     })
                     .expect("client should never be able to exceed FlowMap capacity");
                 metrics.connections_initiated.add(1);
-                backwards = 0;
             }
             Err(e) => {
-                if e.kind() == ErrorKind::AddrInUse && backwards < num_flows {
-                    f -= 1;
-                    backwards += 1;
-                } else {
-                    warn!("connection to {addr} failed from {port}: {e}");
-                    metrics.connections_failed.add(1);
-                }
+                warn!("connection to {addr} failed: {e}");
+                metrics.connections_failed.add(1);
             }
         }
     }
@@ -504,29 +452,25 @@ fn apply_client_action(
             }
         }
         ClientAction::Reconnect => {
-            // Take the flow out of the map so the old socket can be fully
-            // closed before the new connection binds to the same source port.
-            // The old socket holds `port` until its fd is dropped, so a bind
-            // to `port` while it is still open would fail with EADDRINUSE.
-            let Some(flow) = flows.remove(token) else {
+            // Take the flow out of the map so the old socket is fully closed
+            // before the new connection is opened.
+            let Some(mut flow) = flows.remove(token) else {
                 return;
             };
-            let Flow {
-                mut stream, port, ..
-            } = flow;
-            let _ = registry.deregister(&mut stream);
+            let _ = registry.deregister(&mut flow.stream);
             {
                 // Abortive close: SO_LINGER with a zero timeout makes the drop
                 // below emit a RST instead of a FIN, so the socket skips
-                // TIME_WAIT and `port` is released immediately for the bind.
-                let sock = socket2::SockRef::from(&stream);
+                // TIME_WAIT and its source port returns to the constrained
+                // ephemeral range immediately rather than lingering 2*MSL.
+                let sock = socket2::SockRef::from(&flow.stream);
                 if let Err(e) = sock.set_linger(Some(Duration::from_secs(0))) {
                     warn!("failed to set SO_LINGER for abortive close on reconnect: {e}");
                 }
             }
-            // Drop the old stream now (sends RST, frees `port`) before binding.
-            drop(stream);
-            match generator_connect_nonblocking(addr, Some(port)) {
+            // Drop the old stream now (sends RST) before the new connect.
+            drop(flow);
+            match generator_connect_nonblocking(addr) {
                 Ok(mut new_stream) => {
                     {
                         let sock = socket2::SockRef::from(&new_stream);
@@ -540,7 +484,6 @@ fn apply_client_action(
                     } else if let Err(err) = flows.insert(Flow {
                         stream: new_stream,
                         token,
-                        port,
                         state: ClientState::Connecting,
                         xfer: 0,
                     }) {
@@ -952,7 +895,6 @@ fn server_thread_main(
                                 token,
                                 state: ServerState::RecvRequest,
                                 xfer: request_size,
-                                port: 0,
                             }) {
                                 warn!(
                                     "failed to insert flow in server FlowMap: {err} {0}",
