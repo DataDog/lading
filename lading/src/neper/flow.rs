@@ -37,28 +37,61 @@ pub(crate) struct FlowMap<S> {
     inner: Vec<Option<Flow<S>>>,
 }
 
+/// Errors produced by `FlowMap`.
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum FlowMapError {
+    /// No capacity
+    #[error("Server flow map is at capacity: {0}")]
+    NoCapacity(usize),
+}
+
 impl<S> FlowMap<S> {
-    pub(crate) fn new() -> Self {
-        Self { inner: Vec::new() }
+    pub(crate) fn new(flows: usize) -> Self {
+        Self {
+            inner: Vec::with_capacity(flows * 2),
+        }
     }
 
-    /// Insert a flow. Grows the backing vec if needed.
-    pub(crate) fn insert(&mut self, flow: Flow<S>) {
-        let idx = flow.token.0;
-        if idx >= self.inner.len() {
+    /// Insert a flow.
+    pub(crate) fn insert(&mut self, flow: Flow<S>) -> Result<(), FlowMapError> {
+        let idx = flow.token.0 % self.inner.capacity();
+        if self.inner.len() <= idx {
             self.inner.resize_with(idx + 1, || None);
         }
-        self.inner[idx] = Some(flow);
+        if self.inner[idx].is_none() {
+            self.inner[idx] = Some(flow);
+            return Ok(());
+        }
+
+        Err(FlowMapError::NoCapacity(self.inner.capacity()))
     }
 
     /// Get a mutable reference to the flow at the given token.
+    ///
+    /// Returns `None` for an empty slot. A slot occupied by a flow with a
+    /// different token indicates a token-collision bug (tokens congruent
+    /// modulo capacity share a slot), so it is asserted against.
     pub(crate) fn get_mut(&mut self, token: Token) -> Option<&mut Flow<S>> {
-        self.inner.get_mut(token.0).and_then(|slot| slot.as_mut())
+        let idx = token.0 % self.inner.capacity();
+        let flow = self.inner.get_mut(idx).and_then(|slot| slot.as_mut())?;
+        assert_eq!(
+            flow.token, token,
+            "FlowMap slot {idx} holds a flow with a mismatched token"
+        );
+        Some(flow)
     }
 
     /// Remove and return the flow at the given token.
+    ///
+    /// Returns `None` for an empty slot; asserts the occupant's token matches.
     pub(crate) fn remove(&mut self, token: Token) -> Option<Flow<S>> {
-        self.inner.get_mut(token.0).and_then(Option::take)
+        let idx = token.0 % self.inner.capacity();
+        let flow = self.inner.get_mut(idx).and_then(Option::take)?;
+        assert_eq!(
+            flow.token, token,
+            "FlowMap slot {idx} holds a flow with a mismatched token"
+        );
+        Some(flow)
     }
 }
 

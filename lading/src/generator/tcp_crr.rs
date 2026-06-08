@@ -1,15 +1,17 @@
-//! TCP request/response (`tcp_rr`) generator - the client side.
+//! TCP connect/request/response (`tcp_crr`) generator — the client side.
 //! Based on <https://github.com/google/neper>
 //!
-//! Implements neper's `tcp_rr` protocol: each flow sends a fixed-size request,
-//! waits for a fixed-size response, and repeats. Flows are distributed across
-//! OS threads and multiplexed via mio.
+//! Implements neper's `tcp_crr` protocol: each flow connects, sends a
+//! fixed-size request, reads a fixed-size response, closes the connection,
+//! then reconnects and repeats. This measures connection-establishment rate
+//! end-to-end, including kernel and TCP-handshake overhead.
 //!
 //! The event-loop machinery lives in [`crate::neper::rr`]; this module is a
-//! thin wrapper that supplies configuration.
+//! thin wrapper that supplies configuration and selects [`Mode::Crr`].
 //!
 //! ## Metrics
 //!
+//! `connections_initiated`: Successful client-side connect completions
 //! `requests_sent`: Completed request writes
 //! `responses_received`: Completed response reads
 //! `bytes_written`: Request bytes sent
@@ -47,13 +49,13 @@ fn default_data_port() -> u16 {
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
-/// Configuration for the `tcp_rr` generator.
+/// Configuration for the `tcp_crr` generator.
 ///
-/// Flow count is *not* configured here - it is owned by the
-/// `tcp_rr` blackhole and communicated to the generator over the control port
-/// during startup.
+/// Flow count (neper `-F`) is *not* configured here — it is owned by the
+/// `tcp_crr` blackhole and communicated to the generator over the control
+/// port during startup.
 pub struct Config {
-    /// The IP address of the `tcp_rr` server.
+    /// The IP address of the `tcp_crr` server.
     pub addr: String,
     /// Data port for flow connections. Default 12867.
     #[serde(default = "default_data_port")]
@@ -76,7 +78,7 @@ pub struct Config {
 }
 
 #[derive(thiserror::Error, Debug)]
-/// Errors produced by [`TcpRr`].
+/// Errors produced by [`TcpCrr`].
 pub enum Error {
     /// Shared neper-style request/response error.
     #[error(transparent)]
@@ -84,18 +86,18 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-/// The `tcp_rr` generator (client side).
-pub struct TcpRr {
+/// The `tcp_crr` generator (client side).
+pub struct TcpCrr {
     config: Config,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
 
-impl TcpRr {
-    /// Create a new [`TcpRr`] generator instance.
+impl TcpCrr {
+    /// Create a new [`TcpCrr`] generator instance.
     #[must_use]
     pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
-        let metric_labels = MetricsBuilder::new("tcp_rr").with_id(general.id).build();
+        let metric_labels = MetricsBuilder::new("tcp_crr").with_id(general.id).build();
         Self {
             config: config.clone(),
             metric_labels,
@@ -121,9 +123,9 @@ impl TcpRr {
             request_size: self.config.request_size.get(),
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,
-            mode: Mode::Rr,
+            mode: Mode::Crr,
         };
-        rr::run_client(params, self.metric_labels, self.shutdown, "tcp_rr").await?;
+        rr::run_client(params, self.metric_labels, self.shutdown, "tcp_crr").await?;
         Ok(())
     }
 }
