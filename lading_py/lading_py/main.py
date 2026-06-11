@@ -127,11 +127,45 @@ def _build_parser() -> argparse.ArgumentParser:
 # Config loading
 # ---------------------------------------------------------------------------
 
+_SINGLETON_KEYS = {"telemetry", "sample_period_milliseconds", "inspector", "observer"}
+_LIST_KEYS = {"generator", "blackhole", "target_metrics"}
+
+
+def _merge_raw_configs(base: dict, overlay: dict) -> dict:
+    for key, val in overlay.items():
+        if key in _SINGLETON_KEYS:
+            if key in base:
+                raise ValueError(f"'{key}' defined in multiple config files")
+            base[key] = val
+        elif key in _LIST_KEYS:
+            base.setdefault(key, []).extend(val if isinstance(val, list) else [val])
+        else:
+            base[key] = val
+    return base
+
+
 def _load_raw_config(config_path: str) -> dict:
     lading_config_env = os.environ.get("LADING_CONFIG")
     if lading_config_env:
         return yaml.safe_load(lading_config_env)
-    with open(config_path) as f:
+    p = os.path.abspath(config_path)
+    if os.path.isdir(p):
+        yaml_files = sorted(
+            entry.path
+            for entry in os.scandir(p)
+            if entry.is_file()
+            and entry.name.endswith(".yaml")
+            and not entry.name.startswith(".")
+        )
+        if not yaml_files:
+            raise ValueError(f"No .yaml config files found in directory: {p}")
+        merged: dict = {}
+        for path in yaml_files:
+            with open(path) as f:
+                partial = yaml.safe_load(f) or {}
+            merged = _merge_raw_configs(merged, partial)
+        return merged
+    with open(p) as f:
         return yaml.safe_load(f)
 
 
