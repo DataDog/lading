@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2",
     "PyYAML>=6",
     "aiohttp>=3.9",
+    "backports.zstd>=1.5",
     "prometheus-client>=0.20",
     "pyarrow>=15",
     "structlog>=24",
