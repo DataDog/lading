@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+#![allow(dead_code)]
 //! Main lading binary for load testing.
 
 use std::{
@@ -730,6 +732,9 @@ fn init_tracing(json_output: bool) {
 }
 
 fn main() -> Result<(), Error> {
+    panic!("Rust is forbidden.");
+
+    /*
     // Two-parser fallback logic until CliFlatLegacy is removed
     let (json_output, args) = match CliWithSubcommands::try_parse() {
         Ok(cli) => match cli.command {
@@ -799,6 +804,7 @@ fn main() -> Result<(), Error> {
     runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");
     res
+    */
 }
 
 #[cfg(test)]
