@@ -10,8 +10,10 @@ use serde::Deserialize;
 
 const DEFAULT_METRIC_NAME_PREFIX: &str = "lading_openmetrics";
 const DEFAULT_ROUTE_COUNT: u32 = 60;
-const DEFAULT_BUCKETS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0];
-const DEFAULT_QUANTILES: &[f64] = &[0.5, 0.75, 0.9, 0.95, 0.99];
+const DEFAULT_BUCKETS: &[&str] = &[
+    "0.005", "0.01", "0.025", "0.05", "0.1", "0.25", "0.5", "1", "2.5", "5",
+];
+const DEFAULT_QUANTILES: &[&str] = &["0.5", "0.75", "0.9", "0.95", "0.99"];
 
 /// Errors produced by `OpenMetrics` payload generation.
 #[derive(thiserror::Error, Debug)]
@@ -84,11 +86,17 @@ fn default_consumers() -> Vec<String> {
 }
 
 fn default_buckets() -> Vec<String> {
-    DEFAULT_BUCKETS.iter().map(ToString::to_string).collect()
+    DEFAULT_BUCKETS
+        .iter()
+        .map(|bucket| (*bucket).to_string())
+        .collect()
 }
 
 fn default_quantiles() -> Vec<String> {
-    DEFAULT_QUANTILES.iter().map(ToString::to_string).collect()
+    DEFAULT_QUANTILES
+        .iter()
+        .map(|quantile| (*quantile).to_string())
+        .collect()
 }
 
 /// Configure gauge family generation.
@@ -250,11 +258,11 @@ impl Config {
     /// Returns an error if this configuration cannot produce valid exposition text.
     pub fn valid(&self) -> Result<(), String> {
         validate_metric_prefix(&self.metric_name_prefix)?;
-        validate_non_empty("labels.services", &self.labels.services)?;
-        validate_non_empty("labels.regions", &self.labels.regions)?;
-        validate_non_empty("labels.methods", &self.labels.methods)?;
-        validate_non_empty("labels.status_classes", &self.labels.status_classes)?;
-        validate_non_empty("labels.consumers", &self.labels.consumers)?;
+        validate_label_values("labels.services", &self.labels.services)?;
+        validate_label_values("labels.regions", &self.labels.regions)?;
+        validate_label_values("labels.methods", &self.labels.methods)?;
+        validate_label_values("labels.status_classes", &self.labels.status_classes)?;
+        validate_label_values("labels.consumers", &self.labels.consumers)?;
         if self.labels.route_count == 0 {
             return Err("labels.route_count cannot be zero".to_string());
         }
@@ -287,6 +295,8 @@ impl OpenMetrics {
     /// Returns an error when configuration validation or writing fails.
     pub fn new(config: &Config) -> Result<Self, Error> {
         config.valid().map_err(Error::InvalidConfig)?;
+        let summary_quantiles = parsed_floats("summaries.quantiles", &config.summaries.quantiles)
+            .map_err(Error::InvalidConfig)?;
         let mut body = Vec::new();
         let mut sample_count = 0;
         write_target_info(config, &mut body)?;
@@ -294,7 +304,7 @@ impl OpenMetrics {
         write_counters(config, &mut body, &mut sample_count)?;
         write_gauges(config, &mut body, &mut sample_count)?;
         write_histograms(config, &mut body, &mut sample_count)?;
-        write_summaries(config, &mut body, &mut sample_count)?;
+        write_summaries(config, &summary_quantiles, &mut body, &mut sample_count)?;
         write_build_info(config, &mut body)?;
         sample_count += 1;
         Ok(Self { body, sample_count })
@@ -332,15 +342,20 @@ fn validate_metric_prefix(prefix: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_non_empty(name: &str, values: &[String]) -> Result<(), String> {
+fn validate_label_values(name: &str, values: &[String]) -> Result<(), String> {
     if values.is_empty() {
         return Err(format!("{name} cannot be empty"));
     }
     if values.iter().any(String::is_empty) {
         return Err(format!("{name} cannot contain empty values"));
     }
-    if values.iter().any(|value| value.contains('"')) {
-        return Err(format!("{name} cannot contain quote characters"));
+    if values
+        .iter()
+        .any(|value| value.contains(['"', '\\', '\n', '\r']))
+    {
+        return Err(format!(
+            "{name} cannot contain quote, backslash, or newline characters"
+        ));
     }
     Ok(())
 }
@@ -534,6 +549,7 @@ fn write_histogram_bucket<W: Write>(
 
 fn write_summaries<W: Write>(
     config: &Config,
+    summary_quantiles: &[f64],
     writer: &mut W,
     sample_count: &mut u64,
 ) -> Result<(), Error> {
@@ -548,10 +564,7 @@ fn write_summaries<W: Write>(
         "Synthetic payload size summary.",
     )?;
     for index in 0..config.summaries.count {
-        for quantile in &config.summaries.quantiles {
-            let quantile_value = quantile.parse::<f64>().map_err(|_| {
-                Error::InvalidConfig("summaries.quantiles values must parse".to_string())
-            })?;
+        for (quantile, quantile_value) in config.summaries.quantiles.iter().zip(summary_quantiles) {
             writeln!(
                 writer,
                 "{}{{service=\"{}\",region=\"{}\",consumer=\"{}\",quantile=\"{}\"}} {:.1}",
@@ -560,7 +573,7 @@ fn write_summaries<W: Write>(
                 select(&config.labels.regions, index / 3),
                 select(&config.labels.consumers, index),
                 quantile,
-                512.0 + f64::from(index) * 11.0 + quantile_value * 100.0
+                512.0 + f64::from(index) * 11.0 + *quantile_value * 100.0
             )?;
             *sample_count += 1;
         }
@@ -711,6 +724,53 @@ mod tests {
             ..Config::default()
         };
         assert!(config.valid().is_err());
+
+        let config = Config {
+            histograms: HistogramConfig {
+                count: 1,
+                buckets: Vec::new(),
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        let config = Config {
+            summaries: SummaryConfig {
+                count: 1,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        let config = Config {
+            summaries: SummaryConfig {
+                count: 1,
+                quantiles: vec!["1.1".to_string()],
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        let config = Config {
+            labels: LabelConfig {
+                route_count: 0,
+                ..LabelConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        for invalid_label in ["bad\\label", "bad\nlabel", "bad\rlabel", "bad\"label"] {
+            let config = Config {
+                labels: LabelConfig {
+                    services: vec![invalid_label.to_string()],
+                    ..LabelConfig::default()
+                },
+                ..Config::default()
+            };
+            assert!(config.valid().is_err());
+        }
     }
 
     proptest! {
@@ -737,7 +797,9 @@ mod tests {
                 ..Config::default()
             };
             let payload = OpenMetrics::new(&config).expect("payload should build");
+            let duplicate = OpenMetrics::new(&config).expect("duplicate payload should build");
             let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+            prop_assert_eq!(payload.as_bytes(), duplicate.as_bytes());
             prop_assert_eq!(payload.sample_count(), non_comment_line_count(body));
         }
     }
