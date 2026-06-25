@@ -1,8 +1,8 @@
-//! `OpenMetrics` text exposition payload.
+//! Prometheus/OpenMetrics text exposition payload.
 //!
-//! This generator builds a deterministic Prometheus text exposition body for
-//! scrape-oriented tests. The body is fully precomputed before serving so that
-//! lading does no payload generation work on request hot paths.
+//! This generator builds a deterministic Prometheus/OpenMetrics text exposition
+//! body for scrape-oriented tests. The body is fully precomputed before serving
+//! so that lading does no payload generation work on request hot paths.
 
 use std::io::{self, Write};
 
@@ -332,6 +332,12 @@ impl OpenMetrics {
 fn validate_metric_prefix(prefix: &str) -> Result<(), String> {
     if prefix.is_empty() {
         return Err("metric_name_prefix cannot be empty".to_string());
+    }
+    let Some(first) = prefix.chars().next() else {
+        return Err("metric_name_prefix cannot be empty".to_string());
+    };
+    if !(first.is_ascii_alphabetic() || first == '_' || first == ':') {
+        return Err("metric_name_prefix must start with [A-Za-z_:]".to_string());
     }
     if !prefix
         .chars()
@@ -703,6 +709,11 @@ mod tests {
     fn validation_rejects_bad_config() {
         let config = Config {
             metric_name_prefix: "bad-name".to_string(),
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+        let config = Config {
+            metric_name_prefix: "1bad".to_string(),
             ..Config::default()
         };
         assert!(config.valid().is_err());
