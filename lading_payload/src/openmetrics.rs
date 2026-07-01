@@ -511,12 +511,13 @@ fn write_gauges<W: Write>(
         let priority = if index % 7 == 0 { "high" } else { "normal" };
         writeln!(
             writer,
-            "{}{{service=\"{}\",region=\"{}\",queue=\"queue-{:02}\",priority=\"{}\"}} {:.1}",
+            "{}{{service=\"{}\",region=\"{}\",queue=\"queue-{:02}\",priority=\"{}\",series=\"gauge-{:06}\"}} {:.1}",
             metric_name(config, "queue_depth"),
             label_value(select(&config.labels.services, index)),
             label_value(select(&config.labels.regions, index / 5)),
             index % 36,
             label_value(priority),
+            index,
             f64::from((index * 13) % 997) / 10.0
         )?;
         *sample_count += 1;
@@ -615,11 +616,12 @@ fn write_summaries<W: Write>(
         for (quantile, quantile_value) in config.summaries.quantiles.iter().zip(summary_quantiles) {
             writeln!(
                 writer,
-                "{}{{service=\"{}\",region=\"{}\",consumer=\"{}\",quantile=\"{}\"}} {:.1}",
+                "{}{{service=\"{}\",region=\"{}\",consumer=\"{}\",series=\"summary-{:06}\",quantile=\"{}\"}} {:.1}",
                 metric_name(config, "payload_bytes"),
                 label_value(select(&config.labels.services, index)),
                 label_value(select(&config.labels.regions, index / 3)),
                 label_value(select(&config.labels.consumers, index)),
+                index,
                 label_value(quantile),
                 512.0 + f64::from(index) * 11.0 + *quantile_value * 100.0
             )?;
@@ -627,21 +629,23 @@ fn write_summaries<W: Write>(
         }
         writeln!(
             writer,
-            "{}_sum{{service=\"{}\",region=\"{}\",consumer=\"{}\"}} {}",
+            "{}_sum{{service=\"{}\",region=\"{}\",consumer=\"{}\",series=\"summary-{:06}\"}} {}",
             metric_name(config, "payload_bytes"),
             label_value(select(&config.labels.services, index)),
             label_value(select(&config.labels.regions, index / 3)),
             label_value(select(&config.labels.consumers, index)),
+            index,
             500_000 + u64::from(index) * 997
         )?;
         *sample_count += 1;
         writeln!(
             writer,
-            "{}_count{{service=\"{}\",region=\"{}\",consumer=\"{}\"}} {}",
+            "{}_count{{service=\"{}\",region=\"{}\",consumer=\"{}\",series=\"summary-{:06}\"}} {}",
             metric_name(config, "payload_bytes"),
             label_value(select(&config.labels.services, index)),
             label_value(select(&config.labels.regions, index / 3)),
             label_value(select(&config.labels.consumers, index)),
+            index,
             1_000 + u64::from(index) * 31
         )?;
         *sample_count += 1;
@@ -833,6 +837,33 @@ mod tests {
     }
 
     #[test]
+    fn gauge_series_are_unique_when_labels_wrap() {
+        let config = Config {
+            counters: CounterConfig { count: 0 },
+            gauges: GaugeConfig { count: 182 },
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        let mut gauge_lines = body
+            .lines()
+            .filter(|line| line.starts_with("lading_openmetrics_queue_depth{"))
+            .collect::<Vec<_>>();
+        let line_count = gauge_lines.len();
+        gauge_lines.sort_unstable();
+        gauge_lines.dedup();
+        assert_eq!(gauge_lines.len(), line_count);
+    }
+
+    #[test]
     fn histogram_series_are_unique_when_labels_wrap() {
         let config = Config {
             counters: CounterConfig { count: 0 },
@@ -857,6 +888,33 @@ mod tests {
         histogram_lines.sort_unstable();
         histogram_lines.dedup();
         assert_eq!(histogram_lines.len(), line_count);
+    }
+
+    #[test]
+    fn summary_series_are_unique_when_labels_wrap() {
+        let config = Config {
+            counters: CounterConfig { count: 0 },
+            gauges: GaugeConfig { count: 0 },
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: DEFAULT_ROUTE_COUNT + 1,
+                quantiles: vec!["0.5".to_string()],
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        let mut summary_lines = body
+            .lines()
+            .filter(|line| line.starts_with("lading_openmetrics_payload_bytes"))
+            .collect::<Vec<_>>();
+        let line_count = summary_lines.len();
+        summary_lines.sort_unstable();
+        summary_lines.dedup();
+        assert_eq!(summary_lines.len(), line_count);
     }
 
     #[test]
