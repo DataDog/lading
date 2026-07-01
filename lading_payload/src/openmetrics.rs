@@ -269,6 +269,14 @@ impl Config {
         if self.labels.route_count == 0 {
             return Err("labels.route_count cannot be zero".to_string());
         }
+        if !self.include_type
+            && (self.counters.count > 0 || self.histograms.count > 0 || self.summaries.count > 0)
+        {
+            return Err(
+                "include_type cannot be false when counters, histograms, or summaries are enabled"
+                    .to_string(),
+            );
+        }
         if self.histograms.count > 0 {
             validate_finite_non_negative("histograms.buckets", &self.histograms.buckets)?;
             let buckets = parsed_floats("histograms.buckets", &self.histograms.buckets)?;
@@ -349,8 +357,8 @@ fn validate_metric_prefix(prefix: &str) -> Result<(), String> {
     let Some(first) = prefix.chars().next() else {
         return Err("metric_name_prefix cannot be empty".to_string());
     };
-    if !(first.is_ascii_alphabetic() || first == '_' || first == ':') {
-        return Err("metric_name_prefix must start with [A-Za-z_:]".to_string());
+    if !(first.is_ascii_alphabetic() || first == ':') {
+        return Err("metric_name_prefix must start with [A-Za-z:]".to_string());
     }
     if !prefix
         .chars()
@@ -931,6 +939,12 @@ mod tests {
         assert!(config.valid().is_err());
 
         let config = Config {
+            metric_name_prefix: "_reserved".to_string(),
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        let config = Config {
             labels: LabelConfig {
                 services: Vec::new(),
                 ..LabelConfig::default()
@@ -983,6 +997,27 @@ mod tests {
             ..Config::default()
         };
         assert!(config.valid().is_err());
+
+        let config = Config {
+            include_type: false,
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
+
+        let config = Config {
+            include_type: false,
+            counters: CounterConfig { count: 0 },
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_ok());
 
         let config = Config {
             summaries: SummaryConfig {
