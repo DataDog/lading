@@ -1,10 +1,13 @@
-//! Prometheus/OpenMetrics text exposition payload.
+//! `OpenMetrics` text exposition payload.
 //!
-//! This generator builds a deterministic Prometheus/OpenMetrics text exposition
-//! body for scrape-oriented tests. The body is fully precomputed before serving
-//! so that lading does no payload generation work on request hot paths.
+//! This generator builds a deterministic `OpenMetrics` text exposition body for
+//! scrape-oriented tests. The body is fully precomputed before serving so that
+//! lading does no payload generation work on request hot paths.
 
-use std::io::{self, Write};
+use std::{
+    fmt,
+    io::{self, Write},
+};
 
 use serde::Deserialize;
 
@@ -266,15 +269,20 @@ impl Config {
         if self.labels.route_count == 0 {
             return Err("labels.route_count cannot be zero".to_string());
         }
-        validate_finite_non_negative("histograms.buckets", &self.histograms.buckets)?;
-        let buckets = parsed_floats("histograms.buckets", &self.histograms.buckets)?;
-        if buckets.windows(2).any(|window| window[0] >= window[1]) {
-            return Err("histograms.buckets must be strictly increasing".to_string());
+        if self.histograms.count > 0 {
+            validate_finite_non_negative("histograms.buckets", &self.histograms.buckets)?;
+            let buckets = parsed_floats("histograms.buckets", &self.histograms.buckets)?;
+            if buckets.windows(2).any(|window| window[0] >= window[1]) {
+                return Err("histograms.buckets must be strictly increasing".to_string());
+            }
         }
-        validate_finite_non_negative("summaries.quantiles", &self.summaries.quantiles)?;
-        let quantiles = parsed_floats("summaries.quantiles", &self.summaries.quantiles)?;
-        if quantiles.iter().any(|quantile| *quantile > 1.0) {
-            return Err("summaries.quantiles must be in the range [0.0, 1.0]".to_string());
+        if self.summaries.count > 0 {
+            validate_finite_non_negative("summaries.quantiles", &self.summaries.quantiles)?;
+            validate_unique("summaries.quantiles", &self.summaries.quantiles)?;
+            let quantiles = parsed_floats("summaries.quantiles", &self.summaries.quantiles)?;
+            if quantiles.iter().any(|quantile| *quantile > 1.0) {
+                return Err("summaries.quantiles must be in the range [0.0, 1.0]".to_string());
+            }
         }
         Ok(())
     }
@@ -295,8 +303,12 @@ impl OpenMetrics {
     /// Returns an error when configuration validation or writing fails.
     pub fn new(config: &Config) -> Result<Self, Error> {
         config.valid().map_err(Error::InvalidConfig)?;
-        let summary_quantiles = parsed_floats("summaries.quantiles", &config.summaries.quantiles)
-            .map_err(Error::InvalidConfig)?;
+        let summary_quantiles = if config.summaries.count == 0 {
+            Vec::new()
+        } else {
+            parsed_floats("summaries.quantiles", &config.summaries.quantiles)
+                .map_err(Error::InvalidConfig)?
+        };
         let mut body = Vec::new();
         let mut sample_count = 0;
         write_target_info(config, &mut body)?;
@@ -307,6 +319,7 @@ impl OpenMetrics {
         write_summaries(config, &summary_quantiles, &mut body, &mut sample_count)?;
         write_build_info(config, &mut body)?;
         sample_count += 1;
+        writeln!(&mut body, "# EOF")?;
         Ok(Self { body, sample_count })
     }
 
@@ -355,14 +368,6 @@ fn validate_label_values(name: &str, values: &[String]) -> Result<(), String> {
     if values.iter().any(String::is_empty) {
         return Err(format!("{name} cannot contain empty values"));
     }
-    if values
-        .iter()
-        .any(|value| value.contains(['"', '\\', '\n', '\r']))
-    {
-        return Err(format!(
-            "{name} cannot contain quote, backslash, or newline characters"
-        ));
-    }
     Ok(())
 }
 
@@ -371,6 +376,15 @@ fn validate_finite_non_negative(name: &str, values: &[String]) -> Result<(), Str
         return Err(format!("{name} cannot be empty"));
     }
     parsed_floats(name, values)?;
+    Ok(())
+}
+
+fn validate_unique(name: &str, values: &[String]) -> Result<(), String> {
+    for (index, value) in values.iter().enumerate() {
+        if values[index + 1..].iter().any(|other| other == value) {
+            return Err(format!("{name} cannot contain duplicate values"));
+        }
+    }
     Ok(())
 }
 
@@ -386,6 +400,30 @@ fn parsed_floats(name: &str, values: &[String]) -> Result<Vec<f64>, String> {
         parsed.push(parsed_value);
     }
     Ok(parsed)
+}
+
+struct LabelValue<'a>(&'a str);
+
+impl fmt::Display for LabelValue<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for ch in self.0.chars() {
+            match ch {
+                '\\' => formatter.write_str("\\\\")?,
+                '"' => formatter.write_str("\\\"")?,
+                '\n' => formatter.write_str("\\n")?,
+                '\r' => formatter.write_str("\\r")?,
+                _ => {
+                    let mut buffer = [0; 4];
+                    formatter.write_str(ch.encode_utf8(&mut buffer))?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn label_value(value: &str) -> LabelValue<'_> {
+    LabelValue(value)
 }
 
 fn write_family_header<W: Write>(
@@ -432,20 +470,21 @@ fn write_counters<W: Write>(
     write_family_header(
         config,
         writer,
-        "requests_total",
+        "requests",
         "counter",
         "Synthetic monotonic request counter.",
     )?;
     for index in 0..config.counters.count {
         writeln!(
             writer,
-            "{}{{service=\"{}\",region=\"{}\",method=\"{}\",status_class=\"{}\",route=\"{}\"}} {}",
+            "{}{{service=\"{}\",region=\"{}\",method=\"{}\",status_class=\"{}\",route=\"{}\",series=\"counter-{:06}\"}} {}",
             metric_name(config, "requests_total"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index),
-            select(&config.labels.methods, index),
-            select(&config.labels.status_classes, index),
-            route(config, index),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index)),
+            label_value(select(&config.labels.methods, index)),
+            label_value(select(&config.labels.status_classes, index)),
+            label_value(&route(config, index)),
+            index,
             100_000 + u64::from(index) * 17
         )?;
         *sample_count += 1;
@@ -474,10 +513,10 @@ fn write_gauges<W: Write>(
             writer,
             "{}{{service=\"{}\",region=\"{}\",queue=\"queue-{:02}\",priority=\"{}\"}} {:.1}",
             metric_name(config, "queue_depth"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index / 5),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index / 5)),
             index % 36,
-            priority,
+            label_value(priority),
             f64::from((index * 13) % 997) / 10.0
         )?;
         *sample_count += 1;
@@ -513,9 +552,9 @@ fn write_histograms<W: Write>(
             writer,
             "{}_sum{{service=\"{}\",region=\"{}\",route=\"{}\"}} {:.3}",
             metric_name(config, "request_duration_seconds"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index),
-            route(config, index),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index)),
+            label_value(&route(config, index)),
             f64::from(index + 1) * 123.456
         )?;
         *sample_count += 1;
@@ -523,9 +562,9 @@ fn write_histograms<W: Write>(
             writer,
             "{}_count{{service=\"{}\",region=\"{}\",route=\"{}\"}} {}",
             metric_name(config, "request_duration_seconds"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index),
-            route(config, index),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index)),
+            label_value(&route(config, index)),
             cumulative + 25
         )?;
         *sample_count += 1;
@@ -544,10 +583,10 @@ fn write_histogram_bucket<W: Write>(
         writer,
         "{}_bucket{{service=\"{}\",region=\"{}\",route=\"{}\",le=\"{}\"}} {}",
         metric_name(config, "request_duration_seconds"),
-        select(&config.labels.services, index),
-        select(&config.labels.regions, index),
-        route(config, index),
-        le,
+        label_value(select(&config.labels.services, index)),
+        label_value(select(&config.labels.regions, index)),
+        label_value(&route(config, index)),
+        label_value(le),
         value
     )?;
     Ok(())
@@ -575,10 +614,10 @@ fn write_summaries<W: Write>(
                 writer,
                 "{}{{service=\"{}\",region=\"{}\",consumer=\"{}\",quantile=\"{}\"}} {:.1}",
                 metric_name(config, "payload_bytes"),
-                select(&config.labels.services, index),
-                select(&config.labels.regions, index / 3),
-                select(&config.labels.consumers, index),
-                quantile,
+                label_value(select(&config.labels.services, index)),
+                label_value(select(&config.labels.regions, index / 3)),
+                label_value(select(&config.labels.consumers, index)),
+                label_value(quantile),
                 512.0 + f64::from(index) * 11.0 + *quantile_value * 100.0
             )?;
             *sample_count += 1;
@@ -587,9 +626,9 @@ fn write_summaries<W: Write>(
             writer,
             "{}_sum{{service=\"{}\",region=\"{}\",consumer=\"{}\"}} {}",
             metric_name(config, "payload_bytes"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index / 3),
-            select(&config.labels.consumers, index),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index / 3)),
+            label_value(select(&config.labels.consumers, index)),
             500_000 + u64::from(index) * 997
         )?;
         *sample_count += 1;
@@ -597,9 +636,9 @@ fn write_summaries<W: Write>(
             writer,
             "{}_count{{service=\"{}\",region=\"{}\",consumer=\"{}\"}} {}",
             metric_name(config, "payload_bytes"),
-            select(&config.labels.services, index),
-            select(&config.labels.regions, index / 3),
-            select(&config.labels.consumers, index),
+            label_value(select(&config.labels.services, index)),
+            label_value(select(&config.labels.regions, index / 3)),
+            label_value(select(&config.labels.consumers, index)),
             1_000 + u64::from(index) * 31
         )?;
         *sample_count += 1;
@@ -650,9 +689,9 @@ mod tests {
     fn default_payload_is_non_empty_and_counted() {
         let payload = OpenMetrics::new(&Config::default()).expect("payload should build");
         let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
-        assert!(body.contains("# HELP lading_openmetrics_requests_total"));
+        assert!(body.contains("# HELP lading_openmetrics_requests"));
         assert!(body.contains("# TYPE lading_openmetrics_queue_depth gauge"));
-        assert!(body.ends_with('\n'));
+        assert!(body.ends_with("# EOF\n"));
         assert_eq!(payload.sample_count(), non_comment_line_count(body));
     }
 
@@ -703,6 +742,91 @@ mod tests {
         let first = OpenMetrics::new(&config).expect("first payload should build");
         let second = OpenMetrics::new(&config).expect("second payload should build");
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn disabled_histograms_and_summaries_allow_empty_boundaries() {
+        let config = Config {
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        assert_eq!(payload.sample_count(), non_comment_line_count(body));
+    }
+
+    #[test]
+    fn all_zero_counts_emit_only_info_samples() {
+        let config = Config {
+            counters: CounterConfig { count: 0 },
+            gauges: GaugeConfig { count: 0 },
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        assert_eq!(payload.sample_count(), 2);
+        assert_eq!(payload.sample_count(), non_comment_line_count(body));
+        assert!(body.ends_with("# EOF\n"));
+    }
+
+    #[test]
+    fn label_values_are_escaped_when_written() {
+        let config = Config {
+            counters: CounterConfig { count: 1 },
+            gauges: GaugeConfig { count: 0 },
+            histograms: HistogramConfig {
+                count: 0,
+                buckets: Vec::new(),
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            labels: LabelConfig {
+                services: vec!["svc\\\"one".to_string()],
+                regions: vec!["us\neast".to_string()],
+                methods: vec!["GET".to_string()],
+                status_classes: vec!["2xx".to_string()],
+                consumers: vec!["consumer".to_string()],
+                route_count: 1,
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        assert!(body.contains("service=\"svc\\\\\\\"one\""));
+        assert!(body.contains("region=\"us\\neast\""));
+    }
+
+    #[test]
+    fn counter_series_are_unique_at_default_count() {
+        let payload = OpenMetrics::new(&Config::default()).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        let mut counter_lines = body
+            .lines()
+            .filter(|line| line.starts_with("lading_openmetrics_requests_total{"))
+            .collect::<Vec<_>>();
+        counter_lines.sort_unstable();
+        counter_lines.dedup();
+        assert_eq!(
+            counter_lines.len(),
+            Config::default().counters.count as usize
+        );
     }
 
     #[test]
@@ -772,16 +896,14 @@ mod tests {
         };
         assert!(config.valid().is_err());
 
-        for invalid_label in ["bad\\label", "bad\nlabel", "bad\rlabel", "bad\"label"] {
-            let config = Config {
-                labels: LabelConfig {
-                    services: vec![invalid_label.to_string()],
-                    ..LabelConfig::default()
-                },
-                ..Config::default()
-            };
-            assert!(config.valid().is_err());
-        }
+        let config = Config {
+            summaries: SummaryConfig {
+                count: 1,
+                quantiles: vec!["0.5".to_string(), "0.5".to_string()],
+            },
+            ..Config::default()
+        };
+        assert!(config.valid().is_err());
     }
 
     proptest! {
@@ -842,6 +964,7 @@ labels:
         let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
         assert!(!body.contains("# HELP"));
         assert!(body.contains("om_scale_requests_total"));
+        assert!(body.ends_with("# EOF\n"));
         assert_eq!(payload.sample_count(), non_comment_line_count(body));
     }
 }
