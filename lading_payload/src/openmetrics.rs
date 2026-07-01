@@ -550,21 +550,23 @@ fn write_histograms<W: Write>(
         *sample_count += 1;
         writeln!(
             writer,
-            "{}_sum{{service=\"{}\",region=\"{}\",route=\"{}\"}} {:.3}",
+            "{}_sum{{service=\"{}\",region=\"{}\",route=\"{}\",series=\"histogram-{:06}\"}} {:.3}",
             metric_name(config, "request_duration_seconds"),
             label_value(select(&config.labels.services, index)),
             label_value(select(&config.labels.regions, index)),
             label_value(&route(config, index)),
+            index,
             f64::from(index + 1) * 123.456
         )?;
         *sample_count += 1;
         writeln!(
             writer,
-            "{}_count{{service=\"{}\",region=\"{}\",route=\"{}\"}} {}",
+            "{}_count{{service=\"{}\",region=\"{}\",route=\"{}\",series=\"histogram-{:06}\"}} {}",
             metric_name(config, "request_duration_seconds"),
             label_value(select(&config.labels.services, index)),
             label_value(select(&config.labels.regions, index)),
             label_value(&route(config, index)),
+            index,
             cumulative + 25
         )?;
         *sample_count += 1;
@@ -581,11 +583,12 @@ fn write_histogram_bucket<W: Write>(
 ) -> Result<(), Error> {
     writeln!(
         writer,
-        "{}_bucket{{service=\"{}\",region=\"{}\",route=\"{}\",le=\"{}\"}} {}",
+        "{}_bucket{{service=\"{}\",region=\"{}\",route=\"{}\",series=\"histogram-{:06}\",le=\"{}\"}} {}",
         metric_name(config, "request_duration_seconds"),
         label_value(select(&config.labels.services, index)),
         label_value(select(&config.labels.regions, index)),
         label_value(&route(config, index)),
+        index,
         label_value(le),
         value
     )?;
@@ -827,6 +830,33 @@ mod tests {
             counter_lines.len(),
             Config::default().counters.count as usize
         );
+    }
+
+    #[test]
+    fn histogram_series_are_unique_when_labels_wrap() {
+        let config = Config {
+            counters: CounterConfig { count: 0 },
+            gauges: GaugeConfig { count: 0 },
+            histograms: HistogramConfig {
+                count: DEFAULT_ROUTE_COUNT + 1,
+                buckets: vec!["0.5".to_string()],
+            },
+            summaries: SummaryConfig {
+                count: 0,
+                quantiles: Vec::new(),
+            },
+            ..Config::default()
+        };
+        let payload = OpenMetrics::new(&config).expect("payload should build");
+        let body = std::str::from_utf8(payload.as_bytes()).expect("body should be utf8");
+        let mut histogram_lines = body
+            .lines()
+            .filter(|line| line.starts_with("lading_openmetrics_request_duration_seconds"))
+            .collect::<Vec<_>>();
+        let line_count = histogram_lines.len();
+        histogram_lines.sort_unstable();
+        histogram_lines.dedup();
+        assert_eq!(histogram_lines.len(), line_count);
     }
 
     #[test]

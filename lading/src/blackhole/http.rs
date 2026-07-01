@@ -14,7 +14,8 @@ use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
 use lading_payload::openmetrics;
 use metrics::counter;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
+use serde_yaml::with::singleton_map_recursive;
 use std::{net::SocketAddr, time::Duration};
 use tracing::error;
 
@@ -107,6 +108,35 @@ fn default_headers() -> HeaderMap {
     map
 }
 
+fn openmetrics_content_type() -> http::HeaderValue {
+    "application/openmetrics-text; version=1.0.0; charset=utf-8"
+        .parse()
+        .expect("Not possible to parse into HeaderValue")
+}
+
+fn response_headers(config: &Config) -> HeaderMap {
+    let mut headers = config.headers.clone();
+    if matches!(config.body_variant, BodyVariant::OpenMetrics(_)) {
+        // OpenMetrics scrapers may reject responses before parsing if the
+        // content type does not advertise the OpenMetrics text format. This
+        // body variant owns that semantic header while preserving all other
+        // user-provided response headers.
+        headers.insert(header::CONTENT_TYPE, openmetrics_content_type());
+    }
+    headers
+}
+
+fn deserialize_body_variant<'de, D>(deserializer: D) -> Result<BodyVariant, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_yaml::Value::deserialize(deserializer)?;
+    BodyVariant::deserialize(value.clone()).or_else(|original| {
+        singleton_map_recursive::deserialize(value)
+            .map_err(|_| de::Error::custom(original.to_string()))
+    })
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Http`]
@@ -118,7 +148,7 @@ pub struct Config {
     pub binding_addr: SocketAddr,
     /// the body variant to respond with, default nothing
     #[serde(default = "default_body_variant")]
-    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    #[serde(deserialize_with = "deserialize_body_variant")]
     pub body_variant: BodyVariant,
     /// Headers to include in the response; default is `Content-Type: application/json`
     #[serde(with = "http_serde::header_map", default = "default_headers")]
@@ -248,7 +278,7 @@ impl Http {
             httpd_addr: config.binding_addr,
             body_bytes,
             concurrency_limit: config.concurrent_requests_max,
-            headers: config.headers.clone(),
+            headers: response_headers(config),
             status,
             shutdown,
             metric_labels,
@@ -346,6 +376,54 @@ raw_bytes: [0x01, 0x02, 0x10]
                 status: default_status_code(),
                 raw_bytes: vec![0x01, 0x02, 0x10],
             },
+        );
+    }
+
+    #[test]
+    fn config_deserializes_tagged_static_variant() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+body_variant: !static ok
+"#;
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
+        assert_eq!(config.body_variant, BodyVariant::Static("ok".to_string()));
+    }
+
+    #[test]
+    fn config_deserializes_singleton_static_variant() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+body_variant:
+  static: ok
+"#;
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
+        assert_eq!(config.body_variant, BodyVariant::Static("ok".to_string()));
+    }
+
+    #[test]
+    fn openmetrics_body_variant_sets_openmetrics_content_type() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+headers:
+  x-test-header: "still here"
+body_variant:
+  openmetrics: {}
+"#;
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
+        let (shutdown, _) = lading_signal::signal();
+        let http = Http::new(General { id: None }, &config, shutdown).expect("http should build");
+        assert_eq!(
+            http.headers.get(header::CONTENT_TYPE),
+            Some(&openmetrics_content_type())
+        );
+        assert_eq!(
+            http.headers
+                .get("x-test-header")
+                .and_then(|value| value.to_str().ok()),
+            Some("still here")
         );
     }
 
