@@ -3,8 +3,6 @@ blackhole:
       binding_addr: "127.0.0.1:9100"
       concurrent_requests_max: 1000
       response_delay_millis: 100
-      headers:
-        content-type: "application/openmetrics-text; version=1.0.0; charset=utf-8"
       body_variant:
         openmetrics:
           metric_name_prefix: "om_scale"
