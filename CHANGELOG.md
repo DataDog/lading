@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- HTTP blackhole now supports an `openmetrics` body variant for generated
+  Prometheus/OpenMetrics scrape responses.
 - Updated to rand 0.10.x
 - `dogstatsd` generator now supports configurable pools for the `|c:` (container
   ID), `|e:` (external data), and `|card:` (cardinality) origin detection
