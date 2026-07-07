@@ -1,7 +1,7 @@
 use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
-    common::v1::InstrumentationScope,
+    common::v1::{InstrumentationScope, KeyValue},
     metrics::{
         self,
         v1::{
@@ -15,7 +15,7 @@ use opentelemetry_proto::tonic::{
 use prost::Message;
 use rand::{
     Rng, RngExt,
-    distr::{Distribution, StandardUniform, weighted::WeightedIndex},
+    distr::{Distribution, weighted::WeightedIndex},
 };
 use tracing::debug;
 
@@ -53,33 +53,23 @@ fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) 
     max
 }
 
-struct Ndp(NumberDataPoint);
-impl Distribution<Ndp> for StandardUniform {
-    fn sample<R>(&self, rng: &mut R) -> Ndp
-    where
-        R: Rng + ?Sized,
-    {
-        let value = match rng.random_range(0..=1) {
-            0 => number_data_point::Value::AsDouble(0.0),
-            1 => number_data_point::Value::AsInt(0),
-            _ => unreachable!(),
-        };
+fn random_number_data_point<R>(rng: &mut R, attributes: &[KeyValue]) -> NumberDataPoint
+where
+    R: Rng + ?Sized,
+{
+    let value = match rng.random_range(0..=1) {
+        0 => number_data_point::Value::AsDouble(0.0),
+        1 => number_data_point::Value::AsInt(0),
+        _ => unreachable!(),
+    };
 
-        Ndp(NumberDataPoint {
-            // NOTE absent a reason to set attributes to not-empty, it's unclear
-            // that we should.
-            attributes: Vec::new(),
-            start_time_unix_nano: 0, // epoch instant
-            time_unix_nano: rng.random(),
-            // Unclear that this needs to be set.
-            exemplars: Vec::new(),
-            // Equivalent to DoNotUse, the flag is ignored. This is discussed in
-            // the upstream OTLP protobuf definition, which we inherit from the
-            // SDK. If we ever set `value` to None this must be set to
-            // DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK
-            flags: 0,
-            value: Some(value),
-        })
+    NumberDataPoint {
+        attributes: attributes.to_vec(),
+        start_time_unix_nano: 0,
+        time_unix_nano: rng.random(),
+        exemplars: Vec::new(),
+        flags: 0,
+        value: Some(value),
     }
 }
 
@@ -204,7 +194,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let data = match kind {
             Kind::Gauge => {
                 let data_points = (0..total_data_points)
-                    .map(|_| rng.random::<Ndp>().0)
+                    .map(|_| random_number_data_point(rng, &metadata))
                     .collect();
                 Data::Gauge(metrics::v1::Gauge { data_points })
             }
@@ -213,7 +203,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 is_monotonic,
             } => {
                 let data_points = (0..total_data_points)
-                    .map(|_| rng.random::<Ndp>().0)
+                    .map(|_| random_number_data_point(rng, &metadata))
                     .collect();
                 Data::Sum(metrics::v1::Sum {
                     data_points,
@@ -225,7 +215,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality,
             } => {
                 let data_points = (0..total_data_points)
-                    .map(|_| random_histogram_data_point())
+                    .map(|_| random_histogram_data_point(&metadata))
                     .collect();
                 Data::Histogram(metrics::v1::Histogram {
                     data_points,
@@ -236,7 +226,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality,
             } => {
                 let data_points = (0..total_data_points)
-                    .map(|_| random_exp_histogram_data_point(rng))
+                    .map(|_| random_exp_histogram_data_point(rng, &metadata))
                     .collect();
                 Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
                     data_points,
@@ -245,7 +235,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             }
             Kind::Summary => {
                 let data_points = (0..total_data_points)
-                    .map(|_| random_summary_data_point(rng))
+                    .map(|_| random_summary_data_point(rng, &metadata))
                     .collect();
                 Data::Summary(metrics::v1::Summary { data_points })
             }
@@ -386,13 +376,13 @@ pub(crate) enum Kind {
 /// size to differ from the size after `generate()` writes real values --
 /// breaking the size invariant the pool relies on. The live state is updated
 /// each tick in `generate()`, mirroring how monotonic sums work.
-fn random_histogram_data_point() -> HistogramDataPoint {
+fn random_histogram_data_point(attributes: &[KeyValue]) -> HistogramDataPoint {
     // Five explicit bounds define six buckets:
     // (-inf, 1], (1, 5], (5, 10], (10, 50], (50, 100], (100, +inf)
     let explicit_bounds: Vec<f64> = vec![1.0, 5.0, 10.0, 50.0, 100.0];
     let n_buckets = explicit_bounds.len() + 1;
     HistogramDataPoint {
-        attributes: Vec::new(),
+        attributes: attributes.to_vec(),
         start_time_unix_nano: 1,
         time_unix_nano: 1,
         count: n_buckets as u64,
@@ -415,14 +405,17 @@ const EXP_HIST_ZERO_COUNT: u64 = 1;
 /// The template uses fixed bucket counts for positive and negative ranges so
 /// generated payload size stays predictable. `generate()` later adjusts the
 /// per-bucket counts while preserving the same bucket layout.
-fn random_exp_histogram_data_point<R: Rng + ?Sized>(rng: &mut R) -> ExponentialHistogramDataPoint {
+fn random_exp_histogram_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> ExponentialHistogramDataPoint {
     let scale: i32 = rng.random_range(-3_i32..=3);
-    let positive_offset = rng.random_range(-10_i32..=10);
-    let negative_offset = rng.random_range(-10_i32..=10);
+    let positive_offset = rng.random_range(0_i32..=10);
+    let negative_offset = rng.random_range(0_i32..=10);
     let bucket_count =
         EXP_HIST_ZERO_COUNT + EXP_HIST_POSITIVE_BUCKETS as u64 + EXP_HIST_NEGATIVE_BUCKETS as u64;
     ExponentialHistogramDataPoint {
-        attributes: Vec::new(),
+        attributes: attributes.to_vec(),
         start_time_unix_nano: 1,
         time_unix_nano: 1,
         count: bucket_count,
@@ -450,7 +443,10 @@ fn random_exp_histogram_data_point<R: Rng + ?Sized>(rng: &mut R) -> ExponentialH
 /// Produces five standard quantiles (0.0, 0.5, 0.9, 0.99, 1.0).  Values are
 /// drawn randomly and sorted so they are monotonically non-decreasing, matching
 /// the convention that higher quantiles carry equal or greater values.
-fn random_summary_data_point<R: Rng + ?Sized>(rng: &mut R) -> SummaryDataPoint {
+fn random_summary_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> SummaryDataPoint {
     let count: u64 = rng.random_range(1_u64..=1000);
     let sum: f64 = rng.random_range(0.0_f64..=10000.0);
     let mut raw: Vec<f64> = (0..5).map(|_| rng.random_range(0.0_f64..=1000.0)).collect();
@@ -461,7 +457,7 @@ fn random_summary_data_point<R: Rng + ?Sized>(rng: &mut R) -> SummaryDataPoint {
         .map(|(&quantile, &value)| summary_data_point::ValueAtQuantile { quantile, value })
         .collect();
     SummaryDataPoint {
-        attributes: Vec::new(),
+        attributes: attributes.to_vec(),
         start_time_unix_nano: 0,
         time_unix_nano: rng.random(),
         count,
@@ -755,7 +751,7 @@ mod test {
                         || config.metric_weights.histogram_cumulative >= 1),
                     Data::ExponentialHistogram(_) => {
                         assert!(config.metric_weights.exp_histogram_delta >= 1
-                            || config.metric_weights.exp_histogram_cumulative >= 1)
+                            || config.metric_weights.exp_histogram_cumulative >= 1);
                     }
                     Data::Summary(_) => assert!(config.metric_weights.summary >= 1),
                 }
