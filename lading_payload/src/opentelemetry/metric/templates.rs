@@ -218,7 +218,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality,
             } => {
                 let data_points = (0..total_data_points)
-                    .map(|_| random_histogram_data_point(&metadata))
+                    .map(|_| random_histogram_data_point(rng, &metadata))
                     .collect();
                 Data::Histogram(metrics::v1::Histogram {
                     data_points,
@@ -370,19 +370,22 @@ pub(crate) enum Kind {
     Summary,
 }
 
-/// Construct a zeroed-out explicit-bucket `HistogramDataPoint` scaffold.
+/// Construct an explicit-bucket `HistogramDataPoint` scaffold.
 ///
-/// The bucket schema is fixed at five boundaries (1, 5, 10, 50, 100) creating
-/// six buckets. `bucket_counts`, `count`, `sum`, and `time_unix_nano` are
-/// initialized to non-zero sentinels rather than zero because proto3 omits
-/// `fixed64` fields whose value is 0, which would cause the template's encoded
-/// size to differ from the size after `generate()` writes real values --
-/// breaking the size invariant the pool relies on. The live state is updated
-/// each tick in `generate()`, mirroring how monotonic sums work.
-fn random_histogram_data_point(attributes: &[KeyValue]) -> HistogramDataPoint {
-    // Five explicit bounds define six buckets:
-    // (-inf, 1], (1, 5], (5, 10], (10, 50], (50, 100], (100, +inf)
-    let explicit_bounds: Vec<f64> = vec![1.0, 5.0, 10.0, 50.0, 100.0];
+/// The bucket count is fixed so generated payload size stays predictable, but
+/// the explicit bounds are randomized to avoid repeating the same histogram
+/// shape across templates. The live state is updated each tick in `generate()`.
+fn random_histogram_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> HistogramDataPoint {
+    let num_of_bounds = rng.random_range(3_usize..=8);
+    let mut explicit_bounds = Vec::with_capacity(num_of_bounds);
+    let mut bound = rng.random_range(1.0_f64..=1000.0);
+    for _ in 0..num_of_bounds {
+        explicit_bounds.push(bound);
+        bound += rng.random_range(1.0_f64..=1000.0);
+    }
     let n_buckets = explicit_bounds.len() + 1;
     HistogramDataPoint {
         attributes: attributes.to_vec(),
@@ -399,10 +402,6 @@ fn random_histogram_data_point(attributes: &[KeyValue]) -> HistogramDataPoint {
     }
 }
 
-const EXP_HIST_POSITIVE_BUCKETS: usize = 8;
-const EXP_HIST_NEGATIVE_BUCKETS: usize = 8;
-const EXP_HIST_ZERO_COUNT: u64 = 1;
-
 /// Construct an `ExponentialHistogramDataPoint` scaffold.
 ///
 /// The template uses fixed bucket counts for positive and negative ranges so
@@ -413,25 +412,29 @@ fn random_exp_histogram_data_point<R: Rng + ?Sized>(
     attributes: &[KeyValue],
 ) -> ExponentialHistogramDataPoint {
     let scale: i32 = rng.random_range(-3_i32..=3);
+
+    let positive_bucket_count = rng.random_range(1_usize..=100);
+    let negative_bucket_count = rng.random_range(1_usize..=100);
+    let zero_data_count = rng.random_range(1_usize..=6);
+
     let positive_offset = rng.random_range(0_i32..=10);
     let negative_offset = rng.random_range(0_i32..=10);
-    let bucket_count =
-        EXP_HIST_ZERO_COUNT + EXP_HIST_POSITIVE_BUCKETS as u64 + EXP_HIST_NEGATIVE_BUCKETS as u64;
+    let bucket_count = positive_bucket_count + negative_bucket_count + zero_data_count;
     ExponentialHistogramDataPoint {
         attributes: attributes.to_vec(),
         start_time_unix_nano: 1,
         time_unix_nano: 1,
-        count: bucket_count,
+        count: bucket_count as u64,
         sum: Some(0.0),
         scale,
-        zero_count: EXP_HIST_ZERO_COUNT,
+        zero_count: zero_data_count as u64,
         positive: Some(exponential_histogram_data_point::Buckets {
             offset: positive_offset,
-            bucket_counts: vec![1; EXP_HIST_POSITIVE_BUCKETS],
+            bucket_counts: vec![1; positive_bucket_count],
         }),
         negative: Some(exponential_histogram_data_point::Buckets {
             offset: negative_offset,
-            bucket_counts: vec![1; EXP_HIST_NEGATIVE_BUCKETS],
+            bucket_counts: vec![1; negative_bucket_count],
         }),
         flags: 0,
         exemplars: Vec::new(),
@@ -450,9 +453,11 @@ fn random_summary_data_point<R: Rng + ?Sized>(
     rng: &mut R,
     attributes: &[KeyValue],
 ) -> SummaryDataPoint {
-    let count: u64 = rng.random_range(1_u64..=1000);
-    let sum: f64 = rng.random_range(0.0_f64..=10000.0);
-    let mut raw: Vec<f64> = (0..5).map(|_| rng.random_range(0.0_f64..=1000.0)).collect();
+    let count: u64 = rng.random_range(1_u64..=1_000_000);
+    let sum: f64 = rng.random_range(0.0_f64..=1_000_000.0);
+    let mut raw: Vec<f64> = (0..5)
+        .map(|_| rng.random_range(0.0_f64..=1_000_000.0))
+        .collect();
     raw.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     let quantile_values = [0.0_f64, 0.5, 0.9, 0.99, 1.0]
         .iter()

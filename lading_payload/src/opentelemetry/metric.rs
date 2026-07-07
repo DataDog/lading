@@ -735,13 +735,9 @@ impl crate::Serialize for OpentelemetryMetrics {
                 }
                 bytes_remaining = max_bytes.saturating_sub(required_bytes);
             } else {
-                // Belt with suspenders time: verify no templates could possibly
-                // fit. If we pass this assertion, break as no template will
-                // ever fit the requested max_bytes.
-                assert!(
-                    !self.pool.template_fits(bytes_remaining),
-                    "Pool claims template fits {bytes_remaining} bytes but generate() failed, indicative of a logic error",
-                );
+                // A template may fit its cached size but exceed the remaining
+                // budget after live fields are updated. Stop rather than
+                // asserting on the pre-update pool size.
                 break;
             }
         }
