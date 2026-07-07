@@ -28,9 +28,14 @@
 //
 // * Gauge -- a collection of `NumberDataPoint`, values sampled at specific times
 // * Sum -- `Gauge` with the addition of monotonic flag, aggregation metadata
-//
-// We omit Histogram / ExponentialHistogram / Summary in this current version
-// but will introduce them in the near-term. The `NumberDataPoint` is a
+// * Histogram -- explicit-bucket histogram: each data point carries bucket counts
+//   aligned to a fixed set of explicit boundaries, plus count/sum.
+// * ExponentialHistogram -- base-2 exponential bucket histogram: each data point
+//   carries positive/negative Buckets structs (offset + counts), zero_count,
+//   and a scale factor that governs bucket width.
+// * Summary -- quantile summaries: each data point carries count/sum plus a
+//   sorted list of (quantile, value) pairs.
+// The`NumberDataPoint` is a
 //
 // * attributes: Vec<KeyValue> -- tags
 // * start_time_unix_nano: u64 -- represents the first possible moment a measurement could be recorded, optional
@@ -41,6 +46,7 @@
 pub(crate) mod templates;
 pub(crate) mod unit;
 
+use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 use rand::RngExt;
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
@@ -50,7 +56,9 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{
+    ResourceMetrics, exponential_histogram_data_point, metric::Data, number_data_point,
+};
 use prost::Message;
 use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
@@ -63,6 +71,29 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
+
+fn increment_exp_bucket_counts(
+    buckets: &mut exponential_histogram_data_point::Buckets,
+    increment: u64,
+) -> u64 {
+    for count in &mut buckets.bucket_counts {
+        *count = count.saturating_add(increment);
+    }
+    buckets.bucket_counts.iter().sum()
+}
+
+fn randomize_exp_bucket_counts<R>(
+    buckets: &mut exponential_histogram_data_point::Buckets,
+    rng: &mut R,
+) -> u64
+where
+    R: rand::Rng + ?Sized,
+{
+    for count in &mut buckets.bucket_counts {
+        *count = rng.random_range(0_u64..=10);
+    }
+    buckets.bucket_counts.iter().sum()
+}
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -110,14 +141,45 @@ pub struct MetricWeights {
     pub sum_delta: u8,
     /// The relative probability of generating a sum cumulative metric.
     pub sum_cumulative: u8,
+    /// The relative probability of generating a delta histogram metric.
+    pub histogram_delta: u8,
+    /// The relative probability of generating a cumulative histogram metric.
+    pub histogram_cumulative: u8,
+    /// The relative probability of generating a delta exponential histogram metric.
+    pub exp_histogram_delta: u8,
+    /// The relative probability of generating a cumulative exponential histogram metric.
+    pub exp_histogram_cumulative: u8,
+    /// The relative probability of generating a summary metric.
+    pub summary: u8,
+}
+
+impl MetricWeights {
+    fn has_zero_weight(&self) -> bool {
+        [
+            self.gauge,
+            self.sum_delta,
+            self.sum_cumulative,
+            self.histogram_delta,
+            self.histogram_cumulative,
+            self.exp_histogram_delta,
+            self.exp_histogram_cumulative,
+            self.summary,
+        ]
+        .contains(&0)
+    }
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50,          // 50%
-            sum_delta: 25,      // 25%
-            sum_cumulative: 25, // 25%
+            gauge: 30,
+            sum_delta: 15,
+            sum_cumulative: 15,
+            histogram_delta: 10,
+            histogram_cumulative: 10,
+            exp_histogram_delta: 5,
+            exp_histogram_cumulative: 5,
+            summary: 10,
         }
     }
 }
@@ -140,12 +202,10 @@ impl Config {
     /// Function will error if the configuration is invalid
     #[expect(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
-        // Validate metric weights - both types must have non-zero probability to ensure
-        // we can generate a diverse set of metrics
-        if self.metric_weights.gauge == 0
-            || self.metric_weights.sum_delta == 0
-            || self.metric_weights.sum_cumulative == 0
-        {
+        // Validate metric weights: every supported metric type must have
+        // non-zero probability so generated payloads cover the full OTLP metric
+        // surface area.
+        if self.metric_weights.has_zero_weight() {
             return Err("Metric weights cannot be 0".to_string());
         }
 
@@ -332,6 +392,7 @@ impl OpentelemetryMetrics {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     type Output = ResourceMetrics;
     type Error = Error;
@@ -420,7 +481,84 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        Data::Histogram(hist) => {
+                            data_points_count += hist.data_points.len() as u64;
+                            let is_cumulative = hist.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
+                            for point in &mut hist.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                if is_cumulative {
+                                    // Cumulative: bucket_counts and sum only
+                                    // grow, mirroring monotonic sum behavior.
+                                    // incr_i always positive so cast is safe.
+                                    #[allow(clippy::cast_sign_loss)]
+                                    for bc in &mut point.bucket_counts {
+                                        *bc += self.incr_i as u64;
+                                    }
+                                    point.count = point.bucket_counts.iter().sum();
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum += self.incr_f;
+                                    }
+                                } else {
+                                    // Delta: fresh observations each window.
+                                    // Use 1..=10 (not 0..=10) so count stays
+                                    // non-zero and the encoded size is stable.
+                                    for bc in &mut point.bucket_counts {
+                                        *bc = rng.random_range(1_u64..=10);
+                                    }
+                                    point.count = point.bucket_counts.iter().sum();
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum = rng.random_range(1.0_f64..=1000.0);
+                                    }
+                                }
+                            }
+                        }
+                        Data::ExponentialHistogram(exp_hist) => {
+                            data_points_count += exp_hist.data_points.len() as u64;
+                            let is_cumulative = exp_hist.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
+                            for point in &mut exp_hist.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                if is_cumulative {
+                                    // Cumulative: zero, positive, and negative
+                                    // bucket counts only grow.
+                                    #[allow(clippy::cast_sign_loss)]
+                                    let increment = self.incr_i as u64;
+                                    point.zero_count = point.zero_count.saturating_add(increment);
+                                    let mut count = point.zero_count;
+                                    if let Some(positive) = &mut point.positive {
+                                        count += increment_exp_bucket_counts(positive, increment);
+                                    }
+                                    if let Some(negative) = &mut point.negative {
+                                        count += increment_exp_bucket_counts(negative, increment);
+                                    }
+                                    point.count = count;
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum += self.incr_f;
+                                    }
+                                } else {
+                                    // Delta: fresh observations each window.
+                                    point.zero_count = rng.random_range(1_u64..=10);
+                                    let mut count = point.zero_count;
+                                    if let Some(positive) = &mut point.positive {
+                                        count += randomize_exp_bucket_counts(positive, rng);
+                                    }
+                                    if let Some(negative) = &mut point.negative {
+                                        count += randomize_exp_bucket_counts(negative, rng);
+                                    }
+                                    point.count = count;
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum = rng.random_range(1.0_f64..=1000.0);
+                                    }
+                                }
+                            }
+                        }
+                        Data::Summary(summary) => {
+                            data_points_count += summary.data_points.len() as u64;
+                            for point in &mut summary.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            }
+                        }
                     }
                 }
             }
@@ -1007,7 +1145,30 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    _ => {},
+                                    Data::Histogram(histogram) => {
+                                        for point in &histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::ExponentialHistogram(exp_histogram) => {
+                                        for point in &exp_histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::Summary(summary) => {
+                                        for point in &summary.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -1060,6 +1221,11 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
                 },
             };
 
@@ -1100,6 +1266,11 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
                 },
             };
 
@@ -1345,6 +1516,7 @@ mod test {
                 gauge: 0,
                 sum_delta: 25,
                 sum_cumulative: 25,
+                ..Default::default()
             },
             ..valid_config
         };
@@ -1355,16 +1527,47 @@ mod test {
                 gauge: 50,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                ..Default::default()
             },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
+
+        let zero_histogram_weight = Config {
+            metric_weights: super::MetricWeights {
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_histogram_weight.valid().is_err());
+
+        let zero_exp_histogram_weight = Config {
+            metric_weights: super::MetricWeights {
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_exp_histogram_weight.valid().is_err());
+
+        let zero_summary_weight = Config {
+            metric_weights: super::MetricWeights {
+                summary: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_summary_weight.valid().is_err());
 
         let zero_weights = Config {
             metric_weights: super::MetricWeights {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                ..Default::default()
             },
             ..valid_config
         };
