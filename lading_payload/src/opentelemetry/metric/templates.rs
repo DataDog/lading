@@ -1,4 +1,7 @@
-use std::{cmp, rc::Rc};
+use std::{
+    cmp::{self, Ordering},
+    rc::Rc,
+};
 
 use opentelemetry_proto::tonic::{
     common::v1::{InstrumentationScope, KeyValue},
@@ -450,7 +453,7 @@ fn random_summary_data_point<R: Rng + ?Sized>(
     let count: u64 = rng.random_range(1_u64..=1000);
     let sum: f64 = rng.random_range(0.0_f64..=10000.0);
     let mut raw: Vec<f64> = (0..5).map(|_| rng.random_range(0.0_f64..=1000.0)).collect();
-    raw.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    raw.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     let quantile_values = [0.0_f64, 0.5, 0.9, 0.99, 1.0]
         .iter()
         .zip(raw.iter())
