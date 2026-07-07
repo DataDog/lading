@@ -142,7 +142,12 @@ fn exp_histogram_populated_index_range(
     buckets: &exponential_histogram_data_point::Buckets,
 ) -> Option<(i32, i32)> {
     let (first, last) = populated_bucket_range(&buckets.bucket_counts)?;
-    Some((buckets.offset + first as i32, buckets.offset + last as i32))
+    let first = i32::try_from(first).ok()?;
+    let last = i32::try_from(last).ok()?;
+    Some((
+        buckets.offset.checked_add(first)?,
+        buckets.offset.checked_add(last)?,
+    ))
 }
 
 fn set_exp_histogram_min_max<R>(point: &mut ExponentialHistogramDataPoint, rng: &mut R)
@@ -234,7 +239,7 @@ pub struct MetricWeights {
 }
 
 impl MetricWeights {
-    fn has_zero_weight(&self) -> bool {
+    fn has_zero_weight(self) -> bool {
         [
             self.gauge,
             self.sum_delta,
@@ -488,6 +493,8 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
+        let original_budget = *budget;
+
         self.tick += rng.random_range(1..=60);
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
@@ -648,6 +655,17 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             }
         }
 
+        let required_bytes = tpl.encoded_len();
+        if required_bytes > original_budget {
+            *budget = original_budget;
+            debug!(
+                ?required_bytes,
+                ?original_budget,
+                "Generated metric exceeded request budget"
+            );
+            Err(PoolError::EmptyChoice)?;
+        }
+        *budget = original_budget - required_bytes;
         self.data_points_per_resource = data_points_count;
 
         Ok(tpl)
@@ -1279,6 +1297,7 @@ mod test {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn data_points_include_attributes() -> Result<(), crate::Error> {
         let configs = [
             super::MetricWeights {
