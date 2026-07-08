@@ -147,7 +147,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             Err(e) => Err(e)?,
         };
 
-        let name = self
+        let name_suffix = self
             .str_pool
             .of_size_range(rng, 1_u8..16)
             .ok_or(Self::Error::StringGenerate)?
@@ -191,6 +191,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             7 => Kind::Summary,
             _ => unreachable!(),
         };
+        let prefix = kind.name_prefix();
+        let name = format!("{prefix}_{name_suffix}");
 
         // Use weighted distribution: heavily favors small numbers (1-2) but can go up to 60
         let total_data_points = exponential_weighted_range(rng, 1, 60);
@@ -368,6 +370,38 @@ pub(crate) enum Kind {
         aggregation_temporality: i32,
     },
     Summary,
+}
+
+impl Kind {
+    fn name_prefix(self) -> &'static str {
+        match self {
+            Self::Gauge => "gauge",
+            Self::Sum {
+                aggregation_temporality: 1,
+                ..
+            } => "sum_delta",
+            Self::Sum {
+                aggregation_temporality: 2,
+                ..
+            } => "sum_cumulative",
+            Self::Sum { .. } => "sum",
+            Self::Histogram {
+                aggregation_temporality: 1,
+            } => "histogram_delta",
+            Self::Histogram {
+                aggregation_temporality: 2,
+            } => "histogram_cumulative",
+            Self::Histogram { .. } => "histogram",
+            Self::ExponentialHistogram {
+                aggregation_temporality: 1,
+            } => "exp_histogram_delta",
+            Self::ExponentialHistogram {
+                aggregation_temporality: 2,
+            } => "exp_histogram_cumulative",
+            Self::ExponentialHistogram { .. } => "exp_histogram",
+            Self::Summary => "summary",
+        }
+    }
 }
 
 /// Construct an explicit-bucket `HistogramDataPoint` scaffold.
