@@ -484,8 +484,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
     /// Generate OTLP metrics with the following enhancements:
     ///
-    /// * Monotonic sums are truly monotonic, incrementing by a random amount
-    ///   each tick
+    /// * Cumulative sums evolve from their prior value each tick; monotonic
+    ///   cumulative sums only increase while non-monotonic cumulative sums may
+    ///   move in either direction
     /// * Timestamps advance monotonically based on internal tick counter
     ///   starting at epoch
     /// * Each call advances the tick counter by a random amount (1-60)
@@ -535,32 +536,34 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                         }
                         Data::Sum(sum) => {
                             data_points_count += sum.data_points.len() as u64;
-                            let is_accumulating = sum.is_monotonic;
+                            let is_cumulative = sum.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
                             for point in &mut sum.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
-                                if is_accumulating {
-                                    // For accumulating sums, monotonically
-                                    // increase by some factor of `tick_diff`
-                                    if let Some(value) = &mut point.value {
-                                        match value {
-                                            number_data_point::Value::AsDouble(v) => {
-                                                *v += self.incr_f;
-                                            }
-                                            #[allow(clippy::cast_possible_wrap)]
-                                            number_data_point::Value::AsInt(v) => {
-                                                *v += self.incr_i;
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // For non-accumulating sums, use random
-                                    // values
-                                    if let Some(value) = &mut point.value {
-                                        match value {
-                                            number_data_point::Value::AsDouble(v) => {
+                                if let Some(value) = &mut point.value {
+                                    match value {
+                                        number_data_point::Value::AsDouble(v) => {
+                                            if is_cumulative {
+                                                if sum.is_monotonic {
+                                                    *v += self.incr_f;
+                                                } else {
+                                                    *v += rng
+                                                        .random_range(-self.incr_f..=self.incr_f);
+                                                }
+                                            } else {
                                                 *v = rng.random();
                                             }
-                                            number_data_point::Value::AsInt(v) => {
+                                        }
+                                        #[allow(clippy::cast_possible_wrap)]
+                                        number_data_point::Value::AsInt(v) => {
+                                            if is_cumulative {
+                                                if sum.is_monotonic {
+                                                    *v += self.incr_i;
+                                                } else {
+                                                    *v += rng
+                                                        .random_range(-self.incr_i..=self.incr_i);
+                                                }
+                                            } else {
                                                 *v = rng.random();
                                             }
                                         }
@@ -575,15 +578,28 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             for point in &mut hist.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
                                 if is_cumulative {
+                                    let previous_min = point.min;
+                                    let previous_max = point.max;
                                     // Cumulative: bucket_counts and sum only
                                     // grow, mirroring monotonic sum behavior.
                                     // incr_i always positive so cast is safe.
                                     #[allow(clippy::cast_sign_loss)]
+                                    let increment = self.incr_i as u64;
                                     for bc in &mut point.bucket_counts {
-                                        *bc += self.incr_i as u64;
+                                        *bc = bc.saturating_add(increment);
                                     }
                                     point.count = point.bucket_counts.iter().sum();
                                     set_histogram_min_max(point, rng);
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_min, point.min.as_mut())
+                                    {
+                                        *current = current.min(previous);
+                                    }
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_max, point.max.as_mut())
+                                    {
+                                        *current = current.max(previous);
+                                    }
                                     if let Some(sum) = &mut point.sum {
                                         *sum += self.incr_f;
                                     }
@@ -609,6 +625,8 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             for point in &mut exp_hist.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
                                 if is_cumulative {
+                                    let previous_min = point.min;
+                                    let previous_max = point.max;
                                     // Cumulative: zero, positive, and negative
                                     // bucket counts only grow.
                                     #[allow(clippy::cast_sign_loss)]
@@ -623,6 +641,16 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     }
                                     point.count = count;
                                     set_exp_histogram_min_max(point, rng);
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_min, point.min.as_mut())
+                                    {
+                                        *current = current.min(previous);
+                                    }
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_max, point.max.as_mut())
+                                    {
+                                        *current = current.max(previous);
+                                    }
                                     if let Some(sum) = &mut point.sum {
                                         *sum += self.incr_f;
                                     }
