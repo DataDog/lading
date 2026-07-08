@@ -18,16 +18,25 @@ use crate::log_gen::{LogBatch, LogLine};
 use crate::property::{Property, PropertyFailure};
 use crate::scenario::Scenario;
 
-/// Return a temp directory base that is visible inside Docker VMs.
+/// Return a temp directory base for per-case artifacts.
 ///
-/// Colima/Lima only mount `$HOME` by default. The system temp dir
-/// (`/var/folders/` on macOS) is not visible inside the VM, so bind
-/// mounts from there fail. We use `$HOME/.lading_proptest_tmp` instead.
+/// Resolution order:
+/// 1. `LADING_TMP_BASE` env var if set — caller is responsible for ensuring
+///    the path is visible inside any Docker VM (Colima/Lima) being used.
+/// 2. `$HOME/.lading_proptest_tmp` (default).
+///
+/// Colima/Lima only mount `$HOME` by default on macOS. The system temp dir
+/// (`/var/folders/` on macOS) is not visible inside the VM, so bind mounts
+/// from there fail. If `LADING_TMP_BASE` is set, it must point somewhere
+/// that's visible to the Docker daemon — typically under `$HOME` when using
+/// Colima/Lima.
 fn dirs_or_home() -> PathBuf {
-    let base = PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
-    )
-    .join(".lading_proptest_tmp");
+    let base = if let Ok(custom) = std::env::var("LADING_TMP_BASE") {
+        PathBuf::from(custom)
+    } else {
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()))
+            .join(".lading_proptest_tmp")
+    };
     std::fs::create_dir_all(&base).expect("failed to create temp base dir");
     base
 }
