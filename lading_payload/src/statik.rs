@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -89,15 +89,37 @@ impl crate::Serialize for Static {
             .filter(|src| src.byte_size < max_bytes as u64);
         if let Some(source) = subset.choose(&mut rng) {
             debug!("Opening {} static file.", &source.path.display());
-            let file = OpenOptions::new().read(true).open(&source.path)?;
-
-            let mut reader = BufReader::new(file);
-            let buffer = reader.fill_buf()?;
-            let buffer_length = buffer.len();
-            writer.write_all(buffer)?;
-            reader.consume(buffer_length);
+            let mut file = OpenOptions::new().read(true).open(&source.path)?;
+            io::copy(&mut file, writer)?;
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    use super::Static;
+    use crate::Serialize;
+
+    proptest! {
+        /// For every non-empty file smaller than the maximum block size, serialization
+        /// returns every source byte in its original order.
+        #[test]
+        fn transmits_complete_binary_file(bytes in prop::collection::vec(any::<u8>(), 8_193..131_072)) {
+            let directory = tempfile::tempdir()?;
+            let path = directory.path().join("payload.bin");
+            std::fs::write(&path, &bytes)?;
+            let mut payload = Static::new(&path)?;
+            let mut output = Vec::new();
+            let rng = StdRng::seed_from_u64(1);
+
+            payload.to_bytes(rng, bytes.len() + 1, &mut output)?;
+
+            prop_assert_eq!(output, bytes);
+        }
     }
 }

@@ -4,10 +4,10 @@
 //! their configured maximum lifetime.
 
 use bollard::Docker;
-use bollard::models::ContainerCreateBody;
+use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveContainerOptionsBuilder,
-    StartContainerOptions, StopContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, InspectContainerOptionsBuilder,
+    RemoveContainerOptionsBuilder, StartContainerOptions, StopContainerOptionsBuilder,
 };
 use bollard::secret::ContainerCreateResponse;
 use lading_throttle::Throttle;
@@ -42,14 +42,34 @@ fn default_max_lifetime_seconds() -> NonZeroU32 {
     NonZeroU32::MAX
 }
 
+/// A container created by the experiment runner and available to Lading.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceContainer {
+    /// The container whose performance is being measured.
+    Target,
+}
+
+impl SourceContainer {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Target => "target",
+        }
+    }
+}
+
 /// Configuration of the container generator.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Repository in which the container is found, docker.io/datadog/foobar.
-    pub repository: String,
+    pub repository: Option<String>,
     /// Container tag, :v1.0.0.
-    pub tag: String,
+    pub tag: Option<String>,
+    /// Existing container whose local image should be reused without a registry pull.
+    pub source_container: Option<SourceContainer>,
+    /// Existing container whose network namespace should be shared.
+    pub share_network_with: Option<SourceContainer>,
     /// Arguments for the container entrypoint, maps to docker run CMD.
     pub args: Option<Vec<String>>,
     /// Environment variables for the container, maps to docker run --env.
@@ -129,6 +149,21 @@ pub enum Error {
         #[source]
         source: Box<bollard::errors::Error>,
     },
+    /// Invalid generator configuration.
+    #[error("Invalid container generator configuration: {0}")]
+    InvalidConfig(String),
+    /// Error inspecting a source container.
+    #[error("Failed to inspect source container {container}: {source}")]
+    SourceContainerInspect {
+        /// Container that could not be inspected.
+        container: String,
+        /// Underlying Bollard error.
+        #[source]
+        source: Box<bollard::errors::Error>,
+    },
+    /// The source container did not report a usable image identifier.
+    #[error("Source container {0} did not report an image identifier")]
+    SourceContainerImage(String),
 }
 
 /// Information about a created container
@@ -182,6 +217,7 @@ impl Container {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
+        config.validate()?;
         let concurrent_containers = config.number_of_containers;
         let metric_labels = MetricsBuilder::new("container").with_id(general.id).build();
 
@@ -227,60 +263,9 @@ impl Container {
     /// Panics if container index cannot be converted to u32.
     #[expect(clippy::too_many_lines)]
     pub async fn spin(mut self) -> Result<(), Error> {
-        info!(
-            "Container generator running: {repository}:{tag}",
-            repository = self.config.repository,
-            tag = self.config.tag
-        );
-
         let docker = Docker::connect_with_local_defaults()?;
-        let full_image = format!(
-            "{repository}:{tag}",
-            repository = self.config.repository,
-            tag = self.config.tag
-        );
-
-        debug!("Ensuring image is available: {full_image}");
-        let pull_start = Instant::now();
-        let create_image_options = CreateImageOptionsBuilder::default()
-            .from_image(&full_image)
-            .build();
-
-        let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
-        let mut last_progress_log = Instant::now();
-        while let Some(item) = pull_stream.next().await {
-            match item {
-                Ok(status) => {
-                    // Only log progress every second to avoid spam
-                    if let Some(progress) = status.progress {
-                        let now = Instant::now();
-                        if now.duration_since(last_progress_log).as_secs() >= 1 {
-                            let elapsed = pull_start.elapsed();
-                            debug!("Pull progress ({elapsed:?}): {progress}");
-                            last_progress_log = now;
-                        }
-                    }
-                }
-                Err(source) => {
-                    let elapsed = pull_start.elapsed();
-                    error!("Failed to pull image {full_image} after {elapsed:?}: {source}");
-                    let mut labels = self.metric_labels.clone();
-                    labels.push(("kind".to_string(), "pull".to_string()));
-                    labels.push(("result".to_string(), "failure".to_string()));
-                    counter!("operation", &labels).increment(1);
-                    return Err(Error::ImagePull {
-                        image: full_image,
-                        source: Box::new(source),
-                    });
-                }
-            }
-        }
-        let pull_elapsed = pull_start.elapsed();
-        debug!("Image {full_image} ready after {pull_elapsed:?}");
-        let mut labels = self.metric_labels.clone();
-        labels.push(("kind".to_string(), "pull".to_string()));
-        labels.push(("result".to_string(), "success".to_string()));
-        counter!("operation", &labels).increment(1);
+        let full_image = self.resolve_image(&docker).await?;
+        info!(image = full_image, "Container generator running");
 
         let mut machine = StateMachine::new(self.concurrent_containers.get());
         let mut event = Event::Started;
@@ -400,6 +385,76 @@ impl Container {
                 Operation::Exit => return Ok(()),
             };
         }
+    }
+
+    async fn resolve_image(&self, docker: &Docker) -> Result<String, Error> {
+        if let Some(source_container) = self.config.source_container {
+            let container_name = source_container.name();
+            let inspect_options = InspectContainerOptionsBuilder::default().build();
+            let inspected = docker
+                .inspect_container(container_name, Some(inspect_options))
+                .await
+                .map_err(|source| Error::SourceContainerInspect {
+                    container: container_name.to_string(),
+                    source: Box::new(source),
+                })?;
+            return inspected
+                .image
+                .ok_or_else(|| Error::SourceContainerImage(container_name.to_string()));
+        }
+
+        let repository = self
+            .config
+            .repository
+            .as_deref()
+            .ok_or_else(|| Error::InvalidConfig("repository is required".to_string()))?;
+        let tag = self
+            .config
+            .tag
+            .as_deref()
+            .ok_or_else(|| Error::InvalidConfig("tag is required".to_string()))?;
+        let full_image = format!("{repository}:{tag}");
+        debug!("Ensuring image is available: {full_image}");
+        let pull_start = Instant::now();
+        let create_image_options = CreateImageOptionsBuilder::default()
+            .from_image(&full_image)
+            .build();
+
+        let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
+        let mut last_progress_log = Instant::now();
+        while let Some(item) = pull_stream.next().await {
+            match item {
+                Ok(status) => {
+                    if let Some(progress) = status.progress {
+                        let now = Instant::now();
+                        if now.duration_since(last_progress_log).as_secs() >= 1 {
+                            let elapsed = pull_start.elapsed();
+                            debug!("Pull progress ({elapsed:?}): {progress}");
+                            last_progress_log = now;
+                        }
+                    }
+                }
+                Err(source) => {
+                    let elapsed = pull_start.elapsed();
+                    error!("Failed to pull image {full_image} after {elapsed:?}: {source}");
+                    let mut labels = self.metric_labels.clone();
+                    labels.push(("kind".to_string(), "pull".to_string()));
+                    labels.push(("result".to_string(), "failure".to_string()));
+                    counter!("operation", &labels).increment(1);
+                    return Err(Error::ImagePull {
+                        image: full_image,
+                        source: Box::new(source),
+                    });
+                }
+            }
+        }
+        let pull_elapsed = pull_start.elapsed();
+        debug!("Image {full_image} ready after {pull_elapsed:?}");
+        let mut labels = self.metric_labels.clone();
+        labels.push(("kind".to_string(), "pull".to_string()));
+        labels.push(("result".to_string(), "success".to_string()));
+        counter!("operation", &labels).increment(1);
+        Ok(full_image)
     }
 }
 
@@ -678,6 +733,26 @@ impl Drop for Container {
 }
 
 impl Config {
+    fn validate(&self) -> Result<(), Error> {
+        let registry_image = self.repository.is_some() || self.tag.is_some();
+        if registry_image && (self.repository.is_none() || self.tag.is_none()) {
+            return Err(Error::InvalidConfig(
+                "repository and tag must be configured together".to_string(),
+            ));
+        }
+        if registry_image == self.source_container.is_some() {
+            return Err(Error::InvalidConfig(
+                "configure exactly one of repository/tag or source_container".to_string(),
+            ));
+        }
+        if self.network_disabled && self.share_network_with.is_some() {
+            return Err(Error::InvalidConfig(
+                "network_disabled and share_network_with cannot be combined".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
     #[must_use]
     fn to_container_config(&self, full_image: &str) -> ContainerCreateBody {
@@ -717,8 +792,92 @@ impl Config {
                 .as_ref()
                 .map(|labels| labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             network_disabled: Some(self.network_disabled),
+            host_config: self.share_network_with.map(|container| HostConfig {
+                network_mode: Some(format!("container:{}", container.name())),
+                ..Default::default()
+            }),
             exposed_ports,
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use super::{Config, SourceContainer};
+
+    fn base_config() -> Config {
+        Config {
+            repository: Some("busybox".to_string()),
+            tag: Some("latest".to_string()),
+            source_container: None,
+            share_network_with: None,
+            args: None,
+            env: None,
+            labels: None,
+            network_disabled: false,
+            exposed_ports: Vec::new(),
+            max_lifetime_seconds: NonZeroU32::MAX,
+            number_of_containers: NonZeroU32::MIN,
+        }
+    }
+
+    #[test]
+    fn accepts_target_image_and_network_namespace() {
+        let config = Config {
+            repository: None,
+            tag: None,
+            source_container: Some(SourceContainer::Target),
+            share_network_with: Some(SourceContainer::Target),
+            ..base_config()
+        };
+
+        assert!(config.validate().is_ok());
+        let body = config.to_container_config("sha256:target-image");
+        assert_eq!(body.image.as_deref(), Some("sha256:target-image"));
+        assert_eq!(
+            body.host_config.and_then(|host| host.network_mode),
+            Some("container:target".to_string())
+        );
+    }
+
+    #[test]
+    fn deserializes_target_image_and_network_namespace() -> Result<(), serde_yaml::Error> {
+        let config: Config = serde_yaml::from_str(
+            r"
+source_container: target
+share_network_with: target
+args:
+  - /usr/local/run-companion
+number_of_containers: 1
+",
+        )?;
+
+        assert_eq!(config.source_container, Some(SourceContainer::Target));
+        assert_eq!(config.share_network_with, Some(SourceContainer::Target));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_multiple_image_sources() {
+        let config = Config {
+            source_container: Some(SourceContainer::Target),
+            ..base_config()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_disabled_shared_network() {
+        let config = Config {
+            network_disabled: true,
+            share_network_with: Some(SourceContainer::Target),
+            ..base_config()
+        };
+
+        assert!(config.validate().is_err());
     }
 }
