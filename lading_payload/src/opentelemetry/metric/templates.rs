@@ -1,11 +1,13 @@
 use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
-    common::v1::InstrumentationScope,
+    common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
     metrics::{
         self,
         v1::{
-            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data, number_data_point,
+            ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint,
+            ResourceMetrics, ScopeMetrics, SummaryDataPoint, exponential_histogram_data_point,
+            metric::Data, number_data_point, summary_data_point,
         },
     },
     resource,
@@ -49,6 +51,62 @@ fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) 
     }
 
     max
+}
+
+pub(super) fn random_histogram_bounds<R: Rng + ?Sized>(n_bounds: usize, rng: &mut R) -> Vec<f64> {
+    let mut next = rng.random_range(0.0_f64..=1_000.0);
+    let mut bounds = Vec::with_capacity(n_bounds);
+    for _ in 0..n_bounds {
+        next += rng.random_range(0.25_f64..=10_000.0);
+        bounds.push(next);
+    }
+    bounds
+}
+
+pub(super) fn random_non_negative_min_max<R: Rng + ?Sized>(
+    rng: &mut R,
+) -> (Option<f64>, Option<f64>) {
+    let min = rng.random_range(0.0_f64..=100_000.0);
+    let max = min + rng.random_range(0.0_f64..=1_000_000.0);
+    (Some(min), Some(max))
+}
+
+pub(super) fn random_signed_min_max<R: Rng + ?Sized>(rng: &mut R) -> (Option<f64>, Option<f64>) {
+    let min = rng.random_range(-100_000.0_f64..=100_000.0);
+    let max = min + rng.random_range(0.0_f64..=1_000_000.0);
+    (Some(min), Some(max))
+}
+
+pub(super) fn random_summary_quantiles<R: Rng + ?Sized>(
+    quantile_count: usize,
+    rng: &mut R,
+) -> Vec<f64> {
+    let mut quantiles: Vec<f64> = (0..quantile_count).map(|_| rng.random()).collect();
+    quantiles.sort_by(f64::total_cmp);
+    quantiles
+}
+
+fn point_attributes(metadata: &[KeyValue]) -> Vec<KeyValue> {
+    let mut attributes: Vec<KeyValue> = metadata.iter().take(2).cloned().collect();
+    attributes.push(KeyValue {
+        key: "sample".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes.push(KeyValue {
+        key: "spread".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes.push(KeyValue {
+        key: "jitter".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes
 }
 
 struct Ndp(NumberDataPoint);
@@ -112,6 +170,9 @@ impl MetricTemplateGenerator {
                 u16::from(config.metric_weights.gauge),
                 u16::from(config.metric_weights.sum_delta),
                 u16::from(config.metric_weights.sum_cumulative),
+                u16::from(config.metric_weights.histogram),
+                u16::from(config.metric_weights.exponential_histogram),
+                u16::from(config.metric_weights.summary),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -124,6 +185,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     type Output = Metric;
     type Error = GeneratorError;
 
+    #[allow(clippy::too_many_lines)]
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
@@ -175,6 +237,14 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality: 2,
                 is_monotonic: rng.random_bool(0.5),
             },
+            3 => Kind::Histogram {
+                aggregation_temporality: 2,
+            },
+            4 => Kind::ExponentialHistogram {
+                aggregation_temporality: 1,
+                scale: rng.random_range(-3_i32..=10),
+            },
+            5 => Kind::Summary,
             _ => unreachable!(),
         };
 
@@ -193,6 +263,117 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality,
                 is_monotonic,
             }),
+            Kind::Summary => {
+                let data_points = (0..total_data_points)
+                    .map(|_| {
+                        let quantiles =
+                            random_summary_quantiles(rng.random_range(2_usize..=8), rng);
+                        let mut val = rng.random_range(0.0_f64..=10_000.0);
+                        let quantile_values = quantiles
+                            .into_iter()
+                            .map(|quantile| {
+                                val += rng.random_range(0.25_f64..=25_000.0);
+                                summary_data_point::ValueAtQuantile {
+                                    quantile,
+                                    value: val,
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        SummaryDataPoint {
+                            attributes: point_attributes(&metadata),
+                            start_time_unix_nano: 0,
+                            time_unix_nano: rng.random(),
+                            count: rng
+                                .random_range(quantile_values.len().max(1) as u64..=100_000_u64),
+                            sum: val * rng.random_range(1.0_f64..=4.0),
+                            quantile_values,
+                            flags: 0,
+                        }
+                    })
+                    .collect();
+                Data::Summary(metrics::v1::Summary { data_points })
+            }
+            Kind::Histogram {
+                aggregation_temporality,
+            } => {
+                let data_points = (0..total_data_points as usize)
+                    .map(|_| {
+                        let n_bounds = rng.random_range(4_usize..=16);
+                        let bounds = random_histogram_bounds(n_bounds, rng);
+                        let n_buckets = bounds.len() + 1;
+                        let count: u64 = rng.random_range(n_buckets as u64..=250_000_u64);
+                        let bucket_counts = random_partition(count, n_buckets, rng);
+                        let (min, max) = random_non_negative_min_max(rng);
+
+                        HistogramDataPoint {
+                            attributes: point_attributes(&metadata),
+                            start_time_unix_nano: 0,
+                            time_unix_nano: rng.random(),
+                            count,
+                            sum: Some(rng.random_range(0.0_f64..=1_000_000.0)),
+                            explicit_bounds: bounds,
+                            bucket_counts,
+                            exemplars: Vec::new(),
+                            flags: 0,
+                            min,
+                            max,
+                        }
+                    })
+                    .collect();
+                Data::Histogram(metrics::v1::Histogram {
+                    data_points,
+                    aggregation_temporality,
+                })
+            }
+            Kind::ExponentialHistogram {
+                aggregation_temporality,
+                scale,
+            } => {
+                let data_points = (0..total_data_points as usize)
+                    .map(|_| {
+                        let n_buckets = rng.random_range(4_usize..=32);
+                        let count: u64 = rng.random_range((n_buckets as u64) * 2..=250_000_u64);
+                        let partition = random_partition(count, 3, rng);
+                        let pos_count = partition[0];
+                        let neg_count = partition[1];
+                        let zero_count = partition[2];
+
+                        let positive = Some(exponential_histogram_data_point::Buckets {
+                            offset: rng.random_range(-256_i32..=256),
+                            bucket_counts: random_partition(pos_count, n_buckets, rng),
+                        });
+
+                        let negative = Some(exponential_histogram_data_point::Buckets {
+                            offset: rng.random_range(-256_i32..=256),
+                            bucket_counts: random_partition(neg_count, n_buckets, rng),
+                        });
+
+                        let (min, max) = random_signed_min_max(rng);
+
+                        ExponentialHistogramDataPoint {
+                            attributes: point_attributes(&metadata),
+                            start_time_unix_nano: 0,
+                            time_unix_nano: rng.random(),
+                            count,
+                            sum: Some(rng.random_range(-1_000_000.0_f64..=1_000_000.0)),
+                            scale,
+                            zero_count,
+                            positive,
+                            negative,
+                            exemplars: Vec::new(),
+                            flags: 0,
+                            min,
+                            max,
+                            zero_threshold: rng.random_range(0.0_f64..=10_000.0),
+                        }
+                    })
+                    .collect();
+
+                Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+                    data_points,
+                    aggregation_temporality,
+                })
+            }
         };
         let mut metric = Metric {
             name,
@@ -223,6 +404,45 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     }
 }
 
+pub(super) fn random_partition<R: Rng + ?Sized>(
+    count: u64,
+    n_buckets: usize,
+    rng: &mut R,
+) -> Vec<u64> {
+    if n_buckets == 0 {
+        return Vec::new();
+    }
+
+    let mut result = vec![0; n_buckets];
+    if count == 0 {
+        return result;
+    }
+
+    let guaranteed_non_zero = n_buckets.min(usize::try_from(count).unwrap_or(usize::MAX));
+    for value in result.iter_mut().take(guaranteed_non_zero) {
+        *value = 1;
+    }
+
+    let mut remaining = count.saturating_sub(guaranteed_non_zero as u64);
+    while remaining > 0 {
+        let bucket_idx = rng.random_range(0..guaranteed_non_zero.max(1));
+        let chunk = if remaining == 1 {
+            1
+        } else {
+            rng.random_range(1..=remaining)
+        };
+        result[bucket_idx] += chunk;
+        remaining -= chunk;
+    }
+
+    for idx in (1..result.len()).rev() {
+        let swap_idx = rng.random_range(0..=idx);
+        result.swap(idx, swap_idx);
+    }
+
+    result
+}
+
 fn data_points_total(metric: &Metric) -> usize {
     let data = &metric.data;
     match data {
@@ -230,8 +450,12 @@ fn data_points_total(metric: &Metric) -> usize {
             Data::Gauge(metrics::v1::Gauge { data_points })
             | Data::Sum(metrics::v1::Sum { data_points, .. }),
         ) => data_points.len(),
+        Some(Data::Histogram(metrics::v1::Histogram { data_points, .. })) => data_points.len(),
+        Some(Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+            data_points, ..
+        })) => data_points.len(),
+        Some(Data::Summary(metrics::v1::Summary { data_points })) => data_points.len(),
         None => 0,
-        _ => unimplemented!("only gauge/sum metrics supported"),
     }
 }
 
@@ -261,8 +485,36 @@ fn cut_data_points(metric: Metric) -> Metric {
                 is_monotonic,
             }))
         }
+        Some(Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+            mut data_points,
+            aggregation_temporality,
+        })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::ExponentialHistogram(
+                metrics::v1::ExponentialHistogram {
+                    data_points,
+                    aggregation_temporality,
+                },
+            ))
+        }
+        Some(Data::Histogram(metrics::v1::Histogram {
+            mut data_points,
+            aggregation_temporality,
+        })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Histogram(metrics::v1::Histogram {
+                data_points,
+                aggregation_temporality,
+            }))
+        }
+        Some(Data::Summary(metrics::v1::Summary { mut data_points })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Summary(metrics::v1::Summary { data_points }))
+        }
         None => None,
-        _ => unimplemented!("only gauge/sum metrics supported"),
     };
 
     Metric {
@@ -281,6 +533,14 @@ pub(crate) enum Kind {
         aggregation_temporality: i32,
         is_monotonic: bool,
     },
+    Histogram {
+        aggregation_temporality: i32,
+    },
+    ExponentialHistogram {
+        aggregation_temporality: i32,
+        scale: i32,
+    },
+    Summary,
 }
 
 #[derive(Clone, Debug)]
@@ -538,6 +798,9 @@ mod test {
             config.metric_weights.gauge = gauge;
             config.metric_weights.sum_delta = sum_delta;
             config.metric_weights.sum_cumulative = sum_cumulative;
+            config.metric_weights.histogram = 0;
+            config.metric_weights.exponential_histogram = 0;
+            config.metric_weights.summary = 0;
 
             let mut rng = SmallRng::seed_from_u64(seed);
 
@@ -563,8 +826,97 @@ mod test {
                             _ => panic!("invalid aggregation temporality"),
                         }
                     }
-                    _ => panic!("invalid metric data"),
+                    Data::Histogram(_) | Data::ExponentialHistogram(_) | Data::Summary(_) => {
+                        panic!("unexpected new metric type when weights are zero")
+                    }
                 }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn metric_template_generator_new_types_generate(
+            seed: u64,
+            histogram in 0..2_u8,
+            exponential_histogram in 0..2_u8,
+            summary in 0..2_u8,
+        ) {
+            if histogram == 0 && exponential_histogram == 0 && summary == 0 {
+                return Ok(());
+            }
+
+            let mut config = Config::default();
+            config.metric_weights.gauge = 0;
+            config.metric_weights.sum_delta = 0;
+            config.metric_weights.sum_cumulative = 0;
+            config.metric_weights.histogram = histogram;
+            config.metric_weights.exponential_histogram = exponential_histogram;
+            config.metric_weights.summary = summary;
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator_result = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::RandomStringPool::with_size(&mut rng, 1024)),
+                &mut rng,
+            );
+            assert!(generator_result.is_ok());
+            let mut generator = generator_result.unwrap();
+
+            for _ in 0..100 {
+                let result = generator.generate(&mut rng, &mut 1024);
+                assert!(result.is_ok());
+                let metric = result.unwrap();
+                assert!(metric.data.is_some());
+                match metric.data.unwrap() {
+                    Data::Histogram(_) => assert!(histogram >= 1),
+                    Data::ExponentialHistogram(_) => assert!(exponential_histogram >= 1),
+                    Data::Summary(_) => assert!(summary >= 1),
+                    Data::Gauge(_) | Data::Sum(_) => {
+                        panic!("unexpected gauge/sum when weights are zero")
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn random_partition_preserves_count_and_density(
+            seed: u64,
+            count in 0_u64..10_000,
+            n_buckets in 1_usize..128,
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let partition = random_partition(count, n_buckets, &mut rng);
+
+            prop_assert_eq!(partition.len(), n_buckets);
+            prop_assert_eq!(partition.iter().sum::<u64>(), count);
+
+            if count >= n_buckets as u64 {
+                prop_assert!(
+                    partition.iter().all(|value| *value > 0),
+                    "count {count} should populate every bucket",
+                );
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn random_summary_quantiles_are_sorted_and_bounded(
+            seed: u64,
+            quantile_count in 0_usize..32,
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let quantiles = random_summary_quantiles(quantile_count, &mut rng);
+
+            prop_assert_eq!(quantiles.len(), quantile_count);
+            for quantile in &quantiles {
+                prop_assert!((0.0..=1.0).contains(quantile));
+            }
+            for pair in quantiles.windows(2) {
+                prop_assert!(pair[0] <= pair[1]);
             }
         }
     }
