@@ -21,3 +21,11 @@ generator:
         - 5000/tcp
       max_lifetime_seconds: 20
       number_of_containers: 10
+  - id: target-image-companion
+    container:
+      source_container: target
+      share_network_with: target
+      args:
+        - /usr/local/bin/run-companion
+      max_lifetime_seconds: 4294967295
+      number_of_containers: 1
