@@ -35,13 +35,13 @@
 //   and a scale factor that governs bucket width.
 // * Summary -- quantile summaries: each data point carries count/sum plus a
 //   sorted list of (quantile, value) pairs.
-// The`NumberDataPoint` is a
+// The`NumberDataPoint` is:
 //
 // * attributes: Vec<KeyValue> -- tags
 // * start_time_unix_nano: u64 -- represents the first possible moment a measurement could be recorded, optional
 // * time_unix_nano: u64 -- a timestamp when the value was sampled
 // * value: enum { u64, f64 } -- the value
-// * flags: uu32 -- I'm not sure what to make of this yet
+// * flags: u32 -- OTLP data point flags, such as FLAG_NO_RECORDED_VALUE.
 
 pub(crate) mod templates;
 pub(crate) mod unit;
