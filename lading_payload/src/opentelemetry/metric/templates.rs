@@ -745,6 +745,7 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
 mod test {
     use super::*;
     use crate::SizedGenerator;
+    use crate::opentelemetry::metric::MetricWeights;
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
@@ -797,6 +798,95 @@ mod test {
                     }
                     Data::Summary(_) => assert!(config.metric_weights.summary >= 1),
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn histogram_temporality_weights_map_to_otlp_values() {
+        let cases = [
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 1,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                1,
+                false,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 1,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                2,
+                false,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 1,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                1,
+                true,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 1,
+                    summary: 0,
+                },
+                2,
+                true,
+            ),
+        ];
+
+        for (metric_weights, expected_temporality, exponential) in cases {
+            let config = Config {
+                metric_weights,
+                ..Default::default()
+            };
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut generator = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::RandomStringPool::with_size(&mut rng, 1024)),
+                &mut rng,
+            )
+            .expect("metric template generator should be created");
+            let mut budget = 1_000_000;
+            let metric = generator
+                .generate(&mut rng, &mut budget)
+                .expect("metric should be generated");
+            match metric.data {
+                Some(Data::Histogram(histogram)) if !exponential => {
+                    assert_eq!(histogram.aggregation_temporality, expected_temporality);
+                }
+                Some(Data::ExponentialHistogram(histogram)) if exponential => {
+                    assert_eq!(histogram.aggregation_temporality, expected_temporality);
+                }
+                _ => panic!("unexpected metric kind"),
             }
         }
     }

@@ -133,6 +133,12 @@ where
     point.max = Some(max);
 }
 
+fn set_histogram_sum_at_least_max(point: &mut HistogramDataPoint) {
+    if let (Some(sum), Some(max)) = (&mut point.sum, point.max) {
+        *sum = sum.max(max);
+    }
+}
+
 fn exp_histogram_bucket_bounds(scale: i32, index: i32) -> (f64, f64) {
     let base = 2.0_f64.powf(2.0_f64.powi(-scale));
     (base.powi(index), base.powi(index + 1))
@@ -178,6 +184,12 @@ where
 
     point.min = Some(min.min(max));
     point.max = Some(max.max(min));
+}
+
+fn set_exp_histogram_sum_at_least_max(point: &mut ExponentialHistogramDataPoint) {
+    if let (Some(sum), Some(max)) = (&mut point.sum, point.max) {
+        *sum = sum.max(max);
+    }
 }
 
 /// Configure the OpenTelemetry metric payload.
@@ -595,6 +607,12 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     {
                                         *current = current.min(previous);
                                     }
+                                    if let Some((_, last)) =
+                                        populated_bucket_range(&point.bucket_counts)
+                                    {
+                                        let (_, upper) = histogram_bucket_bounds(point, last);
+                                        point.max = Some(upper + self.incr_f);
+                                    }
                                     if let (Some(previous), Some(current)) =
                                         (previous_max, point.max.as_mut())
                                     {
@@ -603,6 +621,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     if let Some(sum) = &mut point.sum {
                                         *sum += self.incr_f;
                                     }
+                                    set_histogram_sum_at_least_max(point);
                                 } else {
                                     // Delta: fresh observations each window.
                                     // Use 1..=10 (not 0..=10) so count stays
@@ -615,6 +634,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     if let Some(sum) = &mut point.sum {
                                         *sum = rng.random_range(1.0_f64..=1000.0);
                                     }
+                                    set_histogram_sum_at_least_max(point);
                                 }
                             }
                         }
@@ -641,10 +661,26 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     }
                                     point.count = count;
                                     set_exp_histogram_min_max(point, rng);
+                                    if let Some(negative) = &point.negative
+                                        && let Some((_, last)) =
+                                            exp_histogram_populated_index_range(negative)
+                                    {
+                                        let (_, upper) =
+                                            exp_histogram_bucket_bounds(point.scale, last);
+                                        point.min = Some(-upper);
+                                    }
                                     if let (Some(previous), Some(current)) =
                                         (previous_min, point.min.as_mut())
                                     {
                                         *current = current.min(previous);
+                                    }
+                                    if let Some(positive) = &point.positive
+                                        && let Some((_, last)) =
+                                            exp_histogram_populated_index_range(positive)
+                                    {
+                                        let (_, upper) =
+                                            exp_histogram_bucket_bounds(point.scale, last);
+                                        point.max = Some(upper + self.incr_f);
                                     }
                                     if let (Some(previous), Some(current)) =
                                         (previous_max, point.max.as_mut())
@@ -654,6 +690,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     if let Some(sum) = &mut point.sum {
                                         *sum += self.incr_f;
                                     }
+                                    set_exp_histogram_sum_at_least_max(point);
                                 } else {
                                     // Delta: fresh observations each window.
                                     point.zero_count = rng.random_range(1_u64..=10);
@@ -669,6 +706,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     if let Some(sum) = &mut point.sum {
                                         *sum = rng.random_range(1.0_f64..=1000.0);
                                     }
+                                    set_exp_histogram_sum_at_least_max(point);
                                 }
                             }
                         }
@@ -799,7 +837,8 @@ mod test {
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
+        ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint, ScopeMetrics,
+        metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
@@ -1477,9 +1516,13 @@ mod test {
                     match &metric.data {
                         Some(Data::Histogram(histogram)) => {
                             for point in &histogram.data_points {
+                                assert_eq!(point.count, point.bucket_counts.iter().sum::<u64>());
                                 assert!(point.min.is_some());
                                 assert!(point.max.is_some());
                                 assert!(point.min <= point.max);
+                                if let (Some(sum), Some(max)) = (point.sum, point.max) {
+                                    assert!(sum >= max);
+                                }
                             }
                         }
                         Some(Data::ExponentialHistogram(exp_histogram)) => {
@@ -1499,11 +1542,127 @@ mod test {
                                 assert!(point.min.is_some());
                                 assert!(point.max.is_some());
                                 assert!(point.min <= point.max);
+                                if let (Some(sum), Some(max)) = (point.sum, point.max) {
+                                    assert!(sum >= max);
+                                }
                             }
                         }
                         _ => {}
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn first_histogram_point(resource_metric: &ResourceMetrics) -> &HistogramDataPoint {
+        for scope_metric in &resource_metric.scope_metrics {
+            for metric in &scope_metric.metrics {
+                if let Some(Data::Histogram(histogram)) = &metric.data
+                    && let Some(point) = histogram.data_points.first()
+                {
+                    return point;
+                }
+            }
+        }
+        panic!("expected a histogram data point")
+    }
+
+    fn first_exp_histogram_point(
+        resource_metric: &ResourceMetrics,
+    ) -> &ExponentialHistogramDataPoint {
+        for scope_metric in &resource_metric.scope_metrics {
+            for metric in &scope_metric.metrics {
+                if let Some(Data::ExponentialHistogram(histogram)) = &metric.data
+                    && let Some(point) = histogram.data_points.first()
+                {
+                    return point;
+                }
+            }
+        }
+        panic!("expected an exponential histogram data point")
+    }
+
+    fn assert_non_decreasing_buckets(previous: &[u64], current: &[u64]) {
+        assert_eq!(previous.len(), current.len());
+        for (previous, current) in previous.iter().zip(current) {
+            assert!(current >= previous);
+        }
+    }
+
+    #[test]
+    fn cumulative_histograms_preserve_state_across_generations() -> Result<(), crate::Error> {
+        let configs = [
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 1,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 1,
+                summary: 0,
+            },
+        ];
+
+        for metric_weights in configs {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(1),
+                    attributes_per_resource: ConfRange::Constant(1),
+                    scopes_per_resource: ConfRange::Constant(1),
+                    attributes_per_scope: ConfRange::Constant(0),
+                    metrics_per_scope: ConfRange::Constant(1),
+                    attributes_per_metric: ConfRange::Constant(0),
+                },
+                metric_weights,
+            };
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)?;
+            let mut budget = 1_000_000;
+            let first = otel_metrics.generate(&mut rng, &mut budget)?;
+            budget = 1_000_000;
+            let second = otel_metrics.generate(&mut rng, &mut budget)?;
+
+            if metric_weights.histogram_cumulative > 0 {
+                let previous = first_histogram_point(&first);
+                let current = first_histogram_point(&second);
+                assert_non_decreasing_buckets(&previous.bucket_counts, &current.bucket_counts);
+                assert!(current.count >= previous.count);
+                assert!(current.sum >= previous.sum);
+                assert!(current.min <= previous.min);
+                assert!(current.max >= previous.max);
+            } else {
+                let previous = first_exp_histogram_point(&first);
+                let current = first_exp_histogram_point(&second);
+                assert!(current.zero_count >= previous.zero_count);
+                assert!(current.count >= previous.count);
+                assert!(current.sum >= previous.sum);
+                assert!(current.min <= previous.min);
+                assert!(current.max >= previous.max);
+                let previous_positive = previous.positive.as_ref().expect("positive buckets");
+                let current_positive = current.positive.as_ref().expect("positive buckets");
+                assert_non_decreasing_buckets(
+                    &previous_positive.bucket_counts,
+                    &current_positive.bucket_counts,
+                );
+                let previous_negative = previous.negative.as_ref().expect("negative buckets");
+                let current_negative = current.negative.as_ref().expect("negative buckets");
+                assert_non_decreasing_buckets(
+                    &previous_negative.bucket_counts,
+                    &current_negative.bucket_counts,
+                );
             }
         }
 
