@@ -95,15 +95,6 @@ pub enum Variant {
 
 /// Controls which received series this blackhole records as lading capture
 /// metrics.
-///
-/// The Datadog intake blackhole re-emits every received series into lading's
-/// capture system, preserving the payload's tags (see [`handle_v2_protobuf`]).
-/// Each unique `(metric, tag-set)` becomes its own capture series, so a payload
-/// carrying an unbounded tag — for example a per-event `host` — produces
-/// unbounded capture series, inflating the capture file without limit and
-/// OOM-ing downstream analysis. This policy controls what reaches the capture
-/// system at the recording boundary, before the capture key is interned: drop
-/// a known high-cardinality tag, or disable recording entirely.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -114,14 +105,9 @@ pub enum RecordPolicy {
     /// counters are still emitted and payloads are still decoded for
     /// accounting.
     Disabled,
-    /// Record series, but drop the listed tag keys when forming the capture
-    /// series; every other tag is retained. Use this to remove a known
-    /// high-cardinality tag while keeping the rest of the series intact.
-    Tags {
-        /// Tag keys to drop. An empty set retains every tag (a no-op,
-        /// equivalent to [`RecordPolicy::All`]).
-        drop: BTreeSet<String>,
-    },
+    /// Record series but drop the listed tag keys when forming the capture
+    /// series. An empty list behaves like `All`, only slower.
+    TagsToDrop(BTreeSet<String>),
 }
 
 impl Default for RecordPolicy {
@@ -139,16 +125,16 @@ impl RecordPolicy {
         match self {
             Self::All => true,
             Self::Disabled => false,
-            Self::Tags { drop } => !drop.contains(tag_key),
+            Self::TagsToDrop(tags) => !tags.contains(tag_key),
         }
     }
 }
 
 /// Deserialize [`RecordPolicy`] accepting both the plain-scalar form for unit
-/// variants (`record: disabled`) and the natural nested-map form for the struct
-/// variant (`record: { tags: { drop: [...] } }`). `serde_yaml` otherwise
-/// insists on YAML tags (`!tags`) for struct variants; this mirrors the
-/// fallback the `http` blackhole uses for its body variant.
+/// variants (`record: disabled`) and the natural nested-map form for the
+/// non-unit variant (`record: { tags_to_drop: [...] }`). `serde_yaml`
+/// otherwise insists on YAML tags (`!tags_to_drop`) for such variants; this
+/// mirrors the fallback the `http` blackhole uses for its body variant.
 fn deserialize_record<'de, D>(deserializer: D) -> Result<RecordPolicy, D::Error>
 where
     D: Deserializer<'de>,
@@ -519,19 +505,18 @@ record: disabled
     }
 
     #[test]
-    fn record_tags_denylist_deserializes() {
-        // Exercises the `deserialize_record` fallback: the struct variant is
-        // written as a nested map, not a `!tags` YAML tag.
+    fn record_tags_to_drop_deserializes() {
+        // Exercises the `deserialize_record` fallback: the variant is written
+        // as a nested map, not a `!tags_to_drop` YAML tag.
         let yaml = r#"
 v2:
   binding_addr: "127.0.0.1:9091"
 record:
-  tags:
-    drop: [host]
+  tags_to_drop: [host]
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let drop: BTreeSet<String> = ["host".to_string()].into_iter().collect();
-        assert_eq!(config.record, RecordPolicy::Tags { drop });
+        let tags: BTreeSet<String> = ["host".to_string()].into_iter().collect();
+        assert_eq!(config.record, RecordPolicy::TagsToDrop(tags));
     }
 
     #[test]
@@ -539,9 +524,9 @@ record:
         // `All` keeps every tag.
         assert!(RecordPolicy::All.retains_tag("host"));
 
-        // `Tags` drops the listed keys and keeps the rest.
-        let drop: BTreeSet<String> = ["host".to_string()].into_iter().collect();
-        let policy = RecordPolicy::Tags { drop };
+        // `TagsToDrop` drops the listed keys and keeps the rest.
+        let tags: BTreeSet<String> = ["host".to_string()].into_iter().collect();
+        let policy = RecordPolicy::TagsToDrop(tags);
         assert!(policy.retains_tag("service"));
         assert!(!policy.retains_tag("host"));
     }
