@@ -101,28 +101,26 @@ pub enum Variant {
 /// Each unique `(metric, tag-set)` becomes its own capture series, so a payload
 /// carrying an unbounded tag — for example a per-event `host` — produces
 /// unbounded capture series, inflating the capture file without limit and
-/// OOM-ing downstream analysis. This policy bounds that cardinality at the
-/// recording boundary, before the capture key is interned.
+/// OOM-ing downstream analysis. This policy controls what reaches the capture
+/// system at the recording boundary, before the capture key is interned: drop
+/// a known high-cardinality tag, or disable recording entirely.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum RecordPolicy {
-    /// Record every received series with all of its tags. Default; preserves
-    /// historical behaviour. Cardinality is unbounded if the target emits
-    /// unbounded tags.
+    /// Default behaviour, record every received series with all of its tags.
     All,
     /// Record no series at all. Aggregate `bytes_received` / `requests_received`
     /// counters are still emitted and payloads are still decoded for
-    /// accounting. Lowest overhead, and the right choice when the experiment's
-    /// signal (e.g. target RSS) does not come from the recorded series.
+    /// accounting.
     Disabled,
-    /// Record series, but retain only the listed tag keys when forming the
-    /// capture series; every other tag is dropped. Capture-series cardinality
-    /// is then bounded by the value-space of the retained tags.
+    /// Record series, but drop the listed tag keys when forming the capture
+    /// series; every other tag is retained. Use this to remove a known
+    /// high-cardinality tag while keeping the rest of the series intact.
     Tags {
-        /// Tag keys to retain. An empty set collapses every series to its bare
-        /// metric name (one capture series per distinct metric).
-        keep: BTreeSet<String>,
+        /// Tag keys to drop. An empty set retains every tag (a no-op,
+        /// equivalent to [`RecordPolicy::All`]).
+        drop: BTreeSet<String>,
     },
 }
 
@@ -141,14 +139,14 @@ impl RecordPolicy {
         match self {
             Self::All => true,
             Self::Disabled => false,
-            Self::Tags { keep } => keep.contains(tag_key),
+            Self::Tags { drop } => !drop.contains(tag_key),
         }
     }
 }
 
 /// Deserialize [`RecordPolicy`] accepting both the plain-scalar form for unit
 /// variants (`record: disabled`) and the natural nested-map form for the struct
-/// variant (`record: { tags: { keep: [...] } }`). `serde_yaml` otherwise
+/// variant (`record: { tags: { drop: [...] } }`). `serde_yaml` otherwise
 /// insists on YAML tags (`!tags`) for struct variants; this mirrors the
 /// fallback the `http` blackhole uses for its body variant.
 fn deserialize_record<'de, D>(deserializer: D) -> Result<RecordPolicy, D::Error>
@@ -521,7 +519,7 @@ record: disabled
     }
 
     #[test]
-    fn record_tags_allowlist_deserializes() {
+    fn record_tags_denylist_deserializes() {
         // Exercises the `deserialize_record` fallback: the struct variant is
         // written as a nested map, not a `!tags` YAML tag.
         let yaml = r#"
@@ -529,14 +527,11 @@ v2:
   binding_addr: "127.0.0.1:9091"
 record:
   tags:
-    keep: [service, env]
+    drop: [host]
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let keep: BTreeSet<String> = ["service", "env"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        assert_eq!(config.record, RecordPolicy::Tags { keep });
+        let drop: BTreeSet<String> = ["host".to_string()].into_iter().collect();
+        assert_eq!(config.record, RecordPolicy::Tags { drop });
     }
 
     #[test]
@@ -544,9 +539,9 @@ record:
         // `All` keeps every tag.
         assert!(RecordPolicy::All.retains_tag("host"));
 
-        // `Tags` keeps allowlisted keys and drops the rest.
-        let keep: BTreeSet<String> = ["service".to_string()].into_iter().collect();
-        let policy = RecordPolicy::Tags { keep };
+        // `Tags` drops the listed keys and keeps the rest.
+        let drop: BTreeSet<String> = ["host".to_string()].into_iter().collect();
+        let policy = RecordPolicy::Tags { drop };
         assert!(policy.retains_tag("service"));
         assert!(!policy.retains_tag("host"));
     }
