@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Datadog blackhole now accepts a `record` policy (`all` / `disabled` /
+  `tags: { keep: [...] }`) controlling which received series are recorded as
+  capture metrics. Defaults to `all` (unchanged behaviour); `disabled` or a tag
+  allowlist bound capture-series cardinality for targets that emit unbounded
+  tags.
 - HTTP blackhole now supports an `openmetrics` body variant for generated
   Prometheus/OpenMetrics scrape responses.
 - Updated to rand 0.10.x

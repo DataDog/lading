@@ -33,9 +33,11 @@ use hyper_util::{
 use lading_capture::{counter_incr, gauge_set};
 use metrics::counter;
 use prost::Message;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
+use serde_yaml::with::singleton_map_recursive;
 use std::{
     borrow::Cow,
+    collections::BTreeSet,
     io,
     net::SocketAddr,
     sync::Arc,
@@ -91,13 +93,86 @@ pub enum Variant {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+/// Controls which received series this blackhole records as lading capture
+/// metrics.
+///
+/// The Datadog intake blackhole re-emits every received series into lading's
+/// capture system, preserving the payload's tags (see [`handle_v2_protobuf`]).
+/// Each unique `(metric, tag-set)` becomes its own capture series, so a payload
+/// carrying an unbounded tag — for example a per-event `host` — produces
+/// unbounded capture series, inflating the capture file without limit and
+/// OOM-ing downstream analysis. This policy bounds that cardinality at the
+/// recording boundary, before the capture key is interned.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub enum RecordPolicy {
+    /// Record every received series with all of its tags. Default; preserves
+    /// historical behaviour. Cardinality is unbounded if the target emits
+    /// unbounded tags.
+    All,
+    /// Record no series at all. Aggregate `bytes_received` / `requests_received`
+    /// counters are still emitted and payloads are still decoded for
+    /// accounting. Lowest overhead, and the right choice when the experiment's
+    /// signal (e.g. target RSS) does not come from the recorded series.
+    Disabled,
+    /// Record series, but retain only the listed tag keys when forming the
+    /// capture series; every other tag is dropped. Capture-series cardinality
+    /// is then bounded by the value-space of the retained tags.
+    Tags {
+        /// Tag keys to retain. An empty set collapses every series to its bare
+        /// metric name (one capture series per distinct metric).
+        keep: BTreeSet<String>,
+    },
+}
+
+impl Default for RecordPolicy {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl RecordPolicy {
+    /// Whether a tag key is retained on recorded capture series. Only consulted
+    /// while recording; [`RecordPolicy::Disabled`] skips the recording loop
+    /// before this is reached.
+    #[inline]
+    fn retains_tag(&self, tag_key: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Disabled => false,
+            Self::Tags { keep } => keep.contains(tag_key),
+        }
+    }
+}
+
+/// Deserialize [`RecordPolicy`] accepting both the plain-scalar form for unit
+/// variants (`record: disabled`) and the natural nested-map form for the struct
+/// variant (`record: { tags: { keep: [...] } }`). `serde_yaml` otherwise
+/// insists on YAML tags (`!tags`) for struct variants; this mirrors the
+/// fallback the `http` blackhole uses for its body variant.
+fn deserialize_record<'de, D>(deserializer: D) -> Result<RecordPolicy, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_yaml::Value::deserialize(deserializer)?;
+    RecordPolicy::deserialize(value.clone()).or_else(|original| {
+        singleton_map_recursive::deserialize(value)
+            .map_err(|_| de::Error::custom(original.to_string()))
+    })
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Datadog`].
 pub struct Config {
     /// The Datadog API variant to use
     #[serde(flatten)]
     pub variant: Variant,
+    /// Which received series to record as lading capture metrics. Defaults to
+    /// [`RecordPolicy::All`], preserving historical behaviour.
+    #[serde(default, deserialize_with = "deserialize_record")]
+    pub record: RecordPolicy,
 }
 
 #[derive(Debug)]
@@ -106,11 +181,13 @@ pub struct Datadog {
     binding_addr: SocketAddr,
     shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
+    record: RecordPolicy,
 }
 
 #[derive(Clone)]
 struct AppState {
     metric_labels: Arc<[(String, String)]>,
+    record: RecordPolicy,
 }
 
 impl Datadog {
@@ -133,6 +210,7 @@ impl Datadog {
             binding_addr,
             shutdown,
             metric_labels,
+            record: config.record,
         }
     }
 
@@ -146,7 +224,10 @@ impl Datadog {
     /// Function will return an error if the server fails to start.
     pub async fn run(self) -> Result<(), Error> {
         let metric_labels: Arc<[(String, String)]> = Arc::from(self.metric_labels);
-        let state = Arc::new(AppState { metric_labels });
+        let state = Arc::new(AppState {
+            metric_labels,
+            record: self.record,
+        });
 
         let listener = TcpListener::bind(self.binding_addr).await?;
         info!(
@@ -241,7 +322,7 @@ async fn handle_request(
 
     let status = match (path.as_str(), content_type) {
         ("/api/v2/series", "application/x-protobuf") => {
-            handle_v2_protobuf(&whole_body, content_encoding, &path, labels).await
+            handle_v2_protobuf(&whole_body, content_encoding, &path, labels, &state.record).await
         }
         _ => StatusCode::ACCEPTED,
     };
@@ -299,6 +380,7 @@ async fn handle_v2_protobuf(
     content_encoding: &str,
     path: &str,
     labels: &[(String, String)],
+    record: &RecordPolicy,
 ) -> StatusCode {
     let decompressed = match decompress_if_needed(body, content_encoding) {
         Ok(data) => data,
@@ -318,17 +400,26 @@ async fn handle_v2_protobuf(
                 payload.series.len()
             );
 
+            // When recording is disabled the payload is decoded above purely
+            // for byte/parse accounting; skip the recording loop entirely so no
+            // capture series are produced and no per-point work is done.
             for series in &payload.series {
+                if matches!(record, RecordPolicy::Disabled) {
+                    break;
+                }
                 if series.points.is_empty() {
                     continue;
                 }
 
                 // Parse Datadog tags (format: "key:value" or "key") into label pairs.
-                // Key-only tags are represented with an empty value.
+                // Key-only tags are represented with an empty value. The configured
+                // record policy filters the tag set here, before the capture key is
+                // interned, which is what bounds capture-series cardinality.
                 let tag_pairs: Vec<(&str, &str)> = series
                     .tags
                     .iter()
                     .map(|tag| tag.split_once(':').unwrap_or((tag.as_str(), "")))
+                    .filter(|&(key, _)| record.retains_tag(key))
                     .collect();
 
                 // Metric types from the agent_payload.proto:
@@ -407,5 +498,56 @@ v2:
   binding_addr: "127.0.0.1:9091"
 "#;
         let _config: Config = serde_yaml::from_str(yaml).unwrap();
+    }
+
+    #[test]
+    fn record_defaults_to_all_and_parses_disabled() {
+        // Absent `record` defaults to `All`, preserving historical behaviour.
+        let default_yaml = r#"
+v2:
+  binding_addr: "127.0.0.1:9091"
+"#;
+        let config: Config = serde_yaml::from_str(default_yaml).unwrap();
+        assert_eq!(config.record, RecordPolicy::All);
+
+        // The unit variant parses from a plain scalar.
+        let disabled_yaml = r#"
+v2:
+  binding_addr: "127.0.0.1:9091"
+record: disabled
+"#;
+        let config: Config = serde_yaml::from_str(disabled_yaml).unwrap();
+        assert_eq!(config.record, RecordPolicy::Disabled);
+    }
+
+    #[test]
+    fn record_tags_allowlist_deserializes() {
+        // Exercises the `deserialize_record` fallback: the struct variant is
+        // written as a nested map, not a `!tags` YAML tag.
+        let yaml = r#"
+v2:
+  binding_addr: "127.0.0.1:9091"
+record:
+  tags:
+    keep: [service, env]
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let keep: BTreeSet<String> = ["service", "env"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        assert_eq!(config.record, RecordPolicy::Tags { keep });
+    }
+
+    #[test]
+    fn record_policy_retention() {
+        // `All` keeps every tag.
+        assert!(RecordPolicy::All.retains_tag("host"));
+
+        // `Tags` keeps allowlisted keys and drops the rest.
+        let keep: BTreeSet<String> = ["service".to_string()].into_iter().collect();
+        let policy = RecordPolicy::Tags { keep };
+        assert!(policy.retains_tag("service"));
+        assert!(!policy.retains_tag("host"));
     }
 }
