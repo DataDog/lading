@@ -105,9 +105,9 @@ pub enum RecordPolicy {
     /// counters are still emitted and payloads are still decoded for
     /// accounting.
     Disabled,
-    /// Record series but drop the listed tag keys when forming the capture
-    /// series. An empty list behaves like `All`, only slower.
-    TagsToDrop(BTreeSet<String>),
+    /// Record only series whose metric name is listed. An empty list behaves
+    /// like `Disabled`.
+    SeriesToKeep(BTreeSet<String>),
 }
 
 impl Default for RecordPolicy {
@@ -117,12 +117,13 @@ impl Default for RecordPolicy {
 }
 
 impl RecordPolicy {
-    /// Whether a tag key is retained on recorded capture series.
-    fn retains_tag(&self, tag_key: &str) -> bool {
+    /// Whether a series with the given metric name is recorded as a capture
+    /// metric.
+    fn records_series(&self, metric: &str) -> bool {
         match self {
             Self::All => true,
             Self::Disabled => false,
-            Self::TagsToDrop(tags) => !tags.contains(tag_key),
+            Self::SeriesToKeep(names) => names.contains(metric),
         }
     }
 }
@@ -366,19 +367,15 @@ async fn handle_v2_protobuf(
             );
 
             if !matches!(record, RecordPolicy::Disabled) {
-                for series in &payload.series {
-                    if series.points.is_empty() {
-                        continue;
-                    }
-
-                    // Parse Datadog tags (format: "key:value" or "key") into label pairs,
-                    // and the configured record policy filters the tag set here.
+                for series in payload.series.iter().filter(|series| {
+                    !series.points.is_empty() && record.records_series(&series.metric)
+                }) {
+                    // Parse Datadog tags (format: "key:value" or "key") into label pairs.
                     // Key-only tags are represented with an empty value.
                     let tag_pairs: Vec<(&str, &str)> = series
                         .tags
                         .iter()
                         .map(|tag| tag.split_once(':').unwrap_or((tag.as_str(), "")))
-                        .filter(|&(key, _)| record.retains_tag(key))
                         .collect();
 
                     // Metric types from the agent_payload.proto:

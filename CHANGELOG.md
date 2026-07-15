@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 - Datadog blackhole now accepts a `record` policy (`all` / `disabled` /
-  `tags_to_drop: [...]`) controlling which received series are recorded as
+  `series_to_keep: [...]`) controlling which received series are recorded as
   capture metrics.
 - HTTP blackhole now supports an `openmetrics` body variant for generated
   Prometheus/OpenMetrics scrape responses.
