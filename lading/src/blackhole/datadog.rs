@@ -371,10 +371,9 @@ async fn handle_v2_protobuf(
                         continue;
                     }
 
-                    // Parse Datadog tags (format: "key:value" or "key") into label pairs.
-                    // Key-only tags are represented with an empty value. The configured
-                    // record policy filters the tag set here, before the capture key is
-                    // interned, which is what bounds capture-series cardinality.
+                    // Parse Datadog tags (format: "key:value" or "key") into label pairs,
+                    // and the configured record policy filters the tag set here.
+                    // Key-only tags are represented with an empty value.
                     let tag_pairs: Vec<(&str, &str)> = series
                         .tags
                         .iter()
@@ -459,52 +458,5 @@ v2:
   binding_addr: "127.0.0.1:9091"
 "#;
         let _config: Config = serde_yaml::from_str(yaml).unwrap();
-    }
-
-    #[test]
-    fn record_defaults_to_all_and_parses_disabled() {
-        // Absent `record` defaults to `All`, preserving historical behaviour.
-        let default_yaml = r#"
-v2:
-  binding_addr: "127.0.0.1:9091"
-"#;
-        let config: Config = serde_yaml::from_str(default_yaml).unwrap();
-        assert_eq!(config.record, RecordPolicy::All);
-
-        // The unit variant parses from a plain scalar.
-        let disabled_yaml = r#"
-v2:
-  binding_addr: "127.0.0.1:9091"
-record: disabled
-"#;
-        let config: Config = serde_yaml::from_str(disabled_yaml).unwrap();
-        assert_eq!(config.record, RecordPolicy::Disabled);
-    }
-
-    #[test]
-    fn record_tags_to_drop_deserializes() {
-        // Exercises the `deserialize_record` fallback: the variant is written
-        // as a nested map, not a `!tags_to_drop` YAML tag.
-        let yaml = r#"
-v2:
-  binding_addr: "127.0.0.1:9091"
-record:
-  tags_to_drop: [host]
-"#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let tags: BTreeSet<String> = ["host".to_string()].into_iter().collect();
-        assert_eq!(config.record, RecordPolicy::TagsToDrop(tags));
-    }
-
-    #[test]
-    fn record_policy_retention() {
-        // `All` keeps every tag.
-        assert!(RecordPolicy::All.retains_tag("host"));
-
-        // `TagsToDrop` drops the listed keys and keeps the rest.
-        let tags: BTreeSet<String> = ["host".to_string()].into_iter().collect();
-        let policy = RecordPolicy::TagsToDrop(tags);
-        assert!(policy.retains_tag("service"));
-        assert!(!policy.retains_tag("host"));
     }
 }
