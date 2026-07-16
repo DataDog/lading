@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Datadog blackhole now accepts a `record` policy (`all` / `disabled` /
   `series_to_keep: [...]`) controlling which received series are recorded as
   capture metrics.
+- OpenTelemetry metric payloads now prefix generated metric names with their
+  metric kind to simplify intake debugging.
+- OpenTelemetry cumulative metric generation now updates cumulative sums using
+  aggregation temporality and preserves cumulative histogram min/max bounds.
 - HTTP blackhole now supports an `openmetrics` body variant for generated
   Prometheus/OpenMetrics scrape responses.
 - Updated to rand 0.10.x

@@ -96,6 +96,7 @@ where
 
     /// Check if any template in the pool can fit within the given budget.
     /// Returns true if at least one template fits, false otherwise.
+    #[cfg(test)]
     pub(crate) fn template_fits(&self, budget: usize) -> bool {
         // Check if any existing template in the pool fits
         self.by_size.range(..=budget).next().is_some()

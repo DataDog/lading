@@ -28,19 +28,25 @@
 //
 // * Gauge -- a collection of `NumberDataPoint`, values sampled at specific times
 // * Sum -- `Gauge` with the addition of monotonic flag, aggregation metadata
-//
-// We omit Histogram / ExponentialHistogram / Summary in this current version
-// but will introduce them in the near-term. The `NumberDataPoint` is a
+// * Histogram -- explicit-bucket histogram: each data point carries bucket counts
+//   aligned to a fixed set of explicit boundaries, plus count/sum.
+// * ExponentialHistogram -- base-2 exponential bucket histogram: each data point
+//   carries positive/negative Buckets structs (offset + counts), zero_count,
+//   and a scale factor that governs bucket width.
+// * Summary -- quantile summaries: each data point carries count/sum plus a
+//   sorted list of (quantile, value) pairs.
+// The`NumberDataPoint` is:
 //
 // * attributes: Vec<KeyValue> -- tags
 // * start_time_unix_nano: u64 -- represents the first possible moment a measurement could be recorded, optional
 // * time_unix_nano: u64 -- a timestamp when the value was sampled
 // * value: enum { u64, f64 } -- the value
-// * flags: uu32 -- I'm not sure what to make of this yet
+// * flags: u32 -- OTLP data point flags, such as FLAG_NO_RECORDED_VALUE.
 
 pub(crate) mod templates;
 pub(crate) mod unit;
 
+use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 use rand::RngExt;
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
@@ -50,7 +56,10 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{
+    ExponentialHistogramDataPoint, HistogramDataPoint, ResourceMetrics,
+    exponential_histogram_data_point, metric::Data, number_data_point,
+};
 use prost::Message;
 use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
@@ -63,6 +72,125 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
+
+fn increment_exp_bucket_counts(
+    buckets: &mut exponential_histogram_data_point::Buckets,
+    increment: u64,
+) -> u64 {
+    for count in &mut buckets.bucket_counts {
+        *count = count.saturating_add(increment);
+    }
+    buckets.bucket_counts.iter().sum()
+}
+
+fn randomize_exp_bucket_counts<R>(
+    buckets: &mut exponential_histogram_data_point::Buckets,
+    rng: &mut R,
+) -> u64
+where
+    R: rand::Rng + ?Sized,
+{
+    for count in &mut buckets.bucket_counts {
+        *count = rng.random_range(0_u64..=10);
+    }
+    buckets.bucket_counts.iter().sum()
+}
+
+fn populated_bucket_range(bucket_counts: &[u64]) -> Option<(usize, usize)> {
+    let first = bucket_counts.iter().position(|count| *count > 0)?;
+    let last = bucket_counts.iter().rposition(|count| *count > 0)?;
+    Some((first, last))
+}
+
+fn histogram_bucket_bounds(point: &HistogramDataPoint, bucket: usize) -> (f64, f64) {
+    let lower = if bucket == 0 {
+        0.0
+    } else {
+        point.explicit_bounds[bucket - 1]
+    };
+    let upper = point
+        .explicit_bounds
+        .get(bucket)
+        .copied()
+        .unwrap_or_else(|| point.explicit_bounds.last().copied().unwrap_or(1.0) * 2.0);
+    (lower, upper)
+}
+
+fn set_histogram_min_max<R>(point: &mut HistogramDataPoint, rng: &mut R)
+where
+    R: rand::Rng + ?Sized,
+{
+    let Some((first, last)) = populated_bucket_range(&point.bucket_counts) else {
+        point.min = Some(0.0);
+        point.max = Some(0.0);
+        return;
+    };
+    let (min_lower, min_upper) = histogram_bucket_bounds(point, first);
+    let (max_lower, max_upper) = histogram_bucket_bounds(point, last);
+    let min = rng.random_range(min_lower..=min_upper);
+    let max = rng.random_range(max_lower..=max_upper).max(min);
+    point.min = Some(min);
+    point.max = Some(max);
+}
+
+fn set_histogram_sum_at_least_max(point: &mut HistogramDataPoint) {
+    if let (Some(sum), Some(max)) = (&mut point.sum, point.max) {
+        *sum = sum.max(max);
+    }
+}
+
+fn exp_histogram_bucket_bounds(scale: i32, index: i32) -> (f64, f64) {
+    let base = 2.0_f64.powf(2.0_f64.powi(-scale));
+    (base.powi(index), base.powi(index + 1))
+}
+
+fn exp_histogram_populated_index_range(
+    buckets: &exponential_histogram_data_point::Buckets,
+) -> Option<(i32, i32)> {
+    let (first, last) = populated_bucket_range(&buckets.bucket_counts)?;
+    let first = i32::try_from(first).ok()?;
+    let last = i32::try_from(last).ok()?;
+    Some((
+        buckets.offset.checked_add(first)?,
+        buckets.offset.checked_add(last)?,
+    ))
+}
+
+fn set_exp_histogram_min_max<R>(point: &mut ExponentialHistogramDataPoint, rng: &mut R)
+where
+    R: rand::Rng + ?Sized,
+{
+    let positive_range = point
+        .positive
+        .as_ref()
+        .and_then(exp_histogram_populated_index_range);
+    let negative_range = point
+        .negative
+        .as_ref()
+        .and_then(exp_histogram_populated_index_range);
+
+    let min = if let Some((_, last)) = negative_range {
+        let (lower, upper) = exp_histogram_bucket_bounds(point.scale, last);
+        rng.random_range(-upper..=-lower)
+    } else {
+        0.0
+    };
+    let max = if let Some((_, last)) = positive_range {
+        let (lower, upper) = exp_histogram_bucket_bounds(point.scale, last);
+        rng.random_range(lower..=upper)
+    } else {
+        0.0
+    };
+
+    point.min = Some(min.min(max));
+    point.max = Some(max.max(min));
+}
+
+fn set_exp_histogram_sum_at_least_max(point: &mut ExponentialHistogramDataPoint) {
+    if let (Some(sum), Some(max)) = (&mut point.sum, point.max) {
+        *sum = sum.max(max);
+    }
+}
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -110,14 +238,45 @@ pub struct MetricWeights {
     pub sum_delta: u8,
     /// The relative probability of generating a sum cumulative metric.
     pub sum_cumulative: u8,
+    /// The relative probability of generating a delta histogram metric.
+    pub histogram_delta: u8,
+    /// The relative probability of generating a cumulative histogram metric.
+    pub histogram_cumulative: u8,
+    /// The relative probability of generating a delta exponential histogram metric.
+    pub exp_histogram_delta: u8,
+    /// The relative probability of generating a cumulative exponential histogram metric.
+    pub exp_histogram_cumulative: u8,
+    /// The relative probability of generating a summary metric.
+    pub summary: u8,
+}
+
+impl MetricWeights {
+    fn has_zero_weight(self) -> bool {
+        [
+            self.gauge,
+            self.sum_delta,
+            self.sum_cumulative,
+            self.histogram_delta,
+            self.histogram_cumulative,
+            self.exp_histogram_delta,
+            self.exp_histogram_cumulative,
+            self.summary,
+        ]
+        .contains(&0)
+    }
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50,          // 50%
-            sum_delta: 25,      // 25%
-            sum_cumulative: 25, // 25%
+            gauge: 30,
+            sum_delta: 15,
+            sum_cumulative: 15,
+            histogram_delta: 10,
+            histogram_cumulative: 10,
+            exp_histogram_delta: 5,
+            exp_histogram_cumulative: 5,
+            summary: 10,
         }
     }
 }
@@ -140,12 +299,10 @@ impl Config {
     /// Function will error if the configuration is invalid
     #[expect(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
-        // Validate metric weights - both types must have non-zero probability to ensure
-        // we can generate a diverse set of metrics
-        if self.metric_weights.gauge == 0
-            || self.metric_weights.sum_delta == 0
-            || self.metric_weights.sum_cumulative == 0
-        {
+        // Validate metric weights: every supported metric type must have
+        // non-zero probability so generated payloads cover the full OTLP metric
+        // surface area.
+        if self.metric_weights.has_zero_weight() {
             return Err("Metric weights cannot be 0".to_string());
         }
 
@@ -332,14 +489,16 @@ impl OpentelemetryMetrics {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     type Output = ResourceMetrics;
     type Error = Error;
 
     /// Generate OTLP metrics with the following enhancements:
     ///
-    /// * Monotonic sums are truly monotonic, incrementing by a random amount
-    ///   each tick
+    /// * Cumulative sums evolve from their prior value each tick; monotonic
+    ///   cumulative sums only increase while non-monotonic cumulative sums may
+    ///   move in either direction
     /// * Timestamps advance monotonically based on internal tick counter
     ///   starting at epoch
     /// * Each call advances the tick counter by a random amount (1-60)
@@ -347,6 +506,8 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
+        let original_budget = *budget;
+
         self.tick += rng.random_range(1..=60);
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
@@ -387,32 +548,34 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                         }
                         Data::Sum(sum) => {
                             data_points_count += sum.data_points.len() as u64;
-                            let is_accumulating = sum.is_monotonic;
+                            let is_cumulative = sum.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
                             for point in &mut sum.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
-                                if is_accumulating {
-                                    // For accumulating sums, monotonically
-                                    // increase by some factor of `tick_diff`
-                                    if let Some(value) = &mut point.value {
-                                        match value {
-                                            number_data_point::Value::AsDouble(v) => {
-                                                *v += self.incr_f;
-                                            }
-                                            #[allow(clippy::cast_possible_wrap)]
-                                            number_data_point::Value::AsInt(v) => {
-                                                *v += self.incr_i;
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // For non-accumulating sums, use random
-                                    // values
-                                    if let Some(value) = &mut point.value {
-                                        match value {
-                                            number_data_point::Value::AsDouble(v) => {
+                                if let Some(value) = &mut point.value {
+                                    match value {
+                                        number_data_point::Value::AsDouble(v) => {
+                                            if is_cumulative {
+                                                if sum.is_monotonic {
+                                                    *v += self.incr_f;
+                                                } else {
+                                                    *v += rng
+                                                        .random_range(-self.incr_f..=self.incr_f);
+                                                }
+                                            } else {
                                                 *v = rng.random();
                                             }
-                                            number_data_point::Value::AsInt(v) => {
+                                        }
+                                        #[allow(clippy::cast_possible_wrap)]
+                                        number_data_point::Value::AsInt(v) => {
+                                            if is_cumulative {
+                                                if sum.is_monotonic {
+                                                    *v += self.incr_i;
+                                                } else {
+                                                    *v += rng
+                                                        .random_range(-self.incr_i..=self.incr_i);
+                                                }
+                                            } else {
                                                 *v = rng.random();
                                             }
                                         }
@@ -420,12 +583,155 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        Data::Histogram(hist) => {
+                            data_points_count += hist.data_points.len() as u64;
+                            let is_cumulative = hist.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
+                            for point in &mut hist.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                if is_cumulative {
+                                    let previous_min = point.min;
+                                    let previous_max = point.max;
+                                    // Cumulative: bucket_counts and sum only
+                                    // grow, mirroring monotonic sum behavior.
+                                    // incr_i always positive so cast is safe.
+                                    #[allow(clippy::cast_sign_loss)]
+                                    let increment = self.incr_i as u64;
+                                    for bc in &mut point.bucket_counts {
+                                        *bc = bc.saturating_add(increment);
+                                    }
+                                    point.count = point.bucket_counts.iter().sum();
+                                    set_histogram_min_max(point, rng);
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_min, point.min.as_mut())
+                                    {
+                                        *current = current.min(previous);
+                                    }
+                                    if let Some((_, last)) =
+                                        populated_bucket_range(&point.bucket_counts)
+                                    {
+                                        let (_, upper) = histogram_bucket_bounds(point, last);
+                                        point.max = Some(upper + self.incr_f);
+                                    }
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_max, point.max.as_mut())
+                                    {
+                                        *current = current.max(previous);
+                                    }
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum += self.incr_f;
+                                    }
+                                    set_histogram_sum_at_least_max(point);
+                                } else {
+                                    // Delta: fresh observations each window.
+                                    // Use 1..=10 (not 0..=10) so count stays
+                                    // non-zero and the encoded size is stable.
+                                    for bc in &mut point.bucket_counts {
+                                        *bc = rng.random_range(1_u64..=10);
+                                    }
+                                    point.count = point.bucket_counts.iter().sum();
+                                    set_histogram_min_max(point, rng);
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum = rng.random_range(1.0_f64..=1000.0);
+                                    }
+                                    set_histogram_sum_at_least_max(point);
+                                }
+                            }
+                        }
+                        Data::ExponentialHistogram(exp_hist) => {
+                            data_points_count += exp_hist.data_points.len() as u64;
+                            let is_cumulative = exp_hist.aggregation_temporality
+                                == AggregationTemporality::Cumulative as i32;
+                            for point in &mut exp_hist.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                if is_cumulative {
+                                    let previous_min = point.min;
+                                    let previous_max = point.max;
+                                    // Cumulative: zero, positive, and negative
+                                    // bucket counts only grow.
+                                    #[allow(clippy::cast_sign_loss)]
+                                    let increment = self.incr_i as u64;
+                                    point.zero_count = point.zero_count.saturating_add(increment);
+                                    let mut count = point.zero_count;
+                                    if let Some(positive) = &mut point.positive {
+                                        count += increment_exp_bucket_counts(positive, increment);
+                                    }
+                                    if let Some(negative) = &mut point.negative {
+                                        count += increment_exp_bucket_counts(negative, increment);
+                                    }
+                                    point.count = count;
+                                    set_exp_histogram_min_max(point, rng);
+                                    if let Some(negative) = &point.negative
+                                        && let Some((_, last)) =
+                                            exp_histogram_populated_index_range(negative)
+                                    {
+                                        let (_, upper) =
+                                            exp_histogram_bucket_bounds(point.scale, last);
+                                        point.min = Some(-upper);
+                                    }
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_min, point.min.as_mut())
+                                    {
+                                        *current = current.min(previous);
+                                    }
+                                    if let Some(positive) = &point.positive
+                                        && let Some((_, last)) =
+                                            exp_histogram_populated_index_range(positive)
+                                    {
+                                        let (_, upper) =
+                                            exp_histogram_bucket_bounds(point.scale, last);
+                                        point.max = Some(upper + self.incr_f);
+                                    }
+                                    if let (Some(previous), Some(current)) =
+                                        (previous_max, point.max.as_mut())
+                                    {
+                                        *current = current.max(previous);
+                                    }
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum += self.incr_f;
+                                    }
+                                    set_exp_histogram_sum_at_least_max(point);
+                                } else {
+                                    // Delta: fresh observations each window.
+                                    point.zero_count = rng.random_range(1_u64..=10);
+                                    let mut count = point.zero_count;
+                                    if let Some(positive) = &mut point.positive {
+                                        count += randomize_exp_bucket_counts(positive, rng);
+                                    }
+                                    if let Some(negative) = &mut point.negative {
+                                        count += randomize_exp_bucket_counts(negative, rng);
+                                    }
+                                    point.count = count;
+                                    set_exp_histogram_min_max(point, rng);
+                                    if let Some(sum) = &mut point.sum {
+                                        *sum = rng.random_range(1.0_f64..=1000.0);
+                                    }
+                                    set_exp_histogram_sum_at_least_max(point);
+                                }
+                            }
+                        }
+                        Data::Summary(summary) => {
+                            data_points_count += summary.data_points.len() as u64;
+                            for point in &mut summary.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            }
+                        }
                     }
                 }
             }
         }
 
+        let required_bytes = tpl.encoded_len();
+        if required_bytes > original_budget {
+            *budget = original_budget;
+            debug!(
+                ?required_bytes,
+                ?original_budget,
+                "Generated metric exceeded request budget"
+            );
+            Err(PoolError::EmptyChoice)?;
+        }
+        *budget = original_budget - required_bytes;
         self.data_points_per_resource = data_points_count;
 
         Ok(tpl)
@@ -495,13 +801,9 @@ impl crate::Serialize for OpentelemetryMetrics {
                 }
                 bytes_remaining = max_bytes.saturating_sub(required_bytes);
             } else {
-                // Belt with suspenders time: verify no templates could possibly
-                // fit. If we pass this assertion, break as no template will
-                // ever fit the requested max_bytes.
-                assert!(
-                    !self.pool.template_fits(bytes_remaining),
-                    "Pool claims template fits {bytes_remaining} bytes but generate() failed, indicative of a logic error",
-                );
+                // A template may fit its cached size but exceed the remaining
+                // budget after live fields are updated. Stop rather than
+                // asserting on the pre-update pool size.
                 break;
             }
         }
@@ -535,7 +837,8 @@ mod test {
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
+        ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint, ScopeMetrics,
+        metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
@@ -1007,7 +1310,30 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    _ => {},
+                                    Data::Histogram(histogram) => {
+                                        for point in &histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::ExponentialHistogram(exp_histogram) => {
+                                        for point in &exp_histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::Summary(summary) => {
+                                        for point in &summary.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -1031,6 +1357,316 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn data_points_include_attributes() -> Result<(), crate::Error> {
+        let configs = [
+            super::MetricWeights {
+                gauge: 1,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 1,
+                sum_cumulative: 1,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 1,
+                histogram_cumulative: 1,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 1,
+                exp_histogram_cumulative: 1,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 1,
+            },
+        ];
+
+        for metric_weights in configs {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(10),
+                    attributes_per_resource: ConfRange::Constant(1),
+                    scopes_per_resource: ConfRange::Constant(1),
+                    attributes_per_scope: ConfRange::Constant(0),
+                    metrics_per_scope: ConfRange::Constant(4),
+                    attributes_per_metric: ConfRange::Constant(1),
+                },
+                metric_weights,
+            };
+            let mut budget = 1_000_000;
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+            let resource_metric = otel_metrics.generate(&mut rng, &mut budget)?;
+
+            for scope_metric in &resource_metric.scope_metrics {
+                for metric in &scope_metric.metrics {
+                    match &metric.data {
+                        Some(Data::Gauge(gauge)) => {
+                            for point in &gauge.data_points {
+                                assert!(!point.attributes.is_empty());
+                            }
+                        }
+                        Some(Data::Sum(sum)) => {
+                            for point in &sum.data_points {
+                                assert!(!point.attributes.is_empty());
+                            }
+                        }
+                        Some(Data::Histogram(histogram)) => {
+                            for point in &histogram.data_points {
+                                assert!(!point.attributes.is_empty());
+                            }
+                        }
+                        Some(Data::ExponentialHistogram(exp_histogram)) => {
+                            for point in &exp_histogram.data_points {
+                                assert!(!point.attributes.is_empty());
+                            }
+                        }
+                        Some(Data::Summary(summary)) => {
+                            for point in &summary.data_points {
+                                assert!(!point.attributes.is_empty());
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn histograms_populate_min_max() -> Result<(), crate::Error> {
+        let configs = [
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 1,
+                histogram_cumulative: 1,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 1,
+                exp_histogram_cumulative: 1,
+                summary: 0,
+            },
+        ];
+
+        for metric_weights in configs {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(10),
+                    attributes_per_resource: ConfRange::Constant(1),
+                    scopes_per_resource: ConfRange::Constant(1),
+                    attributes_per_scope: ConfRange::Constant(0),
+                    metrics_per_scope: ConfRange::Constant(8),
+                    attributes_per_metric: ConfRange::Constant(0),
+                },
+                metric_weights,
+            };
+            let mut budget = 1_000_000;
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+            let resource_metric = otel_metrics.generate(&mut rng, &mut budget)?;
+
+            for scope_metric in &resource_metric.scope_metrics {
+                for metric in &scope_metric.metrics {
+                    match &metric.data {
+                        Some(Data::Histogram(histogram)) => {
+                            for point in &histogram.data_points {
+                                assert_eq!(point.count, point.bucket_counts.iter().sum::<u64>());
+                                assert!(point.min.is_some());
+                                assert!(point.max.is_some());
+                                assert!(point.min <= point.max);
+                                if let (Some(sum), Some(max)) = (point.sum, point.max) {
+                                    assert!(sum >= max);
+                                }
+                            }
+                        }
+                        Some(Data::ExponentialHistogram(exp_histogram)) => {
+                            for point in &exp_histogram.data_points {
+                                let positive_count = point
+                                    .positive
+                                    .as_ref()
+                                    .map_or(0, |buckets| buckets.bucket_counts.iter().sum());
+                                let negative_count = point
+                                    .negative
+                                    .as_ref()
+                                    .map_or(0, |buckets| buckets.bucket_counts.iter().sum());
+                                assert_eq!(
+                                    point.count,
+                                    point.zero_count + positive_count + negative_count
+                                );
+                                assert!(point.min.is_some());
+                                assert!(point.max.is_some());
+                                assert!(point.min <= point.max);
+                                if let (Some(sum), Some(max)) = (point.sum, point.max) {
+                                    assert!(sum >= max);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn first_histogram_point(resource_metric: &ResourceMetrics) -> &HistogramDataPoint {
+        for scope_metric in &resource_metric.scope_metrics {
+            for metric in &scope_metric.metrics {
+                if let Some(Data::Histogram(histogram)) = &metric.data
+                    && let Some(point) = histogram.data_points.first()
+                {
+                    return point;
+                }
+            }
+        }
+        panic!("expected a histogram data point")
+    }
+
+    fn first_exp_histogram_point(
+        resource_metric: &ResourceMetrics,
+    ) -> &ExponentialHistogramDataPoint {
+        for scope_metric in &resource_metric.scope_metrics {
+            for metric in &scope_metric.metrics {
+                if let Some(Data::ExponentialHistogram(histogram)) = &metric.data
+                    && let Some(point) = histogram.data_points.first()
+                {
+                    return point;
+                }
+            }
+        }
+        panic!("expected an exponential histogram data point")
+    }
+
+    fn assert_non_decreasing_buckets(previous: &[u64], current: &[u64]) {
+        assert_eq!(previous.len(), current.len());
+        for (previous, current) in previous.iter().zip(current) {
+            assert!(current >= previous);
+        }
+    }
+
+    #[test]
+    fn cumulative_histograms_preserve_state_across_generations() -> Result<(), crate::Error> {
+        let configs = [
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 1,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
+            },
+            super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 1,
+                summary: 0,
+            },
+        ];
+
+        for metric_weights in configs {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(1),
+                    attributes_per_resource: ConfRange::Constant(1),
+                    scopes_per_resource: ConfRange::Constant(1),
+                    attributes_per_scope: ConfRange::Constant(0),
+                    metrics_per_scope: ConfRange::Constant(1),
+                    attributes_per_metric: ConfRange::Constant(0),
+                },
+                metric_weights,
+            };
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)?;
+            let mut budget = 1_000_000;
+            let first = otel_metrics.generate(&mut rng, &mut budget)?;
+            budget = 1_000_000;
+            let second = otel_metrics.generate(&mut rng, &mut budget)?;
+
+            if metric_weights.histogram_cumulative > 0 {
+                let previous = first_histogram_point(&first);
+                let current = first_histogram_point(&second);
+                assert_non_decreasing_buckets(&previous.bucket_counts, &current.bucket_counts);
+                assert!(current.count >= previous.count);
+                assert!(current.sum >= previous.sum);
+                assert!(current.min <= previous.min);
+                assert!(current.max >= previous.max);
+            } else {
+                let previous = first_exp_histogram_point(&first);
+                let current = first_exp_histogram_point(&second);
+                assert!(current.zero_count >= previous.zero_count);
+                assert!(current.count >= previous.count);
+                assert!(current.sum >= previous.sum);
+                assert!(current.min <= previous.min);
+                assert!(current.max >= previous.max);
+                let previous_positive = previous.positive.as_ref().expect("positive buckets");
+                let current_positive = current.positive.as_ref().expect("positive buckets");
+                assert_non_decreasing_buckets(
+                    &previous_positive.bucket_counts,
+                    &current_positive.bucket_counts,
+                );
+                let previous_negative = previous.negative.as_ref().expect("negative buckets");
+                let current_negative = current.negative.as_ref().expect("negative buckets");
+                assert_non_decreasing_buckets(
+                    &previous_negative.bucket_counts,
+                    &current_negative.bucket_counts,
+                );
+            }
+        }
+
+        Ok(())
     }
 
     // Property: tick tally in OpentelemetryMetrics increase with calls to
@@ -1060,6 +1696,11 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
                 },
             };
 
@@ -1100,6 +1741,11 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
                 },
             };
 
@@ -1345,6 +1991,7 @@ mod test {
                 gauge: 0,
                 sum_delta: 25,
                 sum_cumulative: 25,
+                ..Default::default()
             },
             ..valid_config
         };
@@ -1355,16 +2002,47 @@ mod test {
                 gauge: 50,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                ..Default::default()
             },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
+
+        let zero_histogram_weight = Config {
+            metric_weights: super::MetricWeights {
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_histogram_weight.valid().is_err());
+
+        let zero_exp_histogram_weight = Config {
+            metric_weights: super::MetricWeights {
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_exp_histogram_weight.valid().is_err());
+
+        let zero_summary_weight = Config {
+            metric_weights: super::MetricWeights {
+                summary: 0,
+                ..Default::default()
+            },
+            ..valid_config
+        };
+        assert!(zero_summary_weight.valid().is_err());
 
         let zero_weights = Config {
             metric_weights: super::MetricWeights {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                ..Default::default()
             },
             ..valid_config
         };
