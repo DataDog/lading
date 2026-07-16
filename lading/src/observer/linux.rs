@@ -79,15 +79,28 @@ ls -l /sys/kernel/mm/page_idle/bitmap
             self.tick_counter = 0;
         }
 
-        self.procfs.poll(sample_smaps).await?;
-        self.cgroup.poll().await?;
+        // Observer reads are best-effort. The target and its cgroup churn
+        // through exit, PID reuse, and cgroup teardown, so per-sample `/proc`
+        // and cgroup reads fail transiently. Propagating those with `?` here
+        // would kill the whole experiment over a blip. Log the failure and
+        // skip that component's sample instead. A persistent failure then
+        // shows up as repeated warnings and absent metrics, which is
+        // recoverable, unlike a dead run.
+        if let Err(e) = self.procfs.poll(sample_smaps).await {
+            warn!("procfs poll failed; skipping this sample: {e}");
+        }
+        if let Err(e) = self.cgroup.poll().await {
+            warn!("cgroup poll failed; skipping this sample: {e}");
+        }
 
         if let Some(wss) = &mut self.wss {
             // WSS measures the amount of memory that has been accessed since the last poll.
             // As a consequence, the poll interval impacts the measure.
             // That’s why we need to be sure we don’t poll more often than once per minute.
             if sample_wss {
-                wss.poll()?;
+                if let Err(e) = wss.poll() {
+                    warn!("wss poll failed; skipping this sample: {e}");
+                }
             }
         }
 

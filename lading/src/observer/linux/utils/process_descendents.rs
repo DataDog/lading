@@ -1,4 +1,5 @@
 use procfs::process::Process;
+use tracing::trace;
 
 /// Iterator which, given a process ID, returns the process and all its descendants
 pub(in crate::observer::linux) struct ProcessDescendantsIterator {
@@ -7,12 +8,17 @@ pub(in crate::observer::linux) struct ProcessDescendantsIterator {
 
 impl ProcessDescendantsIterator {
     pub(in crate::observer::linux) fn new(parent_pid: i32) -> Self {
-        Self {
-            stack: vec![
-                Process::new(parent_pid)
-                    .unwrap_or_else(|e| panic!("process {parent_pid} not found: {e}")),
-            ],
-        }
+        // A target can exit and have its PID recycled between selection and
+        // this read. If the parent process is gone, yield nothing instead of
+        // aborting the whole run. ADR-004: never panic on transient OS state.
+        let stack = match Process::new(parent_pid) {
+            Ok(process) => vec![process],
+            Err(e) => {
+                trace!(parent_pid, "process not found while listing descendants; treating as no descendants: {e}");
+                Vec::new()
+            }
+        };
+        Self { stack }
     }
 }
 
@@ -99,5 +105,14 @@ mod tests {
         child
             .wait()
             .expect("Failed to wait for process tree completion");
+    }
+
+    /// A vanished or nonexistent parent PID must yield an empty iterator, not
+    /// panic. `i32::MAX` is far above any real `pid_max`, so `/proc` has no
+    /// such entry.
+    #[test]
+    fn missing_parent_yields_nothing_without_panicking() {
+        let count = ProcessDescendantsIterator::new(i32::MAX).count();
+        assert_eq!(count, 0, "a missing parent PID must yield no processes");
     }
 }

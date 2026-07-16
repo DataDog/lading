@@ -1,5 +1,6 @@
 use metrics::gauge;
 use tokio::fs;
+use tracing::trace;
 
 use crate::observer::linux::cgroup;
 
@@ -63,23 +64,25 @@ impl Sampler {
 
         // Read cpu.max (cgroup v2)
         let cpu_max = fs::read_to_string(group_prefix.join("cpu.max")).await?;
-        let parts: Vec<&str> = cpu_max.split_whitespace().collect();
-        let (max_str, period_str) = (parts[0], parts[1]);
-        let allowed_cores = if max_str == "max" {
-            // If the target cgroup has no CPU limit we assume it has access to
-            // all cores.
-            num_cpus::get() as f64
-        } else {
-            let max_val = max_str.parse::<f64>()?;
-            let period_val = period_str.parse::<f64>()?;
-            max_val / period_val
-        };
+        let allowed_cores = parse_allowed_cores(&cpu_max)?;
         let limit_millicores = allowed_cores * 1000.0;
 
         // Read `/proc/<PID>/stat`
         let stat_contents = fs::read_to_string(format!("/proc/{pid}/stat")).await?;
         let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
-        assert!(cur_pid == pid);
+        if cur_pid != pid {
+            // `/proc/<pid>` no longer holds the process we meant to sample.
+            // The target exited and its PID was recycled between selection
+            // and this read. Skip the stale sample instead of recording
+            // another process's stats or aborting the run. ADR-004: never
+            // panic on transient OS state.
+            trace!(
+                expected_pid = pid,
+                found_pid = cur_pid,
+                "stat PID mismatch (PID reuse); skipping sample"
+            );
+            return Ok(());
+        }
 
         // Get or initialize the previous stats. Note that the first time this is
         // initialized we intentionally set last_instance to now to avoid scheduling
@@ -112,7 +115,37 @@ impl Sampler {
     }
 }
 
-/// Parse `/proc/<pid>/stat` and extracts:
+/// Parse cgroup v2 `cpu.max` contents into the number of allowed cores.
+///
+/// `cpu.max` is `"<quota> <period>"`, where `<quota>` may be the literal `max`
+/// meaning no limit. A truncated or malformed read, which happens transiently
+/// while a cgroup is being torn down, returns an error instead of panicking
+/// on a missing field. The previous `parts[0]`/`parts[1]` indexing aborted
+/// the whole run under `panic="abort"`.
+#[allow(clippy::cast_precision_loss)]
+fn parse_allowed_cores(cpu_max: &str) -> Result<f64, Error> {
+    let mut parts = cpu_max.split_whitespace();
+    let quota = parts
+        .next()
+        .ok_or(Error::StatMalformed("cpu.max missing quota field"))?;
+    let period = parts
+        .next()
+        .ok_or(Error::StatMalformed("cpu.max missing period field"))?;
+
+    if quota == "max" {
+        // No CPU limit. Assume access to all cores.
+        return Ok(num_cpus::get() as f64);
+    }
+
+    let quota_val = quota.parse::<f64>()?;
+    let period_val = period.parse::<f64>()?;
+    if period_val == 0.0 {
+        return Err(Error::StatMalformed("cpu.max period is zero"));
+    }
+    Ok(quota_val / period_val)
+}
+
+/// Parse `/proc/<pid>/stat` and extract:
 ///
 /// * pid (1st field)
 /// * utime (14th field)
@@ -216,7 +249,32 @@ fn compute_cpu_usage(prev: Stats, cur: Stats, allowed_cores: f64) -> Option<CpuU
 
 #[cfg(test)]
 mod test {
-    use super::{Stats, compute_cpu_usage, parse};
+    use super::{Stats, compute_cpu_usage, parse, parse_allowed_cores};
+
+    #[test]
+    fn cpu_max_valid() {
+        // "quota period" -> quota/period cores.
+        let cores = parse_allowed_cores("50000 100000").expect("valid cpu.max");
+        assert!((cores - 0.5).abs() < f64::EPSILON);
+        // "max <period>" -> all cores, checked here only as a positive number.
+        assert!(parse_allowed_cores("max 100000").expect("valid cpu.max") > 0.0);
+    }
+
+    #[test]
+    fn cpu_max_malformed_errors_not_panics() {
+        // Truncated or malformed reads happen transiently while a cgroup is
+        // torn down. These must return an error, never panic. Under
+        // panic="abort", a panic here would kill the whole run. The previous
+        // `parts[0]`/`parts[1]` indexing panicked on the first two.
+        for input in ["", "50000", "max", "   ", "\n"] {
+            assert!(
+                parse_allowed_cores(input).is_err(),
+                "cpu.max {input:?} must error, not panic"
+            );
+        }
+        // A zero period must not divide-by-zero into a nonsense limit.
+        assert!(parse_allowed_cores("50000 0").is_err());
+    }
 
     #[test]
     fn parse_basic() {
