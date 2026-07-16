@@ -730,6 +730,10 @@ fn init_tracing(json_output: bool) {
 }
 
 fn main() -> Result<(), Error> {
+    // Initialize the Antithesis SDK as early as possible. No-op outside the
+    // `antithesis` feature build.
+    lading::antithesis_hooks::init();
+
     // Two-parser fallback logic until CliFlatLegacy is removed
     let (json_output, args) = match CliWithSubcommands::try_parse() {
         Ok(cli) => match cli.command {
@@ -756,6 +760,12 @@ fn main() -> Result<(), Error> {
 
     let version = env!("CARGO_PKG_VERSION");
     info!("Starting lading {version} run.");
+
+    // Bootstrap Antithesis property: proves the SDK path, coverage
+    // instrumentation, and assertion cataloging are wired into the SUT. Lives
+    // in a guaranteed startup path so it shows up in the first run. No-op
+    // outside the `antithesis` feature build.
+    lading::antithesis_hooks::bootstrap_reachable();
     let memory_limit =
         lading::get_available_memory().get_appropriate_unit(byte_unit::UnitType::Binary);
     info!(

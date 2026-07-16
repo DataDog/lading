@@ -1,0 +1,45 @@
+[package]
+name = "workload-client"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Antithesis test driver for the lading rig. Not shipped with lading."
+
+# Standalone crate, deliberately NOT a member of the lading workspace: it is
+# Antithesis-only scaffolding and must not inherit lading's deny-all lints. The
+# empty [workspace] table makes this its own workspace root so the parent
+# lading workspace does not claim it.
+[workspace]
+
+[[bin]]
+name = "workload-client"
+path = "src/main.rs"
+
+# Test command: `divide-preserves-aggregate-rate` driver. Copied into the test
+# template at /opt/antithesis/test/v1/main/ by antithesis/Dockerfile.
+[[bin]]
+name = "serial_driver_divide_throttle"
+path = "src/bin/serial_driver_divide_throttle.rs"
+
+# Test command: `rig-runs-lading-cleanly` baseline. Spawns a real lading run in
+# a fault-quiet window and checks exit code, capture, and probe-received bytes.
+[[bin]]
+name = "serial_driver_baseline_clean_run"
+path = "src/bin/serial_driver_baseline_clean_run.rs"
+
+[dependencies]
+# The SDK is a hard dependency: the test-command drivers always need its
+# deterministic randomness and assertion macros, and it compiles to local
+# no-ops outside an Antithesis run. Coverage instrumentation stays behind the
+# `antithesis` feature since it is only wanted in the instrumented image build.
+antithesis_sdk = { version = "0.2" }
+antithesis-instrumentation = { version = "0.1", optional = true }
+
+# The SUT crate under test. Linking it lets the driver exercise the real
+# `Throttle::divide` and assert on its output from here, so every property
+# assertion lives in this Antithesis harness rather than in lading's source.
+lading-throttle = { path = "../../lading_throttle" }
+
+[features]
+default = []
+antithesis = ["dep:antithesis-instrumentation"]

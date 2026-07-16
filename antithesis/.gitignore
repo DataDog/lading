@@ -1,0 +1,3 @@
+# Cargo build artifacts for the standalone probe and workload-client crates.
+# These are their own workspaces, so the repo-root /target ignore misses them.
+**/target/

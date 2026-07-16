@@ -1,0 +1,27 @@
+# Minimal lading config for the Antithesis rig (setup skeleton).
+#
+# One TCP generator drives load at the purpose-built probe over the container
+# network; one TCP blackhole binds locally (it also serves as lading's health
+# port and is where the probe will emit output once the workload adds that
+# path). Rate and variant are placeholders — antithesis-workload owns the real
+# scenario matrix (throttle type, byte rate, parallel_connections, ...).
+generator:
+  - tcp:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      addr: "lading-probe:4000"
+      variant: "syslog5424"
+      maximum_prebuild_cache_size_bytes: "64 MiB"
+      # Explicit stable throttle with rolled capacity enabled (timeout_millis >
+      # 0). This is what makes the up-to-11x burst reachable: when a fault idles
+      # the generator across intervals, unused capacity rolls forward, and the
+      # next active interval can burst to (MAX_ROLLED_INTERVALS + 1)x. The
+      # interval_grant_within_burst_envelope assertion guards the ceiling and the
+      # interval_burst_exceeded_* markers characterize how high it climbs.
+      throttle:
+        stable:
+          bytes_per_second: "10 MiB"
+          timeout_millis: 10000
+
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:8080"

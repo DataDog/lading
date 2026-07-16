@@ -1,0 +1,26 @@
+[package]
+name = "lading-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Purpose-built target/oracle for the lading Antithesis rig. Not shipped with lading."
+
+# Standalone crate, deliberately NOT a member of the lading workspace: it is
+# Antithesis-only scaffolding and must not inherit lading's deny-all lints. The
+# empty [workspace] table makes this its own workspace root so the parent
+# lading workspace does not claim it.
+[workspace]
+
+[[bin]]
+name = "lading-probe"
+path = "src/main.rs"
+
+[dependencies]
+# Antithesis SDK + coverage instrumentation, gated behind the `antithesis`
+# feature so the crate also builds as a plain binary for local iteration.
+antithesis_sdk = { version = "0.2", optional = true }
+antithesis-instrumentation = { version = "0.1", optional = true }
+
+[features]
+default = []
+antithesis = ["dep:antithesis_sdk", "dep:antithesis-instrumentation"]

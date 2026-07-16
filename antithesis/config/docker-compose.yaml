@@ -1,0 +1,98 @@
+name: lading
+
+# Antithesis rig for lading. Three containers:
+#   lading          — the SUT, coverage-instrumented
+#   lading-probe    — purpose-built network target/oracle
+#   workload-client — test driver; emits setup_complete, hosts test templates
+#
+# All images build from antithesis/Dockerfile with the repo root as context.
+# The capture volume is shared so the client can later read lading's output.
+
+services:
+  lading-probe:
+    container_name: lading-probe
+    hostname: lading-probe
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: lading-probe
+    image: lading-probe:latest
+    environment:
+      NO_COLOR: "1"
+      PROBE_TCP_PORT: "4000"
+      # Report port: connecting reads back per-port received-byte totals. The
+      # workload's baseline driver polls this for ground truth.
+      PROBE_REPORT_PORT: "4001"
+      # Dedicated ingest port for one-off driver runs, kept separate from the
+      # always-on generator on 4000 so a driver can measure only its own bytes.
+      PROBE_BASELINE_PORT: "4002"
+    healthcheck:
+      # The probe's TCP ingest port is open as soon as it binds.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/4000'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  lading:
+    container_name: lading
+    hostname: lading
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: lading
+    image: lading:latest
+    depends_on:
+      lading-probe:
+        condition: service_healthy
+    environment:
+      NO_COLOR: "1"
+      RUST_LOG: "info"
+    command:
+      # No-target mode: generators run without a lading-launched subprocess and
+      # drive load at lading-probe over the network (see deployment-topology.md,
+      # "Primary topology"). Variant B (binary-launch / local target) is a
+      # separate config the workload adds later.
+      - "--no-target"
+      - "--config-path"
+      - "/etc/lading/lading.yaml"
+      - "--capture-path"
+      - "/captures/lading.capture"
+      - "--capture-format"
+      - "jsonl"
+      - "--experiment-duration-infinite"
+    volumes:
+      - captures:/captures
+    healthcheck:
+      # lading's TCP blackhole binds 0.0.0.0:8080 at startup.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  workload-client:
+    container_name: workload-client
+    hostname: workload-client
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: workload-client
+    image: workload-client:latest
+    depends_on:
+      lading:
+        condition: service_healthy
+      lading-probe:
+        condition: service_healthy
+    environment:
+      NO_COLOR: "1"
+    volumes:
+      # Read the capture file lading writes (baseline oracle, added by workload).
+      - captures:/captures:ro
+
+volumes:
+  captures:

@@ -22,6 +22,12 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
+# Antithesis SDK + coverage instrumentation. Gated behind the `antithesis`
+# feature so ordinary lading builds are unaffected; the Antithesis Docker image
+# enables the feature and supplies the coverage rustflags.
+antithesis_sdk = { version = "0.2", optional = true }
+antithesis-instrumentation = { version = "0.1", optional = true }
+
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
@@ -115,6 +121,9 @@ tonic-prost-build = { workspace = true }
 [features]
 default = []
 logrotate_fs = ["fuser"]
+# Link the Antithesis SDK and coverage instrumentation into the SUT. Enabled by
+# the Antithesis Docker image; see antithesis/Dockerfile.
+antithesis = ["dep:antithesis_sdk", "dep:antithesis-instrumentation"]
 
 [lib]
 doctest = false
