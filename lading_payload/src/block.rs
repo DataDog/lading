@@ -611,6 +611,24 @@ where
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
 
+    // A serializer returns `EmptyBlock` when it cannot fit even one item into
+    // the requested chunk. If `max_block_size` is below the payload's minimum
+    // serializable size, *every* attempt fails, `min_block_size` decays to
+    // zero, the `bytes_remaining < min_block_size` break never fires, and this
+    // loop spins forever building nothing. This is a fuzz-found hang, for
+    // example a trace-agent v04 config whose single trace exceeds
+    // `max_block_size`. The serializer draws a random item each attempt, so a
+    // single rejection does not prove the config impossible. After a run of
+    // rejected random picks, force attempts at `max_block_size`, the largest
+    // permitted block and likeliest to fit. Give up only once a long run of
+    // forced attempts all reject too, meaning no item can ever fit and
+    // construction genuinely cannot proceed. A tight but constructable config
+    // keeps succeeding within the budget and never trips this. Only an
+    // impossible config exhausts it.
+    const REJECTS_BEFORE_MAX_PROBE: u32 = 16;
+    const MAX_PROBE_BUDGET: u32 = 1024;
+    let mut consecutive_rejections: u32 = 0;
+
     let start = Instant::now();
     let mut next_minute = 1;
 
@@ -623,13 +641,20 @@ where
     // objective and iterate over these, choosing random block sizes between the
     // discovered floor and the maximum user-provided block size.
     while bytes_remaining > 0 {
-        // A block_size is always in the range [min_block_size,
-        // max_block_size).
-        let block_size = rng.random_range(min_block_size..max_block_size);
+        // block_size is random in [min_block_size, max_block_size). After a
+        // long run of rejections, force `max_block_size`, the largest
+        // permitted block and likeliest to serialize.
+        let probing_max = consecutive_rejections >= REJECTS_BEFORE_MAX_PROBE;
+        let block_size = if probing_max {
+            max_block_size
+        } else {
+            rng.random_range(min_block_size..max_block_size)
+        };
 
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
                 success_block_sizes += 1;
+                consecutive_rejections = 0;
 
                 let total_bytes = block.total_bytes.get();
                 max_actual_block_size = max_actual_block_size.max(total_bytes);
@@ -640,15 +665,32 @@ where
             Err(SpinError::EmptyBlock) => {
                 debug!(?block_size, "rejected block");
                 rejected_block_sizes += 1;
-                // It might be that `block_size` could not be constructed
-                // because the size is too small or we just caught a bad
-                // break. We do know that there's some true minimum viable size
-                // out there for each serialization format and user
-                // configuration, but we can only guess at it. To avoid racing
-                // _too_ far off the minimum viable size we scale the block size
-                // by -75% -- an arbitrary figure -- and set that as the new
-                // minimum block size.
-                min_block_size = (f64::from(block_size) * 0.25) as u32;
+                consecutive_rejections += 1;
+                if consecutive_rejections >= REJECTS_BEFORE_MAX_PROBE + MAX_PROBE_BUDGET {
+                    // A long run of forced `max_block_size` attempts all
+                    // rejected. No item fits even the largest permitted block,
+                    // so max_block_size is below the payload's minimum
+                    // serializable size and construction cannot proceed.
+                    error!(
+                        ?max_block_size,
+                        rejected_block_sizes,
+                        "Unable to construct any block; max_block_size is below the payload's minimum serializable size"
+                    );
+                    return Err(SpinError::ConstructBlockCache(
+                        ConstructBlockCacheError::InsufficientBlockSizes,
+                    ));
+                }
+                if !probing_max {
+                    // It might be that `block_size` could not be constructed
+                    // because the size is too small or we just caught a bad
+                    // break. We do know that there's some true minimum viable
+                    // size out there for each serialization format and user
+                    // configuration, but we can only guess at it. To avoid
+                    // racing _too_ far off the minimum viable size we scale the
+                    // block size by -75% -- an arbitrary figure -- and set that
+                    // as the new minimum block size.
+                    min_block_size = (f64::from(block_size) * 0.25) as u32;
+                }
             }
             Err(e) => {
                 error!("Unexpected error during block construction: {e}");
@@ -766,5 +808,74 @@ where
             bytes,
             metadata,
         })
+    }
+}
+
+#[cfg(test)]
+mod hang_regression {
+    use super::Cache;
+    use crate::trace_agent;
+    use rand::{SeedableRng, rngs::SmallRng};
+    use std::num::NonZeroU32;
+
+    /// Regression: a tight but constructable config, `max_block_size` just above
+    /// the payload's minimum serializable size, must build a cache for every
+    /// seed. The first hang fix capped construction at a fixed run of consecutive
+    /// rejections, so an unlucky opening run of small random picks returned
+    /// `InsufficientBlockSizes` on a config that can build, empirically ~17% of
+    /// these seeds. Failing fast must key off "even the maximum block cannot be
+    /// built", not a raw rejection count.
+    #[test]
+    fn tight_but_constructable_config_never_fails() {
+        let payload = crate::Config::TraceAgent(trace_agent::Config::V04(
+            trace_agent::v04::Config::default(),
+        ));
+        // A couple of blocks is enough. The spurious failure struck on the
+        // opening run of rejections while the cache was still empty.
+        let total_bytes = NonZeroU32::new(30_000).expect("nonzero");
+        // 12288 is the smallest max that can serialize one v04 trace, so most
+        // random picks below it are rejected and the opening reject run is long.
+        let max_block_size = 12_288;
+        for seed in 0..64u64 {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let result = Cache::fixed_with_max_overhead(
+                &mut rng,
+                total_bytes,
+                max_block_size,
+                &payload,
+                total_bytes.get() as usize,
+            );
+            assert!(
+                result.is_ok(),
+                "seed {seed}: a constructable config must not fail construction"
+            );
+        }
+    }
+
+    /// Regression for a fuzz-found hang. When `max_block_size` is below the
+    /// payload's minimum serializable size, no trace fits a block. Previously
+    /// `to_bytes` emitted a one-byte empty msgpack array that `construct_block`
+    /// accepted, so cache construction "progressed" one byte at a time,
+    /// regenerating an expensive trace per byte, effectively forever for a large
+    /// `total_bytes`. Construction must instead fail fast.
+    #[test]
+    fn tiny_max_block_size_fails_fast_instead_of_hanging() {
+        let mut rng = SmallRng::seed_from_u64(0);
+        let payload = crate::Config::TraceAgent(trace_agent::Config::V04(
+            trace_agent::v04::Config::default(),
+        ));
+        let total_bytes = NonZeroU32::new(1_000_000).expect("nonzero");
+        // Eight bytes cannot hold even one serialized span.
+        let result = Cache::fixed_with_max_overhead(
+            &mut rng,
+            total_bytes,
+            8,
+            &payload,
+            total_bytes.get() as usize,
+        );
+        assert!(
+            result.is_err(),
+            "construction must fail fast when no trace fits a block, not hang"
+        );
     }
 }

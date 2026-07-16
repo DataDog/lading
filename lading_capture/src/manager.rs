@@ -25,7 +25,7 @@ use crate::{
     formats::{self, OutputFormat, jsonl, multi, parquet},
     metric::Metric,
 };
-use metrics::Key;
+use metrics::{Key, counter};
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
@@ -119,6 +119,11 @@ impl metrics::HistogramFn for CaptureHistogram {
             // Use try_send to avoid blocking. If the channel is full,
             // drop the sample to prevent backpressure on the caller.
             if let Err(e) = sender.snd.try_send(Metric::Histogram(histogram)) {
+                // Count drops so tail-biased sample loss is observable, not just
+                // logged. The label is a bounded reason, never the metric key,
+                // which is unbounded. A non-zero count means recorded latencies
+                // are missing samples, a measurement-integrity failure.
+                counter!("capture_histogram_samples_dropped", "reason" => "channel_full").increment(1);
                 warn!(
                     key = %self.key.name(),
                     error = %e,
@@ -126,6 +131,7 @@ impl metrics::HistogramFn for CaptureHistogram {
                 );
             }
         } else {
+            counter!("capture_histogram_samples_dropped", "reason" => "not_initialized").increment(1);
             warn!(
                 key = %self.key.name(),
                 "Histogram sample dropped - capture system not initialized"

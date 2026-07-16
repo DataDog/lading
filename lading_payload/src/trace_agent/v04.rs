@@ -488,9 +488,13 @@ impl crate::Serialize for V04 {
         }
 
         let mut traces: Vec<Vec<Span>> = vec![];
-        // Elide the cost of per-message serialization, batching in fixed size
-        // chunks.
-        let batch_size = 10;
+        // Grow the trace set until it serializes past `max_bytes`, then binary
+        // search below for the exact fit. The batch doubles each iteration.
+        // A fixed batch re-serialized the whole growing vector O(n) times for
+        // O(n^2) total work, so a large `max_bytes` filled with small traces
+        // could take minutes. Geometric growth bounds this to O(log n)
+        // iterations and O(n) total serialization.
+        let mut batch_size: usize = 1;
         for _ in 0..batch_size {
             let trace = self.generate(&mut rng)?;
             traces.push(trace.spans);
@@ -506,6 +510,7 @@ impl crate::Serialize for V04 {
                 let trace = self.generate(&mut rng)?;
                 traces.push(trace.spans);
             }
+            batch_size = batch_size.saturating_mul(2);
         }
 
         // Unlike a protobuf based format, or an in-place string we can't know
@@ -524,6 +529,16 @@ impl crate::Serialize for V04 {
             } else {
                 high = mid - 1;
             }
+        }
+
+        // No single trace fits in `max_bytes`. Emit nothing rather than an
+        // empty msgpack array, one byte, `0x90`. A one-byte "block" is not
+        // empty, so `construct_block` would accept it and block-cache
+        // construction would "progress" one byte at a time, regenerating an
+        // expensive trace per byte, an effective hang for a large cache. An
+        // empty write is treated as `EmptyBlock` and handled by the caller.
+        if low == 0 {
+            return Ok(());
         }
 
         let mut buf = Vec::with_capacity(max_bytes);

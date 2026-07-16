@@ -39,6 +39,8 @@ enum Error {
     Target(target::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Capture manager failed: {0}")]
+    CaptureManager(#[from] lading_capture::manager::Error),
     #[error("Lading generator returned an error: {0}")]
     LadingGenerator(#[from] lading::generator::Error),
     #[error("Lading blackhole returned an error: {0}")]
@@ -412,7 +414,9 @@ async fn inner_main(
     // We support two methods to exflitrate telemetry about the target from rig:
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
-    let mut capture_manager_handle: Option<tokio::task::JoinHandle<()>> = None;
+    let mut capture_manager_handle: Option<
+        tokio::task::JoinHandle<Result<(), lading_capture::manager::Error>>,
+    > = None;
     match config
         .telemetry
         .expect("telemetry should be validated in get_config")
@@ -465,9 +469,11 @@ async fn inner_main(
                     capture_manager.add_global_label(k, v);
                 }
                 let handle = tokio::task::spawn_blocking(move || {
-                    Handle::current()
-                        .block_on(capture_manager.start())
-                        .expect("failed to start capture manager");
+                    // Return the result. A capture failure then surfaces at
+                    // join as a non-zero exit instead of aborting the
+                    // process, which would skip the writers' flush/close on
+                    // the way down.
+                    Handle::current().block_on(capture_manager.start())
                 });
                 capture_manager_handle = Some(handle);
             }
@@ -490,9 +496,11 @@ async fn inner_main(
                     capture_manager.add_global_label(k, v);
                 }
                 let handle = tokio::task::spawn_blocking(move || {
-                    Handle::current()
-                        .block_on(capture_manager.start())
-                        .expect("failed to start capture manager");
+                    // Return the result. A capture failure then surfaces at
+                    // join as a non-zero exit instead of aborting the
+                    // process, which would skip the writers' flush/close on
+                    // the way down.
+                    Handle::current().block_on(capture_manager.start())
                 });
                 capture_manager_handle = Some(handle);
             }
@@ -515,9 +523,11 @@ async fn inner_main(
                     capture_manager.add_global_label(k, v);
                 }
                 let handle = tokio::task::spawn_blocking(move || {
-                    Handle::current()
-                        .block_on(capture_manager.start())
-                        .expect("failed to start capture manager");
+                    // Return the result. A capture failure then surfaces at
+                    // join as a non-zero exit instead of aborting the
+                    // process, which would skip the writers' flush/close on
+                    // the way down.
+                    Handle::current().block_on(capture_manager.start())
                 });
                 capture_manager_handle = Some(handle);
             }
@@ -643,7 +653,7 @@ async fn inner_main(
     let timer_watcher_wait = timer_watcher.recv();
     tokio::pin!(timer_watcher_wait);
     let mut interval = time::interval(Duration::from_millis(400));
-    let res = loop {
+    let mut res = loop {
         tokio::select! {
             _instant = interval.tick() => {
                 gauge!("lading.running").set(1.0);
@@ -703,9 +713,25 @@ async fn inner_main(
     shutdown_broadcast.signal_and_wait().await;
 
     // Await the capture manager task, if it exists, to ensure all data is
-    // flushed.
+    // flushed. A capture write failure is fatal, since the run's output is
+    // its product. A failed capture must surface as a non-zero exit, not a
+    // clean exit with a silently broken capture file. We no longer
+    // `.expect()` inside the task, which aborted the whole process and
+    // skipped the writers' flush on the way down. The error propagates here
+    // instead.
     if let Some(handle) = capture_manager_handle {
-        let _ = handle.await;
+        match handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                error!("capture manager failed: {e}");
+                if res.is_ok() {
+                    res = Err(Error::CaptureManager(e));
+                }
+            }
+            Err(join_err) => {
+                error!("capture manager task failed to join: {join_err}");
+            }
+        }
     }
 
     res
