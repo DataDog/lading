@@ -123,7 +123,7 @@ default = []
 logrotate_fs = ["fuser"]
 # Link the Antithesis SDK and coverage instrumentation into the SUT. Enabled by
 # the Antithesis Docker image; see antithesis/Dockerfile.
-antithesis = ["dep:antithesis_sdk", "dep:antithesis-instrumentation"]
+antithesis = ["dep:antithesis_sdk", "dep:antithesis-instrumentation", "lading-throttle/antithesis"]
 
 [lib]
 doctest = false

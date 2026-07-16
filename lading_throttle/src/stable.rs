@@ -28,6 +28,14 @@ pub struct Stable<C = RealClock> {
     valve: Valve,
     /// The clock that `Stable` will use.
     clock: C,
+    /// Tick-interval most recently observed by the Antithesis grant check.
+    /// Resets `granted_this_interval` on a roll.
+    #[cfg(feature = "antithesis")]
+    observed_interval: u64,
+    /// Capacity granted so far in `observed_interval`, checked against the
+    /// throttle's proven per-interval burst envelope.
+    #[cfg(feature = "antithesis")]
+    granted_this_interval: u64,
 }
 
 impl<C> Stable<C>
@@ -40,22 +48,104 @@ where
     }
 
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
-        loop {
-            let slop: u64 = self
-                .valve
-                .request(self.clock.ticks_elapsed(), request.get())?;
-            if slop == 0 {
-                break;
+        // A request larger than one interval's capacity is not an error. Drain
+        // it across intervals in chunks of at most `maximum_capacity`, so an
+        // oversized block -- for example one larger than the per-worker capacity
+        // after `divide` -- is delivered at the configured rate instead of being
+        // rejected and discarded. Each chunk stays inside the Valve's proven
+        // per-interval envelope, so the Kani bounds are unaffected.
+        let max = self.valve.maximum_capacity;
+        let mut remaining = request.get();
+        while remaining > 0 {
+            let chunk = remaining.min(max);
+            loop {
+                let ticks_elapsed = self.clock.ticks_elapsed();
+                let slop: u64 = self.valve.request(ticks_elapsed, chunk)?;
+                if slop == 0 {
+                    // The chunk was granted this iteration. Check, in the real
+                    // async path under whatever clock Antithesis supplies, that
+                    // the grant stays inside the proven per-interval envelope.
+                    #[cfg(feature = "antithesis")]
+                    self.assert_grant_within_envelope(ticks_elapsed, chunk);
+                    break;
+                }
+                self.clock.wait(slop).await;
             }
-            self.clock.wait(slop).await;
+            remaining -= chunk;
         }
         Ok(())
+    }
+
+    /// Antithesis property `aggregate-rate-not-exceeded`, SUT-side, plus the
+    /// `cross-interval-burst-bounded` characterization.
+    ///
+    /// Kani proves the sync `Valve` never grants more than
+    /// `(MAX_ROLLED_INTERVALS + 1) * maximum_capacity` per interval, and exactly
+    /// `maximum_capacity` when `timeout_ticks == 0`. Those proofs assume a
+    /// well-behaved tick source. The `RealClock` -> ticks mapping and this
+    /// async loop are unverified end to end. This runs the same bound at
+    /// runtime, under whatever clock, possibly faulted, feeds `ticks_elapsed`,
+    /// so an over-grant that only the real path can produce is caught
+    /// in-process rather than inferred from probe bytes.
+    #[cfg(feature = "antithesis")]
+    fn assert_grant_within_envelope(&mut self, ticks_elapsed: u64, granted: u32) {
+        use antithesis_sdk::prelude::*;
+        use serde_json::json;
+
+        let interval = tick_to_interval(ticks_elapsed);
+        if interval != self.observed_interval {
+            self.observed_interval = interval;
+            self.granted_this_interval = 0;
+        }
+        self.granted_this_interval += u64::from(granted);
+
+        let maximum_capacity = u64::from(self.valve.maximum_capacity);
+        // At the default `timeout_ticks == 0` no capacity rolls over, so the
+        // envelope is exactly the configured rate. Any interval that delivers
+        // more than `maximum_capacity` is over-delivery. With a timeout, rolled
+        // capacity legitimately allows up to the Kani-proven 11x.
+        let envelope = if self.valve.timeout_ticks == 0 {
+            maximum_capacity
+        } else {
+            maximum_capacity.saturating_mul(u64::from(MAX_ROLLED_INTERVALS) + 1)
+        };
+
+        let details = json!({
+            "granted_this_interval": self.granted_this_interval,
+            "envelope": envelope,
+            "maximum_capacity": maximum_capacity,
+            "timeout_ticks": self.valve.timeout_ticks,
+            "interval": interval,
+        });
+
+        assert_always!(
+            self.granted_this_interval <= envelope,
+            "lading_throttle.stable.interval_grant_within_burst_envelope",
+            &details
+        );
+
+        // Characterize how large the burst actually gets, the cross-interval-
+        // burst-bounded property. Distinct inline literals so triage shows the
+        // factor reached.
+        if self.granted_this_interval > maximum_capacity.saturating_mul(2) {
+            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_2x", &details);
+        }
+        if self.granted_this_interval > maximum_capacity.saturating_mul(5) {
+            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_5x", &details);
+        }
+        if self.granted_this_interval > maximum_capacity.saturating_mul(10) {
+            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_10x", &details);
+        }
     }
 
     pub(crate) fn with_clock(maximum_capacity: NonZeroU32, timeout_micros: u64, clock: C) -> Self {
         Self {
             valve: Valve::new_with_timeout(maximum_capacity, timeout_micros),
             clock,
+            #[cfg(feature = "antithesis")]
+            observed_interval: 0,
+            #[cfg(feature = "antithesis")]
+            granted_this_interval: 0,
         }
     }
 
@@ -312,6 +402,213 @@ impl Valve {
 #[inline]
 fn tick_to_interval(ticks: u64) -> u64 {
     ticks / INTERVAL_TICKS
+}
+
+#[cfg(test)]
+mod divide_stall {
+    //! Wildcard #1: `divide` shrinks per-worker capacity to `R/N` but not the
+    //! block a worker draws. The raw `Valve` grants at most `maximum_capacity`
+    //! in one interval, so a block sized `R/N < block <= R` fits a single
+    //! connection but not a divided worker. `Stable::wait_for` drains such a
+    //! request across intervals at the per-worker rate, so the worker delivers
+    //! the block instead of discarding it.
+    use super::{Error, Stable, Valve};
+    use crate::Clock;
+    use async_trait::async_trait;
+    use proptest::prelude::*;
+    use std::num::NonZeroU32;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A clock whose `wait` advances a tick counter and returns immediately, so
+    /// `wait_for` can be driven to completion without real time or a runtime.
+    struct MockClock {
+        now: AtomicU64,
+    }
+
+    #[async_trait]
+    impl Clock for MockClock {
+        fn ticks_elapsed(&self) -> u64 {
+            self.now.load(Ordering::Relaxed)
+        }
+        async fn wait(&self, ticks: u64) {
+            self.now.fetch_add(ticks, Ordering::Relaxed);
+        }
+    }
+
+    /// Poll a future to completion on the current thread. `MockClock::wait`
+    /// never suspends, so `wait_for` makes full progress without a runtime.
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        use std::pin::pin;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        const VTABLE: RawWakerVTable =
+            RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+        const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
+        // SAFETY: the waker ignores its data pointer, so a null pointer is fine.
+        let waker = unsafe { Waker::from_raw(RAW) };
+        let mut cx = Context::from_waker(&waker);
+        let mut future = pin!(future);
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+                return value;
+            }
+        }
+    }
+
+    proptest! {
+        /// The raw per-interval fact behind the wildcard: a request above
+        /// `maximum_capacity` fits a single connection at capacity `R` but the
+        /// divided worker's `Valve` at capacity `R/N` rejects it in one interval
+        /// with `Capacity`. `wait_for` is what turns that per-interval limit
+        /// into a multi-interval drain rather than a discard.
+        #[test]
+        fn raw_valve_rejects_request_above_capacity_in_one_interval(
+            rate in 2u32..=1_000_000u32,
+            divisor in 2u32..=32u32,
+        ) {
+            prop_assume!(rate / divisor >= 1);
+            let per_worker = rate / divisor; // what divide() gives each worker
+            let block = per_worker + 1; // fits a single connection, not a worker
+            prop_assume!(block <= rate);
+
+            let mut single = Valve::new_with_timeout(NonZeroU32::new(rate).unwrap(), 0);
+            prop_assert!(
+                single.request(0, block).is_ok(),
+                "a single connection (capacity {rate}) must accept a {block}-byte block"
+            );
+
+            let mut worker = Valve::new_with_timeout(NonZeroU32::new(per_worker).unwrap(), 0);
+            prop_assert!(
+                matches!(worker.request(0, block), Err(Error::Capacity { .. })),
+                "a divided worker's Valve (capacity {per_worker}) rejects the {block}-byte block in one interval"
+            );
+        }
+    }
+
+    /// The fix: `wait_for` delivers a request larger than `maximum_capacity` by
+    /// draining `maximum_capacity` per interval across as many intervals as it
+    /// takes, instead of returning `Capacity` and letting the generator discard
+    /// the block. Rate is preserved: the block simply spans multiple intervals.
+    #[test]
+    fn wait_for_drains_oversized_request_across_intervals() {
+        let max = 100u32;
+        let clock = MockClock {
+            now: AtomicU64::new(0),
+        };
+        let mut stable = Stable::with_clock(NonZeroU32::new(max).expect("nonzero"), 0, clock);
+        // 3 full intervals plus a remainder: four chunks, three interval rolls.
+        let request = NonZeroU32::new(max * 3 + 7).expect("nonzero");
+        block_on(stable.wait_for(request)).expect("oversized request must drain, not error");
+        let elapsed = stable.clock.ticks_elapsed();
+        assert!(
+            elapsed >= 3 * super::INTERVAL_TICKS,
+            "draining {request} at capacity {max} must span at least 3 interval rolls, saw {elapsed} ticks"
+        );
+    }
+}
+
+#[cfg(test)]
+mod burst_measurement {
+    //! Confirm/deny the "up to 11x" burst by driving the real `Valve` over a
+    //! range of rates and idle depths. These call the same `request` path lading
+    //! uses and assert the burst relationship as a property, not a fixture.
+    use super::{INTERVAL_TICKS, MAX_ROLLED_INTERVALS, Valve};
+    use proptest::prelude::*;
+    use std::num::NonZeroU32;
+
+    /// Grant `max_cap`-sized requests within one interval until refused, and
+    /// return total capacity granted. The loop is bounded by the proven
+    /// envelope, so it cannot spin.
+    fn burst_capacity(valve: &mut Valve, ticks: u64, max_cap: u32) -> u64 {
+        let mut granted = 0u64;
+        for _ in 0..=(u64::from(MAX_ROLLED_INTERVALS) + 1) {
+            match valve.request(ticks, max_cap) {
+                Ok(0) => granted += u64::from(max_cap),
+                _ => break,
+            }
+        }
+        granted
+    }
+
+    proptest! {
+        /// With no rollover, the default `timeout == 0`, a single interval
+        /// grants exactly the configured rate for any rate. No burst is possible.
+        #[test]
+        fn timeout_zero_grants_exactly_configured(max_cap in 1u32..=100_000_000) {
+            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).unwrap(), 0);
+            let granted = burst_capacity(&mut valve, 5, max_cap);
+            prop_assert_eq!(granted, u64::from(max_cap));
+        }
+
+        /// With rolled capacity, idling `idle` intervals lets the next interval
+        /// burst to exactly `(idle + 1)x` the configured rate, never past the
+        /// proven `(MAX_ROLLED_INTERVALS + 1)x` ceiling. This confirms the 11x
+        /// figure is reached, not merely bounded.
+        #[test]
+        fn idle_then_burst_scales_with_rollover(
+            max_cap in 1u32..=100_000_000,
+            idle in 1u64..=u64::from(MAX_ROLLED_INTERVALS),
+        ) {
+            let timeout = INTERVAL_TICKS * u64::from(MAX_ROLLED_INTERVALS);
+            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).unwrap(), timeout);
+            let land = INTERVAL_TICKS * idle;
+            let _ = valve.request(land, 0); // roll forward, banking rolled capacity
+            let granted = burst_capacity(&mut valve, land + 1, max_cap);
+            prop_assert_eq!(granted, u64::from(max_cap) * (idle + 1));
+            prop_assert!(granted <= u64::from(max_cap) * (u64::from(MAX_ROLLED_INTERVALS) + 1));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "antithesis"))]
+mod antithesis_tests {
+    use super::{INTERVAL_TICKS, Stable};
+    use crate::RealClock;
+    use std::num::NonZeroU32;
+
+    // `assert_grant_within_envelope` takes ticks as an argument and never
+    // touches the clock, so a `RealClock` is fine here.
+    fn stable(max_cap: u32, timeout_ticks: u64) -> Stable<RealClock> {
+        Stable::with_clock(
+            NonZeroU32::new(max_cap).unwrap(),
+            timeout_ticks,
+            RealClock::default(),
+        )
+    }
+
+    #[test]
+    fn grant_accounting_accumulates_within_interval() {
+        let mut s = stable(1000, 0);
+        s.assert_grant_within_envelope(0, 400);
+        assert_eq!(s.granted_this_interval, 400);
+        s.assert_grant_within_envelope(10, 500);
+        assert_eq!(s.granted_this_interval, 900);
+        // At timeout == 0 the envelope is exactly maximum_capacity.
+        assert!(s.granted_this_interval <= 1000);
+    }
+
+    #[test]
+    fn grant_accounting_resets_on_interval_roll() {
+        let mut s = stable(1000, 0);
+        s.assert_grant_within_envelope(0, 900);
+        assert_eq!(s.granted_this_interval, 900);
+        // Crossing into the next interval resets the per-interval counter.
+        s.assert_grant_within_envelope(INTERVAL_TICKS, 300);
+        assert_eq!(s.observed_interval, 1);
+        assert_eq!(s.granted_this_interval, 300);
+    }
+
+    #[test]
+    fn burst_envelope_widens_with_timeout() {
+        // With a timeout, rolled capacity legitimately allows up to 11x, so the
+        // accounting accumulates past maximum_capacity within one interval
+        // without exceeding the envelope.
+        let mut s = stable(1000, INTERVAL_TICKS * 10);
+        for _ in 0..8 {
+            s.assert_grant_within_envelope(5, 1000);
+        }
+        assert_eq!(s.granted_this_interval, 8000);
+        assert!(s.granted_this_interval <= 1000 * 11);
+    }
 }
 
 #[cfg(kani)]

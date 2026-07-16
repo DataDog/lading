@@ -152,6 +152,35 @@ impl Throttle<RealClock> {
     }
 }
 
+/// Antithesis property `linear-ramp-slope-preserved`. Splitting a `Linear`
+/// throttle across `divisor` workers must preserve the aggregate ramp, so the
+/// aggregate rate reaches maximum in the same time regardless of worker count.
+///
+/// The `divisor` workers each grow at `per_worker_rate`, so the aggregate slope
+/// is their sum. `divide` divides the rate, so that sum equals the original
+/// single-connection rate up to the integer-division remainder of at most
+/// `divisor - 1`, the same remainder the capacities lose. The assertion holds
+/// when the aggregate slope does not exceed the original and falls short by less
+/// than `divisor`. Compiled only under the `antithesis` feature.
+#[cfg(feature = "antithesis")]
+fn assert_linear_ramp_slope_preserved(original_rate: u32, per_worker_rate: u32, divisor: u32) {
+    use antithesis_sdk::prelude::*;
+    use serde_json::json;
+
+    let aggregate_slope = u64::from(per_worker_rate).saturating_mul(u64::from(divisor));
+    let original = u64::from(original_rate);
+    assert_always!(
+        aggregate_slope <= original && original - aggregate_slope < u64::from(divisor),
+        "lading_throttle.divide.linear_ramp_slope_preserved",
+        &json!({
+            "original_rate_of_change": original_rate,
+            "per_worker_rate_of_change": per_worker_rate,
+            "aggregate_rate_of_change": aggregate_slope,
+            "divisor": divisor,
+        })
+    );
+}
+
 impl Throttle<RealClock> {
     /// Create a new throttle with capacity divided by the divisor
     ///
@@ -184,12 +213,18 @@ impl Throttle<RealClock> {
                 let divided_initial = initial / divisor;
                 let divided_max = max_capacity / divisor;
                 let divided_max = NonZeroU32::new(divided_max).ok_or(Error::DivisionByZero)?;
-                // Rate of change should be preserved - each worker grows at the same rate
-                // This way all workers reach their max capacity at the same time as the original
+                // Divide the ramp rate too, so N workers sum to the original
+                // aggregate slope and reach maximum in the intended time. Integer
+                // division loses up to `divisor - 1` per interval, the same
+                // remainder the capacities lose. A rate below `divisor` floors to
+                // zero, so a ramp too fine to split becomes flat.
+                let per_worker_rate = rate / divisor;
+                #[cfg(feature = "antithesis")]
+                assert_linear_ramp_slope_preserved(rate, per_worker_rate, divisor);
                 Ok(Throttle::new_with_config(Config::Linear {
                     initial_capacity: divided_initial,
                     maximum_capacity: divided_max,
-                    rate_of_change: rate,
+                    rate_of_change: per_worker_rate,
                 }))
             }
         }
@@ -350,15 +385,47 @@ mod tests {
 
             let divided_throttle = divided.unwrap();
 
-            // Verify it's still Linear with divided capacities but preserved rate
+            // Verify it's still Linear with capacities and rate divided
             match divided_throttle {
                 Throttle::Linear(inner) => {
                     assert_eq!(inner.initial_capacity(), initial / divisor);
                     assert_eq!(inner.maximum_capacity(), max_capacity.get() / divisor);
-                    assert_eq!(inner.rate_of_change(), rate); // Rate preserved, not divided
+                    assert_eq!(inner.rate_of_change(), rate / divisor);
                 }
                 _ => panic!("Expected Linear throttle after division"),
             }
+        }
+
+        /// `divide` splits a Linear throttle's `rate_of_change` along with its
+        /// capacities, so `N` workers sum to the original aggregate slope and
+        /// reach maximum in the intended time. The sum equals the original rate
+        /// up to the integer-division remainder of at most `divisor - 1`.
+        #[test]
+        fn divide_linear_ramp_is_preserved_across_workers(
+            max_capacity in 2u32..=1_000_000u32,
+            rate in 1u32..=100_000u32,
+            divisor in 2u32..=32u32
+        ) {
+            prop_assume!(max_capacity / divisor >= 1);
+            let single = Throttle::<RealClock>::new_with_config(Config::Linear {
+                initial_capacity: 0,
+                maximum_capacity: NonZeroU32::new(max_capacity).expect("test capacity"),
+                rate_of_change: rate,
+            });
+            let divided = single
+                .divide(NonZeroU32::new(divisor).expect("test divisor"))
+                .expect("divide should succeed");
+            let Throttle::Linear(inner) = divided else {
+                panic!("expected Linear throttle after division");
+            };
+            let per_worker_rate = u64::from(inner.rate_of_change());
+            let aggregate_slope = per_worker_rate * u64::from(divisor);
+            // The per-worker rate is `rate / divisor`, so the aggregate slope
+            // equals the single-connection rate minus only the integer-division
+            // remainder, never the `divisor`-times overshoot of the old bug.
+            prop_assert_eq!(per_worker_rate, u64::from(rate) / u64::from(divisor));
+            prop_assert!(aggregate_slope <= u64::from(rate));
+            prop_assert!(u64::from(rate) - aggregate_slope < u64::from(divisor));
         }
 
         #[test]
@@ -403,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn divide_linear_preserves_rate_divides_capacity() {
+    fn divide_linear_divides_rate_and_capacity() {
         let initial = 100;
         let rate = 10;
         let throttle = Throttle::<RealClock>::new_with_config(Config::Linear {
@@ -417,12 +484,12 @@ mod tests {
             .divide(NonZeroU32::new(divisor).expect("divisor"))
             .expect("divide");
 
-        // Verify the divided throttle has divided capacities but preserved rate
+        // Verify the divided throttle has divided capacities and rate
         match divided {
             Throttle::Linear(inner) => {
                 assert_eq!(inner.initial_capacity(), initial / divisor);
                 assert_eq!(inner.maximum_capacity(), 1000 / divisor);
-                assert_eq!(inner.rate_of_change(), rate); // Rate is preserved
+                assert_eq!(inner.rate_of_change(), rate / divisor);
             }
             _ => panic!("Expected Linear throttle after division"),
         }

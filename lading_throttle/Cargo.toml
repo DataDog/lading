@@ -18,8 +18,22 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
+# Antithesis SDK. Gated behind the `antithesis` feature so ordinary lading
+# builds compile the throttle exactly as before; only the Antithesis Docker
+# image enables it (see antithesis/Dockerfile). lading's own `antithesis`
+# feature turns this on transitively. This is the sanctioned SUT-side
+# instrumentation for timing-sensitive throttle invariants that oracle-side
+# byte-counting cannot catch in-process under clock faults.
+antithesis_sdk = { version = "0.2", optional = true }
+serde_json = { workspace = true, optional = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
+
+[features]
+# Compile the Antithesis property assertions in the stable throttle. A no-op for
+# every ordinary build and absent under `cfg(kani)`, so the proofs are unchanged.
+antithesis = ["dep:antithesis_sdk", "dep:serde_json"]
 
 [lib]
 doctest = false
