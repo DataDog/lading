@@ -9,6 +9,8 @@
 //! `response_bytes`: Total bytes received
 //! `bytes_per_second`: Configured rate to send data
 //! `data_points_transmitted`: Total data points transmitted (for OpenTelemetry metrics)
+//! `blocks_discarded`: Blocks the throttle rejected, such as one larger than
+//!   the per-worker capacity after `divide`
 //!
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
@@ -306,7 +308,17 @@ impl Grpc {
         loop {
             tokio::select! {
                 result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
-                    let _ = result;
+                    if let Err(err) = result {
+                        // Honor the throttle. The old `let _ = result` sent the
+                        // block regardless, so a block the throttle rejected,
+                        // such as one larger than the per-worker capacity after
+                        // `divide`, went out anyway, neither discarded nor
+                        // rate-limited. Discard it observably instead, like tcp/udp.
+                        debug!("Discarding block due to throttle error: {err}");
+                        counter!("blocks_discarded", &self.metric_labels).increment(1);
+                        self.block_cache.advance(&mut handle);
+                        continue;
+                    }
                     let block = self.block_cache.advance(&mut handle);
                     let block_length = block.bytes.len();
                     counter!("requests_sent", &self.metric_labels).increment(1);

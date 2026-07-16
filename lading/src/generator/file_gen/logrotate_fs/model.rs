@@ -610,12 +610,15 @@ impl State {
 
     /// Advance time in the model.
     ///
-    /// # Panics
-    ///
-    /// Will panic if passed `now` is less than recorded `now`. Time can only
-    /// advance.
+    /// FUSE handlers sample the current tick before taking the model lock, so
+    /// reordered operations can call this with a `now` below the model's
+    /// current tick. Model time only advances, so a stale tick is a no-op,
+    /// not an error: asserting here aborts the whole generator under
+    /// `panic="abort"` on a benign scheduling race, per ADR-004.
     pub(crate) fn advance_time(&mut self, now: Tick) {
-        assert!(now >= self.now);
+        if now <= self.now {
+            return;
+        }
         // We have to simulate all ticks that happen between self.now and now,
         // else an observer will detect a sudden shift in the model. This is
         // still possible by careful observation of the metadata for files
@@ -1115,6 +1118,41 @@ mod test {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::StdRng, seq::IteratorRandom};
+
+    /// Reordered FUSE handlers can present `advance_time` a stale tick. It
+    /// must stay a no-op, never a panic. See `advance_time`'s doc comment
+    /// for why.
+    #[test]
+    fn advance_time_ignores_stale_tick_without_panicking() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let block_cache = block::Cache::fixed_with_max_overhead(
+            &mut rng,
+            NonZeroU32::new(1_000_000).expect("nonzero"),
+            10_000,
+            &lading_payload::Config::Ascii,
+            10_000,
+        )
+        .expect("block construction");
+        let mut state = State::new(
+            &mut rng,
+            0,
+            4,
+            1_000_000,
+            block_cache,
+            3,
+            4,
+            LoadProfile::Constant(100),
+        );
+
+        state.advance_time(100);
+        let now_after = state.now;
+        // A reordered handler passing an earlier tick must not move `now` or panic.
+        state.advance_time(50);
+        assert_eq!(
+            state.now, now_after,
+            "a stale tick must be ignored, not advance or panic the model"
+        );
+    }
 
     /// Our testing strategy is to drive the State as if in a filesystem. The
     /// crux is the Operation enum that defines which parts of the State are

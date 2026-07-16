@@ -6,6 +6,8 @@
 //! `packets_sent`: Packets sent successfully
 //! `request_failure`: Number of failed writes; each occurrence causes a reconnect
 //! `connection_failure`: Number of connection failures
+//! `blocks_discarded`: Blocks the throttle rejected, such as one larger than
+//!   the per-worker capacity after `divide`
 //! `bytes_per_second`: Configured rate to send data
 //!
 //! Additional metrics may be emitted by this generator's [throttle].
@@ -242,7 +244,12 @@ impl TcpWorker {
                         );
 
                         let mut error_labels = self.metric_labels.clone();
-                        error_labels.push(("error".to_string(), source.to_string()));
+                        // Label by the error *kind*, a bounded enum, not the full
+                        // message. Raw messages embed variable detail, such as
+                        // addresses or errno text, and each distinct message
+                        // mints a new capture accumulator key. Under a flapping
+                        // target that grows memory without bound, per ADR-005.
+                        error_labels.push(("error".to_string(), format!("{:?}", source.kind())));
                         counter!("connection_failure", &error_labels).increment(1);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
@@ -264,7 +271,9 @@ impl TcpWorker {
                                     trace!("write failed: {}", err);
 
                                     let mut error_labels = self.metric_labels.clone();
-                                    error_labels.push(("error".to_string(), err.to_string()));
+                                    // Bounded error kind, not the raw message. See
+                                    // the connect path above for why.
+                                    error_labels.push(("error".to_string(), format!("{:?}", err.kind())));
                                     counter!("request_failure", &error_labels).increment(1);
                                     current_connection = None;
                                 }
@@ -272,6 +281,13 @@ impl TcpWorker {
                         }
                         Err(err) => {
                             debug!("Discarding block due to throttle error: {err}");
+                            // Surface discards as a counter. Without it, a config
+                            // that discards every block, such as one larger than
+                            // the per-worker throttle capacity after `divide`,
+                            // delivers nothing yet looks identical to a healthy
+                            // run with flat metrics: the CHANGELOG 0.31.2
+                            // busy-discard livelock class.
+                            counter!("blocks_discarded", &self.metric_labels).increment(1);
                             self.block_cache.advance(&mut handle);
                         }
                     }

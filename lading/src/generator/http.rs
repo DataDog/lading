@@ -20,11 +20,10 @@ use std::{
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use metrics::counter;
-use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use lading_payload::block;
 
@@ -34,7 +33,6 @@ use crate::generator::common::{
     create_throttle,
 };
 
-static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
 /// The HTTP method to be used in requests
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -127,6 +125,11 @@ pub struct Http {
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
+    /// Per-generator connection limit. Each `Http` instance owns its own
+    /// semaphore. A process-wide `static` one panicked on a second
+    /// `OnceCell::set` when a config declared more than one HTTP generator,
+    /// and, worse, forced them to share a single limit.
+    semaphore: Arc<Semaphore>,
 }
 
 impl Http {
@@ -183,10 +186,10 @@ impl Http {
                 let concurrency =
                     ConcurrencyStrategy::new(NonZeroU16::new(config.parallel_connections), false);
 
-                // Set the global semaphore based on the concurrency strategy
-                CONNECTION_SEMAPHORE
-                    .set(Semaphore::new(concurrency.connection_count() as usize))
-                    .expect("failed to set semaphore");
+                // Per-generator, not process-wide. See the `semaphore` field's
+                // doc comment.
+                let semaphore =
+                    Arc::new(Semaphore::new(concurrency.connection_count() as usize));
 
                 Ok(Self {
                     concurrency,
@@ -197,6 +200,7 @@ impl Http {
                     throttle,
                     metric_labels: labels,
                     shutdown,
+                    semaphore,
                 })
             }
         }
@@ -221,6 +225,7 @@ impl Http {
         let uri = self.uri;
         let labels = self.metric_labels;
 
+        let semaphore = Arc::clone(&self.semaphore);
         let mut handle = self.block_cache.handle();
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
@@ -252,7 +257,17 @@ impl Http {
                             let data_points = metadata.data_points;
 
                             let uri_clone = uri.clone();
-                            let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
+                            // Owned permit so it can move into the spawned task.
+                            // The semaphore never closes while the generator
+                            // runs, so `acquire_owned` errors only at shutdown.
+                            // Stop cleanly instead of panicking then.
+                            let permit = match Arc::clone(&semaphore).acquire_owned().await {
+                                Ok(permit) => permit,
+                                Err(_) => {
+                                    warn!("connection semaphore closed; stopping HTTP worker");
+                                    return Ok(());
+                                }
+                            };
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);
                                 match client.request(request).await {
@@ -291,9 +306,13 @@ impl Http {
                 },
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
-                    // Acquire all available connections, meaning that we have
-                    // no outstanding tasks in flight.
-                    let _semaphore = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire_many(u32::from(self.concurrency.connection_count())).await.expect("Connection Semaphore has already closed");
+                    // Drain: acquire every permit so no request tasks remain in
+                    // flight before returning. A closed semaphore only means
+                    // there is nothing left to wait for, so ignore the error
+                    // instead of panicking.
+                    let _permit = semaphore
+                        .acquire_many(u32::from(self.concurrency.connection_count()))
+                        .await;
                     return Ok(());
                 },
             }

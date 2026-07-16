@@ -6,6 +6,8 @@
 //! `packets_sent`: Packets written successfully
 //! `request_failure`: Number of failed writes; each occurrence causes a socket re-bind
 //! `connection_failure`: Number of socket bind failures
+//! `blocks_discarded`: Blocks the throttle rejected, such as one larger than
+//!   the per-worker capacity after `divide`
 //! `bytes_per_second`: Configured rate to send data
 //!
 //! Additional metrics may be emitted by this generator's [throttle].
@@ -254,7 +256,10 @@ impl UdpWorker {
                             trace!("Failed to bind UDP socket: {source}");
 
                             let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), source.to_string()));
+                            // Bounded error kind, not the raw message. Distinct
+                            // messages each mint a capture accumulator key and
+                            // grow memory without bound under churn, per ADR-005.
+                            error_labels.push(("error".to_string(), format!("{:?}", source.kind())));
                             counter!("connection_failure", &error_labels).increment(1);
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
@@ -275,7 +280,8 @@ impl UdpWorker {
                                     debug!("Failed to send UDP packet to {addr}: {source}", addr = self.addr);
 
                                     let mut error_labels = self.metric_labels.clone();
-                                    error_labels.push(("error".to_string(), source.to_string()));
+                                    // Bounded error kind, not the raw message. See the bind path above.
+                                    error_labels.push(("error".to_string(), format!("{:?}", source.kind())));
                                     counter!("request_failure", &error_labels).increment(1);
                                     connection = None;
                                 }
@@ -283,6 +289,10 @@ impl UdpWorker {
                         }
                         Err(err) => {
                             debug!("Discarding block due to throttle error: {err}");
+                            // Surface discards so a config that drops every block
+                            // is not indistinguishable from a healthy run. See
+                            // the tcp generator for the full rationale.
+                            counter!("blocks_discarded", &self.metric_labels).increment(1);
                             self.block_cache.advance(&mut handle);
                         }
                     }
