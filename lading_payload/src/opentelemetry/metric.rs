@@ -1646,6 +1646,46 @@ mod test {
         }
     }
 
+    fn prop_assert_histogram_count_limits(point: &HistogramDataPoint) -> Result<(), TestCaseError> {
+        prop_assert_eq!(
+            point.count,
+            checked_count_sum(point.bucket_counts.iter().copied())
+        );
+        prop_assert!(point.count <= MAX_HISTOGRAM_COUNT);
+        for count in &point.bucket_counts {
+            prop_assert!(*count <= MAX_BUCKET_COUNT);
+        }
+        Ok(())
+    }
+
+    fn prop_assert_exp_histogram_count_limits(
+        point: &ExponentialHistogramDataPoint,
+    ) -> Result<(), TestCaseError> {
+        let positive_count = point.positive.as_ref().map_or(0, |buckets| {
+            checked_count_sum(buckets.bucket_counts.iter().copied())
+        });
+        let negative_count = point.negative.as_ref().map_or(0, |buckets| {
+            checked_count_sum(buckets.bucket_counts.iter().copied())
+        });
+        prop_assert_eq!(
+            point.count,
+            checked_count_sum([point.zero_count, positive_count, negative_count])
+        );
+        prop_assert!(point.count <= MAX_HISTOGRAM_COUNT);
+        prop_assert!(point.zero_count <= MAX_BUCKET_COUNT);
+        if let Some(positive) = &point.positive {
+            for count in &positive.bucket_counts {
+                prop_assert!(*count <= MAX_BUCKET_COUNT);
+            }
+        }
+        if let Some(negative) = &point.negative {
+            for count in &negative.bucket_counts {
+                prop_assert!(*count <= MAX_BUCKET_COUNT);
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn cumulative_histograms_preserve_state_across_generations() -> Result<(), crate::Error> {
         let configs = [
@@ -1722,6 +1762,77 @@ mod test {
         }
 
         Ok(())
+    }
+
+    // Property: cumulative histogram count limits hold across repeated
+    // generation.
+    proptest! {
+        #[test]
+        fn cumulative_histogram_counts_stay_within_limits(
+            seed: u64,
+            steps in 1..128_u8,
+        ) {
+            let configs = [
+                super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 1,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 1,
+                    summary: 0,
+                },
+            ];
+
+            for metric_weights in configs {
+                let config = Config {
+                    contexts: Contexts {
+                        total_contexts: ConfRange::Constant(1),
+                        attributes_per_resource: ConfRange::Constant(1),
+                        scopes_per_resource: ConfRange::Constant(1),
+                        attributes_per_scope: ConfRange::Constant(0),
+                        metrics_per_scope: ConfRange::Constant(1),
+                        attributes_per_metric: ConfRange::Constant(0),
+                    },
+                    metric_weights,
+                };
+                let mut rng = SmallRng::seed_from_u64(seed);
+                let mut otel_metrics = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)?;
+
+                for _ in 0..steps {
+                    let mut budget = 1_000_000;
+                    let resource_metric = otel_metrics.generate(&mut rng, &mut budget)?;
+                    for scope_metric in &resource_metric.scope_metrics {
+                        for metric in &scope_metric.metrics {
+                            match &metric.data {
+                                Some(Data::Histogram(histogram)) => {
+                                    for point in &histogram.data_points {
+                                        prop_assert_histogram_count_limits(point)?;
+                                    }
+                                }
+                                Some(Data::ExponentialHistogram(histogram)) => {
+                                    for point in &histogram.data_points {
+                                        prop_assert_exp_histogram_count_limits(point)?;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Property: tick tally in OpentelemetryMetrics increase with calls to
