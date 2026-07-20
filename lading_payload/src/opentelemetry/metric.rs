@@ -73,14 +73,33 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
+fn increment_bounded_count(count: &mut u64, increment: u64, limit: u64) {
+    *count = count.saturating_add(increment).min(limit);
+}
+
+fn checked_count_sum<I>(counts: I, limit: u64) -> u64
+where
+    I: IntoIterator<Item = u64>,
+{
+    let mut total = 0_u64;
+    for count in counts {
+        let Some(next) = total.checked_add(count) else {
+            return limit;
+        };
+        total = next;
+    }
+    total.min(limit)
+}
+
 fn increment_exp_bucket_counts(
     buckets: &mut exponential_histogram_data_point::Buckets,
     increment: u64,
+    limit: u64,
 ) -> u64 {
     for count in &mut buckets.bucket_counts {
-        *count = count.saturating_add(increment);
+        increment_bounded_count(count, increment, limit);
     }
-    buckets.bucket_counts.iter().sum()
+    checked_count_sum(buckets.bucket_counts.iter().copied(), u64::MAX)
 }
 
 fn randomize_exp_bucket_counts<R>(
@@ -93,7 +112,7 @@ where
     for count in &mut buckets.bucket_counts {
         *count = rng.random_range(0_u64..=10);
     }
-    buckets.bucket_counts.iter().sum()
+    checked_count_sum(buckets.bucket_counts.iter().copied(), u64::MAX)
 }
 
 fn populated_bucket_range(bucket_counts: &[u64]) -> Option<(usize, usize)> {
@@ -281,6 +300,29 @@ impl Default for MetricWeights {
     }
 }
 
+/// Defines generation limits for OpenTelemetry histogram count fields.
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct HistogramCountLimits {
+    /// Maximum value generated for explicit and exponential histogram buckets.
+    pub bucket: u64,
+    /// Maximum value generated for exponential histogram zero counts.
+    pub zero: u64,
+    /// Maximum value generated for histogram total counts.
+    pub total: u64,
+}
+
+impl Default for HistogramCountLimits {
+    fn default() -> Self {
+        Self {
+            bucket: u64::from(u32::MAX),
+            zero: u64::from(u32::MAX),
+            total: i64::MAX as u64,
+        }
+    }
+}
+
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Default, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -290,6 +332,8 @@ pub struct Config {
     pub metric_weights: MetricWeights,
     /// Define the contexts available when generating metrics
     pub contexts: Contexts,
+    /// Defines generation limits for histogram count fields.
+    pub histogram_count_limits: HistogramCountLimits,
 }
 
 impl Config {
@@ -460,6 +504,8 @@ pub struct OpentelemetryMetrics {
     data_points_per_resource: u64,
     /// Number of data points in the most recent block (set by `to_bytes`).
     data_points_per_block: u64,
+    /// Generation limits for histogram count fields.
+    histogram_count_limits: HistogramCountLimits,
 }
 
 impl OpentelemetryMetrics {
@@ -485,6 +531,7 @@ impl OpentelemetryMetrics {
             incr_i: 0,
             data_points_per_resource: 0,
             data_points_per_block: 0,
+            histogram_count_limits: config.histogram_count_limits,
         })
     }
 }
@@ -598,9 +645,16 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     #[allow(clippy::cast_sign_loss)]
                                     let increment = self.incr_i as u64;
                                     for bc in &mut point.bucket_counts {
-                                        *bc = bc.saturating_add(increment);
+                                        increment_bounded_count(
+                                            bc,
+                                            increment,
+                                            self.histogram_count_limits.bucket,
+                                        );
                                     }
-                                    point.count = point.bucket_counts.iter().sum();
+                                    point.count = checked_count_sum(
+                                        point.bucket_counts.iter().copied(),
+                                        self.histogram_count_limits.total,
+                                    );
                                     set_histogram_min_max(point, rng);
                                     if let (Some(previous), Some(current)) =
                                         (previous_min, point.min.as_mut())
@@ -627,9 +681,14 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     // Use 1..=10 (not 0..=10) so count stays
                                     // non-zero and the encoded size is stable.
                                     for bc in &mut point.bucket_counts {
-                                        *bc = rng.random_range(1_u64..=10);
+                                        *bc = rng
+                                            .random_range(1_u64..=10)
+                                            .min(self.histogram_count_limits.bucket);
                                     }
-                                    point.count = point.bucket_counts.iter().sum();
+                                    point.count = checked_count_sum(
+                                        point.bucket_counts.iter().copied(),
+                                        self.histogram_count_limits.total,
+                                    );
                                     set_histogram_min_max(point, rng);
                                     if let Some(sum) = &mut point.sum {
                                         *sum = rng.random_range(1.0_f64..=1000.0);
@@ -651,15 +710,31 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     // bucket counts only grow.
                                     #[allow(clippy::cast_sign_loss)]
                                     let increment = self.incr_i as u64;
-                                    point.zero_count = point.zero_count.saturating_add(increment);
-                                    let mut count = point.zero_count;
-                                    if let Some(positive) = &mut point.positive {
-                                        count += increment_exp_bucket_counts(positive, increment);
-                                    }
-                                    if let Some(negative) = &mut point.negative {
-                                        count += increment_exp_bucket_counts(negative, increment);
-                                    }
-                                    point.count = count;
+                                    increment_bounded_count(
+                                        &mut point.zero_count,
+                                        increment,
+                                        self.histogram_count_limits.zero,
+                                    );
+                                    let positive_count =
+                                        point.positive.as_mut().map_or(0, |positive| {
+                                            increment_exp_bucket_counts(
+                                                positive,
+                                                increment,
+                                                self.histogram_count_limits.bucket,
+                                            )
+                                        });
+                                    let negative_count =
+                                        point.negative.as_mut().map_or(0, |negative| {
+                                            increment_exp_bucket_counts(
+                                                negative,
+                                                increment,
+                                                self.histogram_count_limits.bucket,
+                                            )
+                                        });
+                                    point.count = checked_count_sum(
+                                        [point.zero_count, positive_count, negative_count],
+                                        self.histogram_count_limits.total,
+                                    );
                                     set_exp_histogram_min_max(point, rng);
                                     if let Some(negative) = &point.negative
                                         && let Some((_, last)) =
@@ -693,15 +768,21 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     set_exp_histogram_sum_at_least_max(point);
                                 } else {
                                     // Delta: fresh observations each window.
-                                    point.zero_count = rng.random_range(1_u64..=10);
-                                    let mut count = point.zero_count;
-                                    if let Some(positive) = &mut point.positive {
-                                        count += randomize_exp_bucket_counts(positive, rng);
-                                    }
-                                    if let Some(negative) = &mut point.negative {
-                                        count += randomize_exp_bucket_counts(negative, rng);
-                                    }
-                                    point.count = count;
+                                    point.zero_count = rng
+                                        .random_range(1_u64..=10)
+                                        .min(self.histogram_count_limits.zero);
+                                    let positive_count =
+                                        point.positive.as_mut().map_or(0, |positive| {
+                                            randomize_exp_bucket_counts(positive, rng)
+                                        });
+                                    let negative_count =
+                                        point.negative.as_mut().map_or(0, |negative| {
+                                            randomize_exp_bucket_counts(negative, rng)
+                                        });
+                                    point.count = checked_count_sum(
+                                        [point.zero_count, positive_count, negative_count],
+                                        self.histogram_count_limits.total,
+                                    );
                                     set_exp_histogram_min_max(point, rng);
                                     if let Some(sum) = &mut point.sum {
                                         *sum = rng.random_range(1.0_f64..=1000.0);
@@ -1426,6 +1507,7 @@ mod test {
                     attributes_per_metric: ConfRange::Constant(1),
                 },
                 metric_weights,
+                ..Default::default()
             };
             let mut budget = 1_000_000;
             let mut rng = SmallRng::seed_from_u64(42);
@@ -1505,6 +1587,7 @@ mod test {
                     attributes_per_metric: ConfRange::Constant(0),
                 },
                 metric_weights,
+                ..Default::default()
             };
             let mut budget = 1_000_000;
             let mut rng = SmallRng::seed_from_u64(42);
@@ -1627,6 +1710,7 @@ mod test {
                     attributes_per_metric: ConfRange::Constant(0),
                 },
                 metric_weights,
+                ..Default::default()
             };
             let mut rng = SmallRng::seed_from_u64(42);
             let mut otel_metrics = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)?;
@@ -1702,6 +1786,7 @@ mod test {
                     exp_histogram_cumulative: 0,
                     summary: 0,
                 },
+                ..Default::default()
             };
 
             let mut budget = budget;
@@ -1747,6 +1832,7 @@ mod test {
                     exp_histogram_cumulative: 0,
                     summary: 0,
                 },
+                ..Default::default()
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
