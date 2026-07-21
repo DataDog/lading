@@ -97,10 +97,8 @@ ls -l /sys/kernel/mm/page_idle/bitmap
             // WSS measures the amount of memory that has been accessed since the last poll.
             // As a consequence, the poll interval impacts the measure.
             // That’s why we need to be sure we don’t poll more often than once per minute.
-            if sample_wss {
-                if let Err(e) = wss.poll() {
-                    warn!("wss poll failed; skipping this sample: {e}");
-                }
+            if sample_wss && let Err(e) = wss.poll() {
+                warn!("wss poll failed; skipping this sample: {e}");
             }
         }
 

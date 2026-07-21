@@ -14,7 +14,10 @@ impl ProcessDescendantsIterator {
         let stack = match Process::new(parent_pid) {
             Ok(process) => vec![process],
             Err(e) => {
-                trace!(parent_pid, "process not found while listing descendants; treating as no descendants: {e}");
+                trace!(
+                    parent_pid,
+                    "process not found while listing descendants; treating as no descendants: {e}"
+                );
                 Vec::new()
             }
         };

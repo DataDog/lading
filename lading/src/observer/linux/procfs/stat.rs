@@ -170,7 +170,12 @@ fn parse(contents: &str) -> Result<(i32, u64, u64), Error> {
         .ok_or(Error::StatMalformed("Failed to find ')' in stat contents"))?;
 
     let before = &contents[..start_paren];
-    let after = &contents[end_paren + 2..]; // skip ") "
+    // Skip ") " after the comm. A read truncated at the ')' leaves fewer than
+    // two trailing bytes, so index rather than slice: `get` returns `None`
+    // instead of panicking, which under panic="abort" would kill the run.
+    let after = contents
+        .get(end_paren + 2..)
+        .ok_or(Error::StatMalformed("Truncated stat: no fields after comm"))?;
     let before_parts: Vec<&str> = before.split_whitespace().collect();
     if before_parts.is_empty() {
         return Err(Error::StatMalformed("Not enough fields before paren"));
@@ -284,6 +289,24 @@ mod test {
         assert_eq!(pid, 1234);
         assert_eq!(utime, 11);
         assert_eq!(stime, 12);
+    }
+
+    #[test]
+    fn parse_truncated_at_comm_errors_not_panics() {
+        // A `/proc/<pid>/stat` read truncated at the closing ')' leaves no bytes
+        // after the comm. The old `&contents[end_paren + 2..]` slice indexed two
+        // bytes past the ')' and panicked when ')' was the final byte; under
+        // panic="abort" that aborts the whole run. ADR-004: a transient short
+        // read must return an error, never panic.
+        for input in ["4242 (target)", "()", "1 (x)"] {
+            assert!(
+                parse(input).is_err(),
+                "truncated stat {input:?} must error, not panic"
+            );
+        }
+        // Exactly one byte past the ')' is a valid empty tail. It still errors on
+        // the field-count check rather than by panicking.
+        assert!(parse("4242 (target) ").is_err());
     }
 
     #[test]
