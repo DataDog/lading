@@ -33,7 +33,6 @@ use crate::generator::common::{
     create_throttle,
 };
 
-
 /// The HTTP method to be used in requests
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -188,8 +187,7 @@ impl Http {
 
                 // Per-generator, not process-wide. See the `semaphore` field's
                 // doc comment.
-                let semaphore =
-                    Arc::new(Semaphore::new(concurrency.connection_count() as usize));
+                let semaphore = Arc::new(Semaphore::new(concurrency.connection_count() as usize));
 
                 Ok(Self {
                     concurrency,
@@ -261,12 +259,9 @@ impl Http {
                             // The semaphore never closes while the generator
                             // runs, so `acquire_owned` errors only at shutdown.
                             // Stop cleanly instead of panicking then.
-                            let permit = match Arc::clone(&semaphore).acquire_owned().await {
-                                Ok(permit) => permit,
-                                Err(_) => {
-                                    warn!("connection semaphore closed; stopping HTTP worker");
-                                    return Ok(());
-                                }
+                            let Ok(permit) = Arc::clone(&semaphore).acquire_owned().await else {
+                                warn!("connection semaphore closed; stopping HTTP worker");
+                                return Ok(());
                             };
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);

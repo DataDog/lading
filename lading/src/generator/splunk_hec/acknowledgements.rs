@@ -16,7 +16,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     time::timeout,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::{AckSettings, SPLUNK_HEC_CHANNEL_HEADER};
 type AckId = u64;
@@ -58,9 +58,22 @@ impl Channel {
     {
         match self {
             Self::NoAck { .. } => Ok(()),
-            Self::Ack { tx, .. } => Ok(tx
-                .send(msg.await.expect("acknowledgemnts enabled, should have id"))
-                .await?),
+            Self::Ack { tx, id } => {
+                if let Some(ack_id) = msg.await {
+                    Ok(tx.send(ack_id).await?)
+                } else {
+                    // A target can return a 2xx body with no ackId even when
+                    // acknowledgements are enabled: a misbehaving or non-acking
+                    // endpoint, and the body is target-controlled. There is no
+                    // id to track, so skip it rather than abort the whole run
+                    // under panic="abort" (ADR-004). The block is simply not
+                    // ack-verified. The label is the bounded channel id
+                    // (ADR-005).
+                    counter!("ack_id_missing", "channel_id" => id.clone()).increment(1);
+                    warn!(channel_id = %id, "HEC response carried no ackId; skipping ack tracking");
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -251,4 +264,43 @@ async fn ack_request(
 #[derive(Deserialize, Debug)]
 struct HecAckStatusResponse {
     acks: FxHashMap<AckId, bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Channel;
+    use std::future::ready;
+    use tokio::sync::mpsc;
+
+    /// An `Ack` channel handed a `None` ackId -- the target returned a 2xx body
+    /// with no ackId while acknowledgements were enabled -- must skip the ack
+    /// and return Ok, never panic. The previous `.expect()` aborted the whole
+    /// run under panic="abort" (ADR-004) on a target-controlled response.
+    #[tokio::test]
+    async fn ack_channel_send_none_id_is_skipped_not_panicking() {
+        let (tx, _rx) = mpsc::channel(4);
+        let channel = Channel::Ack {
+            id: "test-channel".to_string(),
+            tx,
+        };
+        channel
+            .send(ready(None::<u64>))
+            .await
+            .expect("a None ackId must be skipped, not panic");
+    }
+
+    /// A present ackId is still forwarded to the receiver.
+    #[tokio::test]
+    async fn ack_channel_send_some_id_forwards() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let channel = Channel::Ack {
+            id: "test-channel".to_string(),
+            tx,
+        };
+        channel
+            .send(ready(Some(42u64)))
+            .await
+            .expect("a present ackId must forward");
+        assert_eq!(rx.recv().await, Some(42u64));
+    }
 }

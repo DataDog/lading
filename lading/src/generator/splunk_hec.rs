@@ -318,12 +318,9 @@ impl SplunkHec {
                             // Owned permit so it can move into the spawned task.
                             // The semaphore closes only at shutdown. Stop cleanly
                             // instead of panicking if acquisition fails.
-                            let permit = match Arc::clone(&semaphore).acquire_owned().await {
-                                Ok(permit) => permit,
-                                Err(_) => {
-                                    warn!("connection semaphore closed; stopping splunk_hec worker");
-                                    return Ok(());
-                                }
+                            let Ok(permit) = Arc::clone(&semaphore).acquire_owned().await else {
+                                warn!("connection semaphore closed; stopping splunk_hec worker");
+                                return Ok(());
                             };
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
@@ -379,9 +376,27 @@ where
                         status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
                         counter!("request_ok", &status_labels).increment(1);
                         let body_bytes = body.boxed().collect().await?.to_bytes();
-                        let hec_ack_response =
-                            serde_json::from_slice::<HecResponse>(&body_bytes).expect("unable to parse response body");
-                        channel.send(ready(hec_ack_response.ack_id)).await?;
+                        match serde_json::from_slice::<HecResponse>(&body_bytes) {
+                            Ok(hec_ack_response) => {
+                                channel.send(ready(hec_ack_response.ack_id)).await?;
+                            }
+                            Err(source) => {
+                                // The target controls this body and can return
+                                // something that is not a HEC ack envelope: an
+                                // error page, an empty body, an extra field
+                                // under `deny_unknown_fields`. Parsing it is
+                                // best-effort. Count it with a bounded label and
+                                // skip the ack send rather than abort the whole
+                                // run under panic="abort". ADR-004. Skipping the
+                                // send is safe: an unacked id simply times out in
+                                // the ack service. ADR-005: the label is a fixed
+                                // literal, not the target's response text.
+                                warn!("Failed to parse HEC response body from {uri}: {source}");
+                                let mut error_labels = labels.clone();
+                                error_labels.push(("error".to_string(), "response_parse".to_string()));
+                                counter!("request_failure", &error_labels).increment(1);
+                            }
+                        }
                     }
                     Err(source) => {
                         error!("Failed to send HEC request to {uri}: {source}", uri = uri);
