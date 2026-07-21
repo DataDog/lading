@@ -128,13 +128,22 @@ where
         // burst-bounded property. Distinct inline literals so triage shows the
         // factor reached.
         if self.granted_this_interval > maximum_capacity.saturating_mul(2) {
-            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_2x", &details);
+            assert_reachable!(
+                "lading_throttle.stable.interval_burst_exceeded_2x",
+                &details
+            );
         }
         if self.granted_this_interval > maximum_capacity.saturating_mul(5) {
-            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_5x", &details);
+            assert_reachable!(
+                "lading_throttle.stable.interval_burst_exceeded_5x",
+                &details
+            );
         }
         if self.granted_this_interval > maximum_capacity.saturating_mul(10) {
-            assert_reachable!("lading_throttle.stable.interval_burst_exceeded_10x", &details);
+            assert_reachable!(
+                "lading_throttle.stable.interval_burst_exceeded_10x",
+                &details
+            );
         }
     }
 
@@ -440,8 +449,7 @@ mod divide_stall {
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         use std::pin::pin;
         use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-        const VTABLE: RawWakerVTable =
-            RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+        const VTABLE: RawWakerVTable = RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
         const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
         // SAFETY: the waker ignores its data pointer, so a null pointer is fine.
         let waker = unsafe { Waker::from_raw(RAW) };
@@ -470,13 +478,13 @@ mod divide_stall {
             let block = per_worker + 1; // fits a single connection, not a worker
             prop_assume!(block <= rate);
 
-            let mut single = Valve::new_with_timeout(NonZeroU32::new(rate).unwrap(), 0);
+            let mut single = Valve::new_with_timeout(NonZeroU32::new(rate).expect("rate is nonzero"), 0);
             prop_assert!(
                 single.request(0, block).is_ok(),
                 "a single connection (capacity {rate}) must accept a {block}-byte block"
             );
 
-            let mut worker = Valve::new_with_timeout(NonZeroU32::new(per_worker).unwrap(), 0);
+            let mut worker = Valve::new_with_timeout(NonZeroU32::new(per_worker).expect("per_worker is nonzero"), 0);
             prop_assert!(
                 matches!(worker.request(0, block), Err(Error::Capacity { .. })),
                 "a divided worker's Valve (capacity {per_worker}) rejects the {block}-byte block in one interval"
@@ -534,7 +542,7 @@ mod burst_measurement {
         /// grants exactly the configured rate for any rate. No burst is possible.
         #[test]
         fn timeout_zero_grants_exactly_configured(max_cap in 1u32..=100_000_000) {
-            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).unwrap(), 0);
+            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).expect("max_cap is nonzero"), 0);
             let granted = burst_capacity(&mut valve, 5, max_cap);
             prop_assert_eq!(granted, u64::from(max_cap));
         }
@@ -549,7 +557,7 @@ mod burst_measurement {
             idle in 1u64..=u64::from(MAX_ROLLED_INTERVALS),
         ) {
             let timeout = INTERVAL_TICKS * u64::from(MAX_ROLLED_INTERVALS);
-            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).unwrap(), timeout);
+            let mut valve = Valve::new_with_timeout(NonZeroU32::new(max_cap).expect("max_cap is nonzero"), timeout);
             let land = INTERVAL_TICKS * idle;
             let _ = valve.request(land, 0); // roll forward, banking rolled capacity
             let granted = burst_capacity(&mut valve, land + 1, max_cap);
@@ -569,7 +577,7 @@ mod antithesis_tests {
     // touches the clock, so a `RealClock` is fine here.
     fn stable(max_cap: u32, timeout_ticks: u64) -> Stable<RealClock> {
         Stable::with_clock(
-            NonZeroU32::new(max_cap).unwrap(),
+            NonZeroU32::new(max_cap).expect("max_cap is nonzero"),
             timeout_ticks,
             RealClock::default(),
         )

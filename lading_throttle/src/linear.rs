@@ -42,14 +42,51 @@ where
     }
 
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
-        loop {
-            let slop: u64 = self
-                .valve
-                .request(self.clock.ticks_elapsed(), request.get())?;
-            if slop == 0 {
-                break;
+        // A request larger than one interval's grantable capacity is not an
+        // error. Drain it across intervals in chunks, so an oversized block --
+        // for example one larger than the per-worker capacity after `divide` --
+        // is delivered at the configured rate instead of being rejected and
+        // discarded. This mirrors `Stable::wait_for`.
+        //
+        // Unlike `Stable`, a `Linear` valve ramps, so the chunk size is the
+        // capacity this worker can actually reach in an interval, not
+        // `maximum_capacity`. When `rate_of_change` is zero the ramp is flat --
+        // `divide` floors a fine rate to zero -- and never climbs past
+        // `reset_capacity`, so a `maximum_capacity`-sized chunk would never be
+        // granted and this loop would spin forever. Chunk at the reachable
+        // ceiling instead.
+        let ceiling = if self.valve.rate_of_change == 0 {
+            self.valve.reset_capacity
+        } else {
+            self.valve.maximum_capacity
+        }
+        .min(self.valve.maximum_capacity);
+        let Some(ceiling) = NonZeroU32::new(ceiling) else {
+            // A flat ramp with zero deliverable capacity can never grant a
+            // positive request -- `divide` can floor a small throttle to
+            // `initial == rate == 0`. Returning immediately would let the
+            // caller's discard loop, which has no await of its own, busy-spin a
+            // core. Yield one interval first so the discard runs at most once
+            // per interval, then report a zero deliverable maximum.
+            self.clock.wait(INTERVAL_TICKS).await;
+            return Err(Error::Capacity {
+                requested: request.get(),
+                maximum: 0,
+            });
+        };
+        let ceiling = ceiling.get();
+
+        let mut remaining = request.get();
+        while remaining > 0 {
+            let chunk = remaining.min(ceiling);
+            loop {
+                let slop: u64 = self.valve.request(self.clock.ticks_elapsed(), chunk)?;
+                if slop == 0 {
+                    break;
+                }
+                self.clock.wait(slop).await;
             }
-            self.clock.wait(slop).await;
+            remaining -= chunk;
         }
         Ok(())
     }
@@ -173,6 +210,120 @@ impl Valve {
         } else {
             Ok(INTERVAL_TICKS.saturating_sub(ticks_elapsed % INTERVAL_TICKS))
         }
+    }
+}
+
+#[cfg(test)]
+mod drain {
+    //! `Linear::wait_for` must deliver a request larger than a single interval's
+    //! grantable capacity by draining it across intervals, matching
+    //! `Stable::wait_for`. Without it a `divide`d Linear worker discards every
+    //! block between its per-worker capacity and the single-connection rate. The
+    //! flat-ramp case is the hazard: `divide` can floor `rate_of_change` to zero,
+    //! so a naive `maximum_capacity`-sized chunk would never be granted and the
+    //! drain would spin forever.
+    use super::{Error, Linear};
+    use crate::{Clock, INTERVAL_TICKS};
+    use async_trait::async_trait;
+    use std::num::NonZeroU32;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A clock whose `wait` advances a tick counter and returns immediately, so
+    /// `wait_for` can be driven to completion without real time or a runtime.
+    struct MockClock {
+        now: AtomicU64,
+    }
+
+    #[async_trait]
+    impl Clock for MockClock {
+        fn ticks_elapsed(&self) -> u64 {
+            self.now.load(Ordering::Relaxed)
+        }
+        async fn wait(&self, ticks: u64) {
+            self.now.fetch_add(ticks, Ordering::Relaxed);
+        }
+    }
+
+    /// Poll a future to completion on the current thread. `MockClock::wait`
+    /// never suspends, so `wait_for` makes full progress without a runtime. A
+    /// drain that failed to terminate would hang this loop, which is the point:
+    /// the flat-ramp test would never return under the old naive chunking.
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        use std::pin::pin;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        const VTABLE: RawWakerVTable = RawWakerVTable::new(|_| RAW, |_| {}, |_| {}, |_| {});
+        const RAW: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
+        // SAFETY: the waker ignores its data pointer, so a null pointer is fine.
+        let waker = unsafe { Waker::from_raw(RAW) };
+        let mut cx = Context::from_waker(&waker);
+        let mut future = pin!(future);
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+                return value;
+            }
+        }
+    }
+
+    fn linear(initial: u32, max: u32, rate: u32) -> Linear<MockClock> {
+        Linear::with_clock(
+            initial,
+            NonZeroU32::new(max).expect("max nonzero"),
+            rate,
+            MockClock {
+                now: AtomicU64::new(0),
+            },
+        )
+    }
+
+    /// A request larger than one interval's capacity drains across intervals
+    /// instead of returning `Capacity`. With `initial == max` the valve refills
+    /// to `max` each interval, so four chunks span three interval rolls.
+    #[test]
+    fn wait_for_drains_oversized_request_across_intervals() {
+        let max = 100u32;
+        let mut throttle = linear(max, max, 10);
+        let request = NonZeroU32::new(max * 3 + 7).expect("nonzero");
+        block_on(throttle.wait_for(request)).expect("oversized request must drain, not error");
+        let elapsed = throttle.clock.ticks_elapsed();
+        assert!(
+            elapsed >= 3 * INTERVAL_TICKS,
+            "draining {request} at capacity {max} must span at least 3 interval rolls, saw {elapsed}"
+        );
+    }
+
+    /// The flat-ramp hazard: `divide` floored `rate_of_change` to zero while
+    /// `initial < max`, so the ramp never climbs to `max`. A `max`-sized chunk
+    /// could never be granted and a naive drain would spin forever. Chunking at
+    /// the reachable ceiling (`reset_capacity`, here 1) drains the block one unit
+    /// per interval and terminates. If this test hangs, the fix regressed.
+    #[test]
+    fn wait_for_drains_flat_ramp_without_hanging() {
+        let mut throttle = linear(1, 10, 0); // flat: capacity resets to 1 forever
+        let request = NonZeroU32::new(5).expect("nonzero");
+        block_on(throttle.wait_for(request)).expect("flat ramp must drain, not hang or error");
+        let elapsed = throttle.clock.ticks_elapsed();
+        assert!(
+            elapsed >= 4 * INTERVAL_TICKS,
+            "five 1-unit chunks on a flat ramp must span at least 4 interval rolls, saw {elapsed}"
+        );
+    }
+
+    /// A throttle with zero deliverable capacity (flat ramp, `initial == 0`) can
+    /// never grant a positive request. It must yield an interval and then report
+    /// `Capacity`, rather than either hang forever or return immediately -- an
+    /// immediate error lets the caller's await-free discard loop busy-spin a
+    /// core. The yield bounds that to one discard per interval.
+    #[test]
+    fn wait_for_zero_capacity_flat_ramp_yields_then_errors() {
+        let mut throttle = linear(0, 1, 0);
+        let err = block_on(throttle.wait_for(NonZeroU32::MIN))
+            .expect_err("zero-capacity throttle must error, not hang");
+        assert!(matches!(err, Error::Capacity { maximum: 0, .. }));
+        assert!(
+            throttle.clock.ticks_elapsed() >= INTERVAL_TICKS,
+            "must yield at least one interval before erroring so the caller cannot busy-spin, saw {}",
+            throttle.clock.ticks_elapsed()
+        );
     }
 }
 
