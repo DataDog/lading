@@ -30,6 +30,7 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
                     metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
                     attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
                 },
+                ..Default::default()
             };
             let _ot = OpentelemetryMetrics::new(config, MIB, &mut rng)
                 .expect("failed to create metrics generator");
@@ -60,6 +61,7 @@ fn opentelemetry_metric_throughput(c: &mut Criterion) {
                             metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
                             attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
                         },
+                        ..Default::default()
                     };
                     let ot = OpentelemetryMetrics::new(config, size, &mut rng)
                         .expect("failed to create metrics generator");

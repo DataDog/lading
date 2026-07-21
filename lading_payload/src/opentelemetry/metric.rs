@@ -105,12 +105,13 @@ fn increment_exp_bucket_counts(
 fn randomize_exp_bucket_counts<R>(
     buckets: &mut exponential_histogram_data_point::Buckets,
     rng: &mut R,
+    limit: u64,
 ) -> u64
 where
     R: rand::Rng + ?Sized,
 {
     for count in &mut buckets.bucket_counts {
-        *count = rng.random_range(0_u64..=10);
+        *count = rng.random_range(0_u64..=10).min(limit);
     }
     checked_count_sum(buckets.bucket_counts.iter().copied(), u64::MAX)
 }
@@ -773,11 +774,19 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                         .min(self.histogram_count_limits.zero);
                                     let positive_count =
                                         point.positive.as_mut().map_or(0, |positive| {
-                                            randomize_exp_bucket_counts(positive, rng)
+                                            randomize_exp_bucket_counts(
+                                                positive,
+                                                rng,
+                                                self.histogram_count_limits.bucket,
+                                            )
                                         });
                                     let negative_count =
                                         point.negative.as_mut().map_or(0, |negative| {
-                                            randomize_exp_bucket_counts(negative, rng)
+                                            randomize_exp_bucket_counts(
+                                                negative,
+                                                rng,
+                                                self.histogram_count_limits.bucket,
+                                            )
                                         });
                                     point.count = checked_count_sum(
                                         [point.zero_count, positive_count, negative_count],
@@ -914,12 +923,15 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF};
+    use super::{
+        Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF,
+        randomize_exp_bucket_counts,
+    };
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
         ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint, ScopeMetrics,
-        metric::Data, number_data_point,
+        exponential_histogram_data_point, metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
@@ -932,6 +944,27 @@ mod test {
         collections::HashSet,
         hash::{DefaultHasher, Hash, Hasher},
     };
+
+    // Invariant: for all limits and random seeds, delta exponential bucket
+    // counts do not exceed the configured limit.
+    proptest! {
+        #[test]
+        fn randomized_exponential_bucket_counts_obey_limit(
+            seed: u64,
+            limit in 0_u64..=10,
+            bucket_count in 0_usize..32,
+        ) {
+            let mut buckets = exponential_histogram_data_point::Buckets {
+                offset: 0,
+                bucket_counts: vec![0; bucket_count],
+            };
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            randomize_exp_bucket_counts(&mut buckets, &mut rng, limit);
+
+            prop_assert!(buckets.bucket_counts.iter().all(|count| *count <= limit));
+        }
+    }
 
     // Budget always decreases equivalent to the size of the returned value.
     proptest! {
