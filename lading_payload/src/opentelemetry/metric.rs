@@ -73,6 +73,10 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
+// Exponential histogram templates contain at most 100 positive and 100
+// negative buckets.
+const MAX_EXPONENTIAL_HISTOGRAM_BUCKETS: u64 = 200;
+
 fn increment_bounded_count(count: &mut u64, increment: u64, limit: u64) {
     *count = count.saturating_add(increment).min(limit);
 }
@@ -324,6 +328,53 @@ impl Default for HistogramCountLimits {
     }
 }
 
+impl HistogramCountLimits {
+    fn valid(&self) -> Result<(), String> {
+        let minimum_bucket = u64::from(u8::MAX);
+        let minimum_zero = u64::from(u8::MAX);
+        let minimum_total = u64::from(u16::MAX);
+
+        if self.bucket < minimum_bucket {
+            return Err(format!(
+                "histogram bucket limit must be at least {minimum_bucket}"
+            ));
+        }
+        if self.zero < minimum_zero {
+            return Err(format!(
+                "histogram zero limit must be at least {minimum_zero}"
+            ));
+        }
+        if self.total < minimum_total {
+            return Err(format!(
+                "histogram total limit must be at least {minimum_total}"
+            ));
+        }
+        if self.total > i64::MAX as u64 {
+            return Err("histogram total limit must not exceed i64::MAX".to_string());
+        }
+        if self.bucket > self.total {
+            return Err("histogram bucket limit must not exceed total limit".to_string());
+        }
+        if self.zero > self.total {
+            return Err("histogram zero limit must not exceed total limit".to_string());
+        }
+
+        let maximum_count = self
+            .bucket
+            .checked_mul(MAX_EXPONENTIAL_HISTOGRAM_BUCKETS)
+            .and_then(|count| count.checked_add(self.zero))
+            .ok_or_else(|| "histogram count limits overflow".to_string())?;
+        if self.total < maximum_count {
+            return Err(format!(
+                "histogram total limit ({}) must accommodate all bucket and zero counts ({maximum_count})",
+                self.total,
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Default, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -350,6 +401,8 @@ impl Config {
         if self.metric_weights.has_zero_weight() {
             return Err("Metric weights cannot be 0".to_string());
         }
+
+        self.histogram_count_limits.valid()?;
 
         // Validate total_contexts - we need at least one context to generate metrics
         match self.contexts.total_contexts {
@@ -518,6 +571,11 @@ impl OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
+        config
+            .histogram_count_limits
+            .valid()
+            .map_err(Error::Validation)?;
+
         let context_cap = config.contexts.total_contexts.sample(rng);
         // Moby Dick is 1.2Mb. 128Kb should be more than enough for metric
         // names, descriptions, etc.
@@ -924,8 +982,8 @@ impl crate::Serialize for OpentelemetryMetrics {
 #[cfg(test)]
 mod test {
     use super::{
-        Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF,
-        randomize_exp_bucket_counts,
+        Config, Contexts, HistogramCountLimits, OpentelemetryMetrics, ResourceMetrics,
+        SMALLEST_PROTOBUF, randomize_exp_bucket_counts,
     };
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
@@ -1968,6 +2026,87 @@ mod test {
             encoded_size == SMALLEST_PROTOBUF,
             "Minimal useful request size ({encoded_size}) should be == SMALLEST_PROTOBUF ({SMALLEST_PROTOBUF})"
         );
+    }
+
+    #[test]
+    fn histogram_count_limits_validation() {
+        let minimum_limits = HistogramCountLimits {
+            bucket: u64::from(u8::MAX),
+            zero: u64::from(u8::MAX),
+            total: u64::from(u16::MAX),
+        };
+        let valid_config = Config {
+            histogram_count_limits: minimum_limits,
+            ..Default::default()
+        };
+        assert!(valid_config.valid().is_ok());
+
+        let bucket_below_minimum = Config {
+            histogram_count_limits: HistogramCountLimits {
+                bucket: u64::from(u8::MAX) - 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(bucket_below_minimum.valid().is_err());
+
+        let zero_below_minimum = Config {
+            histogram_count_limits: HistogramCountLimits {
+                zero: u64::from(u8::MAX) - 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(zero_below_minimum.valid().is_err());
+
+        let total_below_minimum = Config {
+            histogram_count_limits: HistogramCountLimits {
+                total: u64::from(u16::MAX) - 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(total_below_minimum.valid().is_err());
+
+        let bucket_greater_than_total = Config {
+            histogram_count_limits: HistogramCountLimits {
+                bucket: u64::from(u16::MAX) + 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(bucket_greater_than_total.valid().is_err());
+
+        let zero_greater_than_total = Config {
+            histogram_count_limits: HistogramCountLimits {
+                zero: u64::from(u16::MAX) + 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(zero_greater_than_total.valid().is_err());
+
+        let total_below_maximum_count = Config {
+            histogram_count_limits: HistogramCountLimits {
+                bucket: 1_000,
+                total: 65_535,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(total_below_maximum_count.valid().is_err());
+
+        let total_above_i64_maximum = Config {
+            histogram_count_limits: HistogramCountLimits {
+                total: i64::MAX as u64 + 1,
+                ..minimum_limits
+            },
+            ..valid_config
+        };
+        assert!(total_above_i64_maximum.valid().is_err());
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        assert!(OpentelemetryMetrics::new(bucket_below_minimum, 1_000_000, &mut rng).is_err());
     }
 
     #[test]
