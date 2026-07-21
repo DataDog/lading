@@ -41,6 +41,8 @@ enum Error {
     Io(#[from] std::io::Error),
     #[error("Capture manager failed: {0}")]
     CaptureManager(#[from] lading_capture::manager::Error),
+    #[error("Capture manager task failed to join: {0}")]
+    CaptureManagerJoin(tokio::task::JoinError),
     #[error("Lading generator returned an error: {0}")]
     LadingGenerator(#[from] lading::generator::Error),
     #[error("Lading blackhole returned an error: {0}")]
@@ -729,7 +731,14 @@ async fn inner_main(
                 }
             }
             Err(join_err) => {
+                // The capture task panicked or was cancelled, so it produced no
+                // valid output file. A failed capture must surface as a non-zero
+                // exit, like any other capture failure, rather than a clean exit
+                // with an absent or broken capture.
                 error!("capture manager task failed to join: {join_err}");
+                if res.is_ok() {
+                    res = Err(Error::CaptureManagerJoin(join_err));
+                }
             }
         }
     }

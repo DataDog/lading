@@ -587,6 +587,7 @@ impl Cache {
 #[tracing::instrument(skip_all)]
 #[expect(clippy::cast_possible_truncation)]
 #[expect(clippy::cast_sign_loss)]
+#[expect(clippy::too_many_lines)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &mut S,

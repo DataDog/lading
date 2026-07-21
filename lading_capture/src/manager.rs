@@ -123,7 +123,8 @@ impl metrics::HistogramFn for CaptureHistogram {
                 // logged. The label is a bounded reason, never the metric key,
                 // which is unbounded. A non-zero count means recorded latencies
                 // are missing samples, a measurement-integrity failure.
-                counter!("capture_histogram_samples_dropped", "reason" => "channel_full").increment(1);
+                counter!("capture_histogram_samples_dropped", "reason" => "channel_full")
+                    .increment(1);
                 warn!(
                     key = %self.key.name(),
                     error = %e,
@@ -131,7 +132,8 @@ impl metrics::HistogramFn for CaptureHistogram {
                 );
             }
         } else {
-            counter!("capture_histogram_samples_dropped", "reason" => "not_initialized").increment(1);
+            counter!("capture_histogram_samples_dropped", "reason" => "not_initialized")
+                .increment(1);
             warn!(
                 key = %self.key.name(),
                 "Histogram sample dropped - capture system not initialized"
@@ -400,7 +402,7 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
         );
 
         // Event loop: tokio select produces Events, state machine processes them
-        loop {
+        let outcome = loop {
             let event = tokio::select! {
                 val = self.recv.recv() => {
                     match val {
@@ -412,9 +414,25 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
                 () = &mut shutdown_wait => Event::ShutdownSignaled,
             };
 
-            match state_machine.next(event)? {
-                Operation::Continue => {}
-                Operation::Exit => return Ok(()),
+            match state_machine.next(event) {
+                Ok(Operation::Continue) => {}
+                Ok(Operation::Exit) => break Ok(()),
+                Err(e) => break Err(e),
+            }
+        };
+
+        // Finalize the output file on every exit path. A mid-run error or an
+        // unexpected channel close leaves the writer open, and for Parquet an
+        // unclosed writer never writes its footer, leaving the run's output
+        // unreadable. Close unconditionally here, then surface a close failure
+        // without masking the original error that ended the loop.
+        let close_result = state_machine.close();
+        match (outcome, close_result) {
+            (Ok(()), close) => close.map_err(Error::from),
+            (Err(e), Ok(())) => Err(Error::from(e)),
+            (Err(e), Err(close_err)) => {
+                error!("Failed to close capture writer during error shutdown: {close_err}");
+                Err(Error::from(e))
             }
         }
     }

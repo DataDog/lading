@@ -182,7 +182,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     pub(crate) fn next(&mut self, event: Event) -> Result<Operation, Error> {
         match event {
             Event::MetricReceived(metric) => self.handle_metric_received(metric),
-            Event::ChannelClosed => Ok(Self::handle_channel_closed()),
+            Event::ChannelClosed => self.handle_channel_closed(),
             Event::FlushTick => self.handle_flush_tick(),
             Event::ShutdownSignaled => self.handle_shutdown(),
         }
@@ -206,9 +206,14 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         Ok(Operation::Continue)
     }
 
-    fn handle_channel_closed() -> Operation {
+    fn handle_channel_closed(&mut self) -> Result<Operation, Error> {
         warn!("Timestamped metrics unexpected transmission shutdown");
-        Operation::Exit
+        // The metric channel closing is abnormal, but the metrics already
+        // accumulated are still the run's product. Drain them like a normal
+        // shutdown so an unexpected close does not silently discard buffered
+        // data. The caller finalizes the file afterward via `close`.
+        self.drain_and_write()?;
+        Ok(Operation::Exit)
     }
 
     fn handle_flush_tick(&mut self) -> Result<Operation, Error> {
@@ -249,13 +254,27 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     fn handle_shutdown(&mut self) -> Result<Operation, Error> {
         info!("shutdown signal received, flushing all remaining metrics");
         self.drain_and_write()?;
-        // Close the format to finalize the output file. For Parquet this writes
-        // the critical file footer, for JSONL it ensures all data is flushed.
-        // Take ownership of the format to call close() which consumes it.
+        Ok(Operation::Exit)
+    }
+
+    /// Flush and close the output format, finalizing the file.
+    ///
+    /// For Parquet this writes the critical footer, without which the file is
+    /// incomplete and unreadable; for JSONL it flushes buffered data. Every
+    /// exit path -- clean shutdown, an unexpected channel close, or a mid-run
+    /// error -- must call this, so the caller invokes it unconditionally once
+    /// the event loop ends. Idempotent: `take` leaves `None` behind, so a
+    /// second call after the format was already closed is a no-op rather than a
+    /// double-close.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying writer fails to flush or close.
+    pub(crate) fn close(&mut self) -> Result<(), Error> {
         if let Some(format) = self.format.take() {
             format.close()?;
         }
-        Ok(Operation::Exit)
+        Ok(())
     }
 
     /// Convert an Instant timestamp to `Accumulator` logical tick time.
@@ -1041,6 +1060,86 @@ mod tests {
         let result = machine.next(Event::ChannelClosed);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Operation::Exit);
+    }
+
+    #[test]
+    fn close_is_idempotent() {
+        // The manager calls close() on every exit path, and handle_shutdown may
+        // already have taken the format. A second close() must be a no-op, not a
+        // double-close, so the unconditional finalize is safe.
+        let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
+        let clock = TestClock::new(0);
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+        let labels = FxHashMap::default();
+
+        let mut machine = StateMachine::new(
+            Duration::from_secs(60),
+            format,
+            1,
+            registry,
+            accumulator,
+            labels,
+            clock,
+        );
+
+        machine.close().expect("first close finalizes the writer");
+        machine.close().expect("second close is a no-op");
+    }
+
+    #[test]
+    fn channel_closed_drains_and_close_finalizes_output() {
+        // An unexpected channel close must drain buffered metrics like a normal
+        // shutdown and let the manager finalize the file, rather than exiting
+        // without draining. Previously ChannelClosed returned Exit and did
+        // neither, so a run that ended by its sender dropping lost buffered
+        // metrics and, for Parquet, its footer.
+        let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer.clone());
+        let clock = TestClock::new(0);
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+        let labels = FxHashMap::default();
+
+        let mut machine = StateMachine::new(
+            Duration::from_secs(60),
+            format,
+            1,
+            registry,
+            accumulator,
+            labels,
+            clock.clone(),
+        );
+
+        // Record a metric at tick 0, then advance and flush so tick 0 becomes a
+        // completed interval the exit path can drain.
+        let counter = Metric::Counter(Counter {
+            key: Key::from_name("channel_close_counter"),
+            timestamp: clock.start(),
+            value: CounterValue::Absolute(7),
+        });
+        machine
+            .next(Event::MetricReceived(counter))
+            .expect("record metric");
+        clock.advance(2_000);
+        machine.next(Event::FlushTick).expect("flush tick");
+
+        assert_eq!(
+            machine
+                .next(Event::ChannelClosed)
+                .expect("channel close drains without error"),
+            Operation::Exit
+        );
+        machine.close().expect("close finalizes the output file");
+
+        let lines = writer.parse_lines().expect("output parses as jsonl");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.metric_name == "channel_close_counter"),
+            "channel-closed exit must produce readable output with the metric, saw {lines:?}"
+        );
     }
 
     #[test]
