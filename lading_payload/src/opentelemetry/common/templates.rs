@@ -58,38 +58,56 @@ where
         G: crate::SizedGenerator<'a, Output = T>,
         G::Error: 'a,
     {
-        // If we are at context cap, search by_size for templates <= budget and
-        // return a random choice. If we are not at context cap, call
-        // generator with the budget and then store the result
-        // for future use in `by_size`.
+        self.fetch_mut(rng, budget).map(|template| &*template)
+    }
+
+    /// Return a mutable reference to an item from the pool.
+    ///
+    /// Callers that model cumulative protocol state update this stored template
+    /// so later selections of the same template retain their prior values.
+    pub(crate) fn fetch_mut<'a, R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<&'a mut T, PoolError<G::Error>>
+    where
+        R: Rng + ?Sized,
+        G: crate::SizedGenerator<'a, Output = T>,
+        G::Error: 'a,
+    {
+        // If we are at context cap, search by_size for templates within the
+        // budget. Otherwise, generate and store one additional template before
+        // selecting a random eligible template.
         //
         // Size search is in the interval (0, budget].
-
         let upper = *budget;
 
         // Generate new instances until either context_cap is hit or the
-        // remaining space drops below our lookup interval.
+        // remaining storage budget is exhausted.
         if self.len < self.context_cap && self.consumed_bytes < self.max_available_bytes {
             let mut limit = *budget;
             if let Ok(item) = self.generator.generate(rng, &mut limit) {
-                let sz = item.encoded_len();
-                self.by_size.entry(sz).or_default().push(item);
+                let size = item.encoded_len();
+                self.by_size.entry(size).or_default().push(item);
                 self.len += 1;
-                self.consumed_bytes = self.consumed_bytes.saturating_add(sz);
-            } else {
-                // Generation failed. It's possible there's an existing
-                // template that fits the budget.
+                self.consumed_bytes = self.consumed_bytes.saturating_add(size);
             }
         }
+        // A generation failure does not prevent selecting an existing template
+        // that fits the requested budget.
 
-        let (choice_sz, choices) = self
+        let choice_size = *self
             .by_size
             .range(..=upper)
+            .map(|(size, _)| size)
             .choose(rng)
             .ok_or(PoolError::EmptyChoice)?;
-
-        let choice = choices.choose(rng).ok_or(PoolError::EmptyChoice)?;
-        *budget = budget.saturating_sub(*choice_sz);
+        let choices = self
+            .by_size
+            .get_mut(&choice_size)
+            .ok_or(PoolError::EmptyChoice)?;
+        let choice = choices.choose_mut(rng).ok_or(PoolError::EmptyChoice)?;
+        *budget = budget.saturating_sub(choice_size);
 
         Ok(choice)
     }

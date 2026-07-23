@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metric kind to simplify intake debugging.
 - OpenTelemetry cumulative metric generation now updates cumulative sums using
   aggregation temporality, preserves cumulative histogram min/max bounds, and
-  supports configurable histogram count limits.
+  supports configurable histogram count limits. Cumulative explicit histograms
+  now retain their state across payload generations.
 - HTTP blackhole now supports an `openmetrics` body variant for generated
   Prometheus/OpenMetrics scrape responses.
 - Updated to rand 0.10.x
