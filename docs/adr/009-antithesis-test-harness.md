@@ -46,13 +46,15 @@ Datadog/saluki's layout, with a "general" MVP scenario of three containers:
   sancov coverage instrumentation.
 - **lading** (system under test): the real lading binary, built
   `--features antithesis` with sancov coverage instrumentation and
-  `panic="abort"`, run with `--no-target --experiment-duration-infinite` against
-  a hard-wired `lading.yaml`, a tcp generator pointed at the sink, with telemetry
-  exposed via `--prometheus-addr` (lading requires telemetry to be configured).
-  Faulted.
-- **workload** (driver): emits the Antithesis `setup_complete` signal, then
-  idles. lading drives the load, so this container is the seam where
-  config-variation test commands will land later.
+  `panic="abort"`. lading reads its config once at startup and cannot be
+  reconfigured, so its entrypoint blocks on a `ready` sentinel and then boots
+  under the per-timeline config the harness sampled to the shared volume, run
+  `--no-target --experiment-duration-infinite --prometheus-addr <addr>`
+  (`--prometheus-addr` satisfies lading's telemetry requirement). A tcp generator
+  points at the sink. Faulted.
+- **workload** (driver): emits the Antithesis `setup_complete` signal, then idles
+  to host the test commands. lading drives the load itself, so the only command
+  today is `first_sample_config`, which samples this timeline's lading config.
 
 In a like manner to saluki we introduce a generic
 `test/antithesis/bin/launch.sh`, driven by per-scenario `launch.env`, tags
@@ -66,6 +68,25 @@ is off, is the single path both the sink and lading's bootstrap use to reach
 `antithesis_sdk`. lading's instrumentation wiring lives in a feature-gated
 `lading/src/antithesis_hooks.rs`, referenced from `lading/src/bin/lading.rs`. It
 does SDK init plus a panic-reporting hook.
+
+Config variation is a shared mechanism, not per-scenario code. The `harness`
+crate (`test/antithesis/harness/`) samples a config by building lading's own
+`generator::tcp::Config` from a value menu and serializing it, so the menu cannot
+drift from the real schema. Its `first_sample_config` command draws the
+structured choices from `AntithesisRng` (the SDK RNG, so each draw is a branch
+point Antithesis explores; `thread_rng` under Antithesis is seeded once and does
+not branch richly), writes the config plus a `ready` sentinel to a volume shared
+with the lading container, and tags the sample with `reachable!` so triage can
+count distinct variants. Scenarios reuse `harness` and differ only in wiring. The
+MVP menu varies the free axes the TCP sink already catches -- payload variant,
+throughput, and parallel connections -- over a fixed TCP transport; transport
+variation waits on a multi-protocol sink. Block size is derived from the sampled
+rate and connection count (not varied independently) so it stays within the
+divided per-connection throttle capacity. The payload `seed` is drawn from system
+entropy, not `AntithesisRng`: lading seeds its own PRNG from it and the docs
+forbid seeding a userspace RNG from SDK randomness, so payload content is opaque
+and effectively fixed across timelines -- acceptable because the sink asserts on
+bytes received, not content.
 
 Key sub-decisions:
 
@@ -82,8 +103,13 @@ Key sub-decisions:
 - **Three containers.** `setup_complete` and future config-variation
   live in a dedicated workload container rather than being owned by the faulted
   system under test.
-- **Config hard-wired for the MVP.** Config variation and test commands are
-  deferred to the workload seam.
+- **Config varied per timeline, sampled from lading's own types.** The shared
+  `harness` builds `tcp::Config` and serializes it, drawing the structured
+  choices from `AntithesisRng`. Sampling is a post-`setup_complete` `first_`
+  command so Antithesis branches each choice per timeline. Unit tests assert
+  every sampled config re-deserializes as a valid lading config and that the
+  block size never exceeds the divided per-connection throttle capacity, so the
+  menu cannot silently drift from the schema or produce a discard-spin config.
 
 ## Alternatives Considered
 
@@ -113,10 +139,22 @@ Rejected: the faulted system under test would own the setup signal, and
 config-variation test commands would have no home. A dedicated workload
 container keeps those concerns separate.
 
+### Sample the config in lading's entrypoint at boot
+
+Rejected. `snouty validate` does not execute `first_` commands, so with the
+sentinel approach lading stays blocked and does not boot under validate --
+validate still passes on `setup_complete`, exactly as saluki behaves. Sampling in
+lading's own entrypoint would make validate boot lading and push, but a boot-time
+draw is pre-`setup_complete`, which Antithesis branches less richly than a
+post-setup `first_` command. We chose the richer exploration; validate passing
+without booting the SUT is acceptable and is what saluki lives with.
+
 ## References
 
 - `lading_antithesis/` - SDK facade over `antithesis_sdk`
-- `test/antithesis/` - harness (to be created)
+- `test/antithesis/sink/` - the sink oracle crate
+- `test/antithesis/harness/` - shared config-variation crate (`first_sample_config`)
+- `test/antithesis/scenarios/general/` - the general scenario (Dockerfile, compose, launcher inputs)
 - `integration/sheepdog/`, `integration/ducks/` - the mechanism this replaces
 - saluki `test/antithesis/` - pattern source
 - ADR-001: Generator-Target-Blackhole Architecture (the sink is an
