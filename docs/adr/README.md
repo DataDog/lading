@@ -22,6 +22,7 @@ helping future contributors understand the reasoning behind the current design.
 | [006](006-testing-strategy.md) | Testing Strategy (Property Tests + Kani) | Accepted |
 | [007](007-code-style-and-abstraction.md) | Code Style and Abstraction Rules | Accepted |
 | [008](008-dependency-philosophy.md) | Dependency Philosophy | Accepted |
+| [009](009-antithesis-test-harness.md) | Antithesis Test Harness Architecture | Draft |
 
 ## Knowledge Map
 
@@ -49,6 +50,13 @@ How to write code for lading:
 - **ADR-004**: No-panic error handling - Graceful failure always
 - **ADR-007**: Code style and abstraction - The "shape rule" and naive style
 - **ADR-008**: Dependency philosophy - When to implement vs. import
+
+### Testing Infrastructure
+
+How lading is tested end-to-end:
+
+- **ADR-006**: Testing strategy - Property tests and Kani proofs
+- **ADR-009**: Antithesis test harness - Fault-injected exploration and the load-arrived oracle
 
 ### Decision Dependencies
 
@@ -78,6 +86,7 @@ When working on lading, consult these ADRs based on the task:
 | Modifying throttle | 003, 005, 006 |
 | Adding a dependency | 008 |
 | Writing tests | 006 |
+| Antithesis harness work | 009, 001, 006 |
 | Error handling | 004 |
 | Code style questions | 007 |
 | Performance work | 002, 005 |

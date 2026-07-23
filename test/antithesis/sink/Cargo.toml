@@ -1,0 +1,33 @@
+[package]
+name = "sink"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "TCP byte-counting sink oracle for the lading Antithesis harness."
+
+[[bin]]
+name = "sink"
+path = "src/main.rs"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lading-antithesis = { workspace = true, features = ["antithesis"] }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "signal",
+] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+proptest = { workspace = true }

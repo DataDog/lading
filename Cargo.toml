@@ -10,6 +10,7 @@ members = [
   "lading_fuzz",
   "lading_payload",
   "lading_throttle",
+  "test/antithesis/sink",
 ]
 
 [workspace.dependencies]
@@ -71,6 +72,8 @@ datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c
 protobuf = { version = "3.7" }
 enum_dispatch = { version = "0.3" }
 antithesis_sdk = { git = "https://github.com/antithesishq/antithesis-sdk-rust", rev = "78c9db56771f0f6b01cb5404765c5a96852c159c", default-features = false } # 0.2.8 is pinned to rand 0.8, rev version allows us to select workspace rand
+antithesis-instrumentation = { version = "0.1" }
+lading-antithesis = { path = "lading_antithesis" }
 
 [workspace.lints.clippy]
 all = "deny"

@@ -1,0 +1,59 @@
+name: lading
+
+services:
+  # Oracle: the TCP sink that counts received bytes and owns the "load arrived"
+  # assertion. Always up, healthchecked, never faulted.
+  sink:
+    container_name: sink
+    hostname: sink
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../../../..
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: sink
+    image: sink:${ANTITHESIS_IMAGE_TAG:-latest}
+    environment:
+      NO_COLOR: "1"
+    healthcheck:
+      # /dev/tcp avoids needing curl in the image.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9000'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # System under test: the instrumented lading, pushing TCP load at the sink.
+  lading:
+    container_name: lading
+    hostname: lading
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../../../..
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: lading
+    image: lading:${ANTITHESIS_IMAGE_TAG:-latest}
+    environment:
+      NO_COLOR: "1"
+      RUST_LOG: "info"
+    depends_on:
+      sink:
+        condition: service_healthy
+
+  # Driver: emits setup_complete then idles. lading drives the load, so this is
+  # the seam where config-variation test commands land later.
+  workload:
+    container_name: workload
+    hostname: workload
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../../../..
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: workload
+    image: workload:${ANTITHESIS_IMAGE_TAG:-latest}
+    environment:
+      NO_COLOR: "1"
+    depends_on:
+      sink:
+        condition: service_healthy

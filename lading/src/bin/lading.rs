@@ -33,6 +33,13 @@ use tokio::{
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
+// Pull in the Antithesis coverage-instrumentation runtime shim only when
+// building for antithesis. Load-bearing: the `use ... as _` keeps the shim from
+// being dropped as unused, so its sancov symbols stay linked in the binary.
+#[cfg(feature = "antithesis")]
+// ast-grep-ignore: no-as-imports
+use antithesis_instrumentation as _;
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Target related error: {0}")]
@@ -730,6 +737,10 @@ fn init_tracing(json_output: bool) {
 }
 
 fn main() -> Result<(), Error> {
+    // Initialize the Antithesis SDK and panic hook before anything can panic.
+    #[cfg(feature = "antithesis")]
+    lading::antithesis_hooks::init();
+
     // Two-parser fallback logic until CliFlatLegacy is removed
     let (json_output, args) = match CliWithSubcommands::try_parse() {
         Ok(cli) => match cli.command {
@@ -776,6 +787,10 @@ fn main() -> Result<(), Error> {
     // function, hence the divide by two.
     let max_shutdown_delay = Duration::from_secs(args.max_shutdown_delay.into());
     let disable_inspector = args.disable_inspector;
+
+    // Bootstrap probe: proves the SDK is linked and the instrumentation path is
+    // wired. No-op when the `antithesis` feature is off.
+    lading_antithesis::reachable!("lading completed bootstrap");
 
     let runtime = Builder::new_multi_thread()
         .enable_io()
