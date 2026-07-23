@@ -195,7 +195,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let name = format!("{prefix}_{name_suffix}");
 
         // Cumulative histograms keep one state per metric identity. Other
-        // metric kinds use a weighted number of points for payload variety.
+        // metric kinds use a weighted distribution, heavily favoring one or
+        // two points while allowing up to 60 for payload variety.
         let total_data_points = match kind {
             Kind::Histogram {
                 aggregation_temporality: 2,

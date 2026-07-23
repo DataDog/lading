@@ -75,8 +75,15 @@ where
         G: crate::SizedGenerator<'a, Output = T>,
         G::Error: 'a,
     {
+        // If we are at context cap, search by_size for templates within the
+        // budget. Otherwise, generate and store one additional template before
+        // selecting a random eligible template.
+        //
+        // Size search is in the interval (0, budget].
         let upper = *budget;
 
+        // Generate new instances until either context_cap is hit or the
+        // remaining storage budget is exhausted.
         if self.len < self.context_cap && self.consumed_bytes < self.max_available_bytes {
             let mut limit = *budget;
             if let Ok(item) = self.generator.generate(rng, &mut limit) {
@@ -86,6 +93,8 @@ where
                 self.consumed_bytes = self.consumed_bytes.saturating_add(size);
             }
         }
+        // A generation failure does not prevent selecting an existing template
+        // that fits the requested budget.
 
         let choice_size = *self
             .by_size
