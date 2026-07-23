@@ -618,8 +618,8 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
-        let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
-            Ok(t) => t.to_owned(),
+        let tpl: &mut ResourceMetrics = match self.pool.fetch_mut(rng, budget) {
+            Ok(template) => template,
             Err(PoolError::EmptyChoice) => {
                 debug!("Pool was unable to satify request for {budget} size");
                 Err(PoolError::EmptyChoice)?
@@ -882,7 +882,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         *budget = original_budget - required_bytes;
         self.data_points_per_resource = data_points_count;
 
-        Ok(tpl)
+        Ok(tpl.clone())
     }
 }
 
@@ -1814,7 +1814,10 @@ mod test {
                 let previous = first_histogram_point(&first);
                 let current = first_histogram_point(&second);
                 assert_non_decreasing_buckets(&previous.bucket_counts, &current.bucket_counts);
+                assert_eq!(current.count, current.bucket_counts.iter().sum::<u64>());
                 assert!(current.count >= previous.count);
+                assert!(current.time_unix_nano > previous.time_unix_nano);
+                assert_eq!(current.start_time_unix_nano, previous.start_time_unix_nano);
                 assert!(current.sum >= previous.sum);
                 assert!(current.min <= previous.min);
                 assert!(current.max >= previous.max);

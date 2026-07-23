@@ -194,8 +194,14 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let prefix = kind.name_prefix();
         let name = format!("{prefix}_{name_suffix}");
 
-        // Use weighted distribution: heavily favors small numbers (1-2) but can go up to 60
-        let total_data_points = exponential_weighted_range(rng, 1, 60);
+        // Cumulative histograms keep one state per metric identity. Other
+        // metric kinds use a weighted number of points for payload variety.
+        let total_data_points = match kind {
+            Kind::Histogram {
+                aggregation_temporality: 2,
+            } => 1,
+            _ => exponential_weighted_range(rng, 1, 60),
+        };
         let data = match kind {
             Kind::Gauge => {
                 let data_points = (0..total_data_points)

@@ -58,38 +58,47 @@ where
         G: crate::SizedGenerator<'a, Output = T>,
         G::Error: 'a,
     {
-        // If we are at context cap, search by_size for templates <= budget and
-        // return a random choice. If we are not at context cap, call
-        // generator with the budget and then store the result
-        // for future use in `by_size`.
-        //
-        // Size search is in the interval (0, budget].
+        self.fetch_mut(rng, budget).map(|template| &*template)
+    }
 
+    /// Return a mutable reference to an item from the pool.
+    ///
+    /// Callers that model cumulative protocol state update this stored template
+    /// so later selections of the same template retain their prior values.
+    pub(crate) fn fetch_mut<'a, R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<&'a mut T, PoolError<G::Error>>
+    where
+        R: Rng + ?Sized,
+        G: crate::SizedGenerator<'a, Output = T>,
+        G::Error: 'a,
+    {
         let upper = *budget;
 
-        // Generate new instances until either context_cap is hit or the
-        // remaining space drops below our lookup interval.
         if self.len < self.context_cap && self.consumed_bytes < self.max_available_bytes {
             let mut limit = *budget;
             if let Ok(item) = self.generator.generate(rng, &mut limit) {
-                let sz = item.encoded_len();
-                self.by_size.entry(sz).or_default().push(item);
+                let size = item.encoded_len();
+                self.by_size.entry(size).or_default().push(item);
                 self.len += 1;
-                self.consumed_bytes = self.consumed_bytes.saturating_add(sz);
-            } else {
-                // Generation failed. It's possible there's an existing
-                // template that fits the budget.
+                self.consumed_bytes = self.consumed_bytes.saturating_add(size);
             }
         }
 
-        let (choice_sz, choices) = self
+        let choice_size = *self
             .by_size
             .range(..=upper)
+            .map(|(size, _)| size)
             .choose(rng)
             .ok_or(PoolError::EmptyChoice)?;
-
-        let choice = choices.choose(rng).ok_or(PoolError::EmptyChoice)?;
-        *budget = budget.saturating_sub(*choice_sz);
+        let choices = self
+            .by_size
+            .get_mut(&choice_size)
+            .ok_or(PoolError::EmptyChoice)?;
+        let choice = choices.choose_mut(rng).ok_or(PoolError::EmptyChoice)?;
+        *budget = budget.saturating_sub(choice_size);
 
         Ok(choice)
     }
