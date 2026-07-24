@@ -72,9 +72,10 @@ RUN --mount=type=cache,target=/tools/target,id=antithesis-tools-target \
     --mount=type=cache,target=/root/.cargo/registry,id=cargo-registry \
     --mount=type=cache,target=/root/.cargo/git,id=cargo-git \
     cargo build --release --package sink --bin sink && \
-    cargo build --release --package harness --bin first_sample_config && \
+    cargo build --release --package harness --bin first_sample_config --bin anytime_capture_consistent && \
     cp /tools/target/release/sink /usr/local/bin/sink && \
-    cp /tools/target/release/first_sample_config /usr/local/bin/first_sample_config
+    cp /tools/target/release/first_sample_config /usr/local/bin/first_sample_config && \
+    cp /tools/target/release/anytime_capture_consistent /usr/local/bin/anytime_capture_consistent
 
 # ---------------------------------------------------------------------------
 # Runtime: instrumented lading (system under test).
@@ -121,4 +122,5 @@ COPY --chmod=755 test/antithesis/scenarios/general/workload/entrypoint.sh /entry
 # template structure; the compiled command binary is injected below.
 COPY --chmod=755 test/antithesis/scenarios/general/workload/test/ /opt/antithesis/test/
 COPY --from=tools-builder --chmod=755 /usr/local/bin/first_sample_config /opt/antithesis/test/v1/main/first_sample_config
+COPY --from=tools-builder --chmod=755 /usr/local/bin/anytime_capture_consistent /opt/antithesis/test/v1/main/anytime_capture_consistent
 ENTRYPOINT ["/entrypoint.sh"]

@@ -43,6 +43,9 @@ services:
       # first_sample_config (workload) writes this timeline's lading.yaml + ready
       # sentinel here; lading's entrypoint blocks on it, then boots under it.
       - shared:/shared:ro
+      # lading writes its capture here (rw); it is a named volume so it survives a
+      # node_termination of this container for the checker to validate.
+      - capture:/capture
     depends_on:
       sink:
         condition: service_healthy
@@ -64,6 +67,9 @@ services:
       CONFIG_DIR: "/shared"
     volumes:
       - shared:/shared
+      # Read-only: the checker (anytime_capture_consistent) validates lading's
+      # capture after node faults. workload is never faulted, so it survives.
+      - capture:/capture:ro
     depends_on:
       sink:
         condition: service_healthy
@@ -71,3 +77,6 @@ services:
 volumes:
   # Carries the sampled lading.yaml + ready sentinel from workload to lading.
   shared:
+  # Carries lading's capture file; survives a node_termination of lading so the
+  # workload's checker can validate crash-consistency.
+  capture:
