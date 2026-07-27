@@ -11,6 +11,8 @@
 
 use http_body_util::BodyExt;
 
+#[cfg(feature = "antithesis")]
+pub mod antithesis_hooks;
 pub mod blackhole;
 pub(crate) mod codec;
 mod common;

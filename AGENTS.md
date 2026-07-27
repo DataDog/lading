@@ -13,6 +13,7 @@ behind these rules, see the [Architecture Decision Records](docs/adr/README.md).
 | Shape rule | 3+ repetitions = create abstraction |
 | Dependencies | When in doubt, implement rather than import |
 | HashMap allowed? | No - use `IndexMap`/`IndexSet` for determinism |
+| Recording a design decision | Write an ADR in `docs/adr/` (see [README](docs/adr/README.md)) |
 
 ## Task Routing
 
@@ -26,6 +27,26 @@ behind these rules, see the [Architecture Decision Records](docs/adr/README.md).
 | Writing tests | Property tests default, document invariants | [006](docs/adr/006-testing-strategy.md) |
 | Adding a dependency | Evaluate: performance, determinism, control | [008](docs/adr/008-dependency-philosophy.md) |
 | Code style questions | Shape rule, no mod.rs, imports at top | [007](docs/adr/007-code-style-and-abstraction.md) |
+
+## Architecture Decisions
+
+Significant architectural or design decisions are recorded as Architecture
+Decision Records (ADRs) in [`docs/adr/`](docs/adr/), never as ad-hoc design or
+spec documents elsewhere.
+
+When a task involves a design decision worth capturing -- a new subsystem, a
+cross-cutting policy, a non-obvious trade-off:
+
+1. Copy [`docs/adr/000-template.md`](docs/adr/000-template.md) to
+   `docs/adr/NNN-title-with-dashes.md` using the next sequential number.
+2. Fill in every section: Context, Decision, Consequences (positive, negative,
+   neutral), Alternatives Considered, References.
+3. Update the [ADR README](docs/adr/README.md) index and knowledge map.
+
+Do not write standalone design docs, brainstorming specs, or plan files in other
+locations. The ADR is the durable record; a decision that is not in `docs/adr/`
+is not recorded. See the [ADR README](docs/adr/README.md) for the full workflow,
+including how to supersede an existing decision.
 
 ## Architecture Overview
 
@@ -182,3 +203,4 @@ Override locally: `PROPTEST_CASES=512 ci/test`
 8. Document invariants with formal language in tests/proofs
 9. Consider measurement interference
 10. No mod.rs files, imports at file top only
+11. Record design decisions as ADRs in `docs/adr/`, not ad-hoc spec docs

@@ -18,7 +18,10 @@ unused-allowed-license = "allow"
 
 [sources]
 unknown-git = "deny"
-allow-git = ["https://github.com/DataDog/saluki"]
+allow-git = [
+  "https://github.com/DataDog/saluki",
+  "https://github.com/antithesishq/antithesis-sdk-rust",
+]
 
 [advisories]
 version = 2
