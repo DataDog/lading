@@ -72,7 +72,9 @@ RUN --mount=type=cache,target=/tools/target,id=antithesis-tools-target \
     --mount=type=cache,target=/root/.cargo/registry,id=cargo-registry \
     --mount=type=cache,target=/root/.cargo/git,id=cargo-git \
     cargo build --release --package sink --bin sink && \
-    cp /tools/target/release/sink /usr/local/bin/sink
+    cargo build --release --package harness --bin first_sample_config && \
+    cp /tools/target/release/sink /usr/local/bin/sink && \
+    cp /tools/target/release/first_sample_config /usr/local/bin/first_sample_config
 
 # ---------------------------------------------------------------------------
 # Runtime: instrumented lading (system under test).
@@ -83,12 +85,13 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y ca-certificates libssl3 && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=lading-builder /usr/local/bin/lading /usr/local/bin/lading
-COPY test/antithesis/scenarios/general/lading.yaml /etc/lading/lading.yaml
+COPY --chmod=755 test/antithesis/scenarios/general/lading-entrypoint.sh /usr/local/bin/lading-entrypoint.sh
 # Antithesis scans /symbols in every pushed image and matches by build-id.
 RUN mkdir -p /symbols && ln -s /usr/local/bin/lading /symbols/lading
-# lading requires telemetry to be configured; --prometheus-addr satisfies it
-# without the unbounded disk growth a capture file would incur over an infinite run.
-ENTRYPOINT ["/usr/local/bin/lading", "--no-target", "--experiment-duration-infinite", "--prometheus-addr", "0.0.0.0:9102", "--config-path", "/etc/lading/lading.yaml"]
+# lading reads its config once at startup, so the entrypoint blocks on the sampled
+# config (first_sample_config -> shared volume) before exec'ing lading. Telemetry
+# (--prometheus-addr) is set inside the entrypoint.
+ENTRYPOINT ["/usr/local/bin/lading-entrypoint.sh"]
 
 # ---------------------------------------------------------------------------
 # Runtime: sink oracle (SDK-linked, uninstrumented).
@@ -107,6 +110,15 @@ ENTRYPOINT ["/usr/local/bin/sink"]
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS workload
 ENV NO_COLOR=1
+# first_sample_config links lading, which carries a dynamic libssl dependency.
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y ca-certificates libssl3 && \
+    rm -rf /var/lib/apt/lists/*
 COPY --chmod=755 test/antithesis/scenarios/general/workload/setup-complete.sh /opt/antithesis/setup-complete.sh
 COPY --chmod=755 test/antithesis/scenarios/general/workload/entrypoint.sh /entrypoint.sh
+# Antithesis test commands live here; the platform discovers and runs them from
+# /opt/antithesis/test/v1/<template>/<command>. Checked-in files provide the
+# template structure; the compiled command binary is injected below.
+COPY --chmod=755 test/antithesis/scenarios/general/workload/test/ /opt/antithesis/test/
+COPY --from=tools-builder --chmod=755 /usr/local/bin/first_sample_config /opt/antithesis/test/v1/main/first_sample_config
 ENTRYPOINT ["/entrypoint.sh"]

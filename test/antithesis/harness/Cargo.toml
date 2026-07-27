@@ -1,0 +1,27 @@
+[package]
+name = "harness"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Shared Antithesis harness for lading scenarios: per-timeline config sampling."
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "first_sample_config"
+path = "src/bin/first_sample_config.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+lading = { path = "../../../lading" }
+lading-payload = { path = "../../../lading_payload" }
+lading-antithesis = { workspace = true, features = ["antithesis"] }
+antithesis_sdk = { workspace = true, features = ["full", "rand_v0_10"] }
+byte-unit = { workspace = true, features = ["std"] }
+rand = { workspace = true, features = ["thread_rng", "std_rng"] }
+serde_yaml = { workspace = true }
+anyhow = { workspace = true }

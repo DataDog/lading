@@ -10,6 +10,7 @@ members = [
   "lading_fuzz",
   "lading_payload",
   "lading_throttle",
+  "test/antithesis/harness",
   "test/antithesis/sink",
 ]
 

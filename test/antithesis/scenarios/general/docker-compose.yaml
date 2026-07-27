@@ -36,6 +36,13 @@ services:
     environment:
       NO_COLOR: "1"
       RUST_LOG: "info"
+      # Must match the writer (first_sample_config) so both ends of the handoff
+      # agree on the shared-config directory.
+      CONFIG_DIR: "/shared"
+    volumes:
+      # first_sample_config (workload) writes this timeline's lading.yaml + ready
+      # sentinel here; lading's entrypoint blocks on it, then boots under it.
+      - shared:/shared:ro
     depends_on:
       sink:
         condition: service_healthy
@@ -54,6 +61,13 @@ services:
     image: workload:${ANTITHESIS_IMAGE_TAG:-latest}
     environment:
       NO_COLOR: "1"
+      CONFIG_DIR: "/shared"
+    volumes:
+      - shared:/shared
     depends_on:
       sink:
         condition: service_healthy
+
+volumes:
+  # Carries the sampled lading.yaml + ready sentinel from workload to lading.
+  shared:
