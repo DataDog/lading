@@ -6,4 +6,5 @@
 //! system-under-test boots from. The menu is built from lading's own
 //! `tcp::Config`, so it cannot drift from the real config schema.
 
+pub mod capture;
 pub mod config;

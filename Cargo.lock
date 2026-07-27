@@ -1374,9 +1374,14 @@ dependencies = [
  "byte-unit",
  "lading",
  "lading-antithesis",
+ "lading-capture",
  "lading-payload",
  "rand 0.10.1",
+ "rustc-hash",
+ "serde_json",
  "serde_yaml",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

@@ -14,8 +14,13 @@ while [ ! -f "${CONFIG_DIR}/ready" ]; do
 done
 echo "lading: config ready, starting" >&2
 
+# --capture-path satisfies lading's telemetry requirement and writes the capture
+# the anytime_capture_consistent checker validates for crash-consistency after
+# node faults. flush every 1s so a kill has a fresh file and many kill-in-flight
+# opportunities. Capture lives on its own volume so it survives the killed container.
 exec /usr/local/bin/lading \
   --no-target \
   --experiment-duration-infinite \
-  --prometheus-addr 0.0.0.0:9102 \
+  --capture-path /capture/capture.jsonl \
+  --capture-flush-seconds 1 \
   --config-path "${CONFIG_DIR}/lading.yaml"

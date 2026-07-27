@@ -1,2 +1,5 @@
 # Rendered compose files produced by bin/launch.sh at submit time.
 scenarios/*/.launch/
+
+# antithesis-research scratchbook: working notes, never committed.
+scratchbook/
