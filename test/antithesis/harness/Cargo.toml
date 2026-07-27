@@ -17,6 +17,10 @@ path = "src/bin/first_sample_config.rs"
 name = "anytime_capture_consistent"
 path = "src/bin/anytime_capture_consistent.rs"
 
+[[bin]]
+name = "anytime_lading_drained_bounded"
+path = "src/bin/anytime_lading_drained_bounded.rs"
+
 [lints]
 workspace = true
 
