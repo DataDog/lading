@@ -278,6 +278,13 @@ impl TcpWorker {
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
+                    // A connected worker honors shutdown here via select. The
+                    // connect-loop branch above does not select on shutdown, so a
+                    // worker stuck reconnecting to an unreachable destination
+                    // never reaches this point. The contrast localizes that gap.
+                    lading_antithesis::reachable!(
+                        "a connected tcp generator worker honored the shutdown signal and stopped promptly"
+                    );
                     return Ok(());
                 },
             }

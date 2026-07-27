@@ -662,6 +662,12 @@ async fn inner_main(
             },
             () = &mut timer_watcher_wait => {
                 info!("shutdown signal received.");
+                // First of four graceful-shutdown breadcrumbs. If a regression
+                // stalls the drain, the later three stop being reached and triage
+                // sees where progress died.
+                lading_antithesis::reachable!(
+                    "lading began graceful shutdown when its experiment timer elapsed"
+                );
                 break Ok(());
             }
             Some(res) = osrv_joinset.join_next() => {
@@ -708,11 +714,22 @@ async fn inner_main(
     };
 
     shutdown_broadcast.signal_and_wait().await;
+    // Second breadcrumb. The barrier waits only on registered peers, today just
+    // the capture manager. If the load-bearing watchers are ever registered, a
+    // generator stuck in its connect loop would hang here and this stops firing.
+    lading_antithesis::reachable!(
+        "lading's shutdown drain barrier returned without hanging"
+    );
 
     // Await the capture manager task, if it exists, to ensure all data is
     // flushed.
     if let Some(handle) = capture_manager_handle {
         let _ = handle.await;
+        // Third breadcrumb. The capture manager task joined, so every matured
+        // capture record reached disk.
+        lading_antithesis::reachable!(
+            "lading flushed all matured capture data to disk during graceful shutdown"
+        );
     }
 
     res
@@ -813,6 +830,11 @@ fn main() -> Result<(), Error> {
     );
     runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");
+    // Fourth breadcrumb. The runtime drained within the shutdown-delay backstop
+    // and lading is about to return its exit status.
+    lading_antithesis::reachable!(
+        "lading drained its runtime within the shutdown-delay backstop and exited cleanly"
+    );
     res
 }
 

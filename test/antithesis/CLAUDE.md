@@ -38,9 +38,17 @@ ready; the workload container runs it from its entrypoint.
   It receives lading's load and owns the "load arrived" assertion. SDK-linked but
   built without coverage instrumentation. Built, linted, and tested from the repo
   root like any other crate.
-- `scenarios/general/` — the MVP scenario: `Dockerfile` (three targets: the
-  instrumented lading system under test, the sink, the workload), a
-  `docker-compose.yaml` snouty consumes as `--config`, `launch.env`, the
-  hard-wired `lading.yaml`, and the `workload/` build inputs. Config variation is
-  deferred to the workload seam.
+- `harness/` — the shared harness crate. Holds the per-timeline config sampler
+  and the workload test commands baked into scenarios: `first_sample_config`,
+  `anytime_capture_consistent`, and `anytime_lading_drained_bounded`.
+- `scenarios/general/` — the MVP scenario. lading pushes TCP load at the sink,
+  the workload samples a lading config per timeline and validates capture
+  crash-consistency across node faults. See `scenarios/general/README.md`.
+- `scenarios/shutdown-safety/` — graceful-shutdown scenario. lading runs under a
+  `timeout` watchdog with its generator aimed at an unreachable destination, and
+  the workload asserts lading drains cleanly within a bound. No sink, no node
+  faults. See `scenarios/shutdown-safety/README.md`.
+- Each scenario directory carries a `Dockerfile`, a `docker-compose.yaml` snouty
+  consumes as `--config`, `launch.env`, a `lading.yaml` when the config is fixed,
+  the `workload/` build inputs, and a `README.md`.
 - `bin/launch.sh` — the generic launcher shared by every scenario.

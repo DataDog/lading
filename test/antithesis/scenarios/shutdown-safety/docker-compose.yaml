@@ -1,0 +1,50 @@
+name: lading-shutdown-safety
+
+services:
+  # System under test: the instrumented lading, whose tcp generator is aimed at
+  # an unreachable address. Runs under a `timeout` watchdog (see the entrypoint)
+  # and writes lading's exit code to the shared volume for the checker.
+  lading:
+    container_name: lading
+    hostname: lading
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../../../..
+      dockerfile: test/antithesis/scenarios/shutdown-safety/Dockerfile
+      target: lading
+    image: lading-shutdown-safety:${ANTITHESIS_IMAGE_TAG:-latest}
+    environment:
+      NO_COLOR: "1"
+      RUST_LOG: "info"
+    volumes:
+      # lading writes lading_exit here (rw); the workload's checker reads it.
+      - shared:/shared
+      # lading's capture; satisfies the telemetry requirement.
+      - capture:/capture
+
+  # Driver: bakes the bounded-drain checker, emits setup_complete, then idles.
+  # There is deliberately no sink service; the generator's destination is
+  # unreachable by design.
+  workload:
+    container_name: workload
+    hostname: workload
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../../../..
+      dockerfile: test/antithesis/scenarios/shutdown-safety/Dockerfile
+      target: workload
+    image: workload-shutdown-safety:${ANTITHESIS_IMAGE_TAG:-latest}
+    environment:
+      NO_COLOR: "1"
+    volumes:
+      # Read-only: the checker (anytime_lading_drained_bounded) reads the exit
+      # code lading records here. Only lading writes it.
+      - shared:/shared:ro
+
+volumes:
+  # Carries lading's recorded exit code from lading to the workload's checker.
+  shared:
+  # Carries lading's capture file.
+  capture:
