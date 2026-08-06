@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.33.0]
 ## Changed
 - **Breaking Change**: Datadog blackhole now records received series under the
   `target/` prefix, matching the prometheus and expvar target metrics
