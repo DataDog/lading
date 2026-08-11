@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## Changed
+- **Breaking Change**: Datadog blackhole now records received series under the
+  `target/` prefix, matching the prometheus and expvar target metrics
+  collectors. The `record` policy still matches on the unprefixed series name.
+- **Breaking Change**: Datadog blackhole does not record any target metrics by
+  default.
+
+## Added
 - Datadog blackhole now accepts a `record` policy (`all` / `disabled` /
   `series_to_keep: [...]`) controlling which received series are recorded as
   capture metrics.
@@ -24,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metric, or omits the field entirely if the pool is empty.
 - `dogstatsd` generator now supports DogStatsD protocol v1.3 `|T` timestamps
   for count and gauge metrics via `timestamp.range` and `timestamp.probability`.
-- Fixed: `dogstatsd` tag generation would silently fail with a misleading
+
+## Fixed
+- `dogstatsd` tag generation would silently fail with a misleading
   `StringGenerate` error for any `tag_length` whose range collapses after
   reserving one byte for the `:` separator -- every constant or single-value
   range (e.g. `Constant(3)`, `Constant(4)`, `Inclusive { min: 100, max: 100 }`)

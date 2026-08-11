@@ -49,6 +49,9 @@ use tracing::{debug, error, info, trace, warn};
 use super::General;
 use crate::proto::datadog::intake::metrics::MetricPayload;
 
+/// Namespace for incoming metrics; matches other target-originated metrics.
+const TARGET_PREFIX: &str = "target/";
+
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Datadog`].
 pub enum Error {
@@ -112,7 +115,7 @@ pub enum RecordPolicy {
 
 impl Default for RecordPolicy {
     fn default() -> Self {
-        Self::All
+        Self::Disabled
     }
 }
 
@@ -367,9 +370,16 @@ async fn handle_v2_protobuf(
             );
 
             if !matches!(record, RecordPolicy::Disabled) {
+                let mut scratch = String::new();
+
                 for series in payload.series.iter().filter(|series| {
                     !series.points.is_empty() && record.records_series(&series.metric)
                 }) {
+                    scratch.clear();
+                    scratch.reserve(TARGET_PREFIX.len() + series.metric.len());
+                    scratch.push_str(TARGET_PREFIX);
+                    scratch.push_str(&series.metric);
+
                     // Parse Datadog tags (format: "key:value" or "key") into label pairs.
                     // Key-only tags are represented with an empty value.
                     let tag_pairs: Vec<(&str, &str)> = series
@@ -395,7 +405,7 @@ async fn handle_v2_protobuf(
                                 // COUNT
                                 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 let value = point.value.round() as u64;
-                                counter_incr(&series.metric, &tag_pairs, value, timestamp).await
+                                counter_incr(&scratch, &tag_pairs, value, timestamp).await
                             }
                             2 => {
                                 // RATE
@@ -409,11 +419,11 @@ async fn handle_v2_protobuf(
                                 }
                                 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 let val = (point.value * interval as f64).round() as u64;
-                                counter_incr(&series.metric, &tag_pairs, val, timestamp).await
+                                counter_incr(&scratch, &tag_pairs, val, timestamp).await
                             }
                             3 => {
                                 // GAUGE
-                                gauge_set(&series.metric, &tag_pairs, point.value, timestamp).await
+                                gauge_set(&scratch, &tag_pairs, point.value, timestamp).await
                             }
                             i => {
                                 warn!("Unknown metric type, skipping: {i}");
