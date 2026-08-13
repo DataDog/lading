@@ -11,11 +11,11 @@ use std::{
 
 use arrow_array::{
     ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array,
+    TimestampMillisecondArray, UInt64Array, builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
-use lading_capture_schema::{capture_schema, columns};
+use lading_capture_schema::{capture_schema, columns, label_dictionary_type};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
@@ -210,16 +210,34 @@ impl<W: Write + Seek + Send> Format<W> {
         label_offsets.push(0i32);
         label_offsets.extend_from_slice(&self.buffers.label_offsets);
 
-        // Build the labels map array using pre-allocated buffers
-        let keys_array = Arc::new(StringArray::from(self.buffers.label_keys.clone()));
-        let values_array = Arc::new(StringArray::from(self.buffers.label_values.clone()));
+        // Build the labels map array using pre-allocated buffers. Keys and
+        // values are dictionary-encoded (Int32,Utf8) so downstream readers
+        // materialize each distinct string once; labels dominate capture memory.
+        let mut keys_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for key in &self.buffers.label_keys {
+            keys_builder.append_value(key);
+        }
+        let keys_array = Arc::new(keys_builder.finish());
+        let mut values_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for value in &self.buffers.label_values {
+            values_builder.append_value(value);
+        }
+        let values_array = Arc::new(values_builder.finish());
         let struct_array = StructArray::from(vec![
             (
-                Arc::new(Field::new(columns::LABEL_KEY, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_KEY,
+                    label_dictionary_type(),
+                    false,
+                )),
                 keys_array as ArrayRef,
             ),
             (
-                Arc::new(Field::new(columns::LABEL_VALUE, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_VALUE,
+                    label_dictionary_type(),
+                    false,
+                )),
                 values_array as ArrayRef,
             ),
         ]);
@@ -227,8 +245,8 @@ impl<W: Write + Seek + Send> Format<W> {
         let field = Arc::new(Field::new(
             columns::LABEL_ENTRIES,
             DataType::Struct(Fields::from(vec![
-                Field::new(columns::LABEL_KEY, DataType::Utf8, false),
-                Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
+                Field::new(columns::LABEL_KEY, label_dictionary_type(), false),
+                Field::new(columns::LABEL_VALUE, label_dictionary_type(), false),
             ])),
             false,
         ));

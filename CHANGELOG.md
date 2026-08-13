@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ## Changed
+- **Breaking Change**: Capture parquet files now type the `labels` map `key` and
+  `value` as `Dictionary(Int32, Utf8)` instead of `Utf8`. Labels dominate capture
+  memory, and dictionary typing lets readers materialize each distinct string
+  once. Consumers must read the label key/value columns as dictionary arrays; the
+  old and new schemas are not interchangeable.
 - **Breaking Change**: Datadog blackhole now records received series under the
   `target/` prefix, matching the prometheus and expvar target metrics
   collectors. The `record` policy still matches on the unprefixed series name.

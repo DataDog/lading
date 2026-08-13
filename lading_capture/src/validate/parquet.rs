@@ -13,7 +13,8 @@ use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
 use arrow_array::{
-    Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
+    Array, ArrayAccessor, DictionaryArray, MapArray, StringArray, StructArray,
+    TimestampMillisecondArray, UInt64Array, types::Int32Type,
 };
 use lading_capture_schema::columns;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -184,16 +185,32 @@ pub fn validate_parquet<P: AsRef<Path>>(
             let key_array = labels_slice
                 .column(0)
                 .as_any()
-                .downcast_ref::<StringArray>()
+                .downcast_ref::<DictionaryArray<Int32Type>>()
                 .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels keys are not StringArray".to_string())
+                    Error::InvalidColumnType(
+                        "Labels keys are not Dictionary(Int32,Utf8)".to_string(),
+                    )
+                })?
+                .downcast_dict::<StringArray>()
+                .ok_or_else(|| {
+                    Error::InvalidColumnType(
+                        "Labels keys dictionary values are not Utf8".to_string(),
+                    )
                 })?;
             let value_array = labels_slice
                 .column(1)
                 .as_any()
-                .downcast_ref::<StringArray>()
+                .downcast_ref::<DictionaryArray<Int32Type>>()
                 .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels values are not StringArray".to_string())
+                    Error::InvalidColumnType(
+                        "Labels values are not Dictionary(Int32,Utf8)".to_string(),
+                    )
+                })?
+                .downcast_dict::<StringArray>()
+                .ok_or_else(|| {
+                    Error::InvalidColumnType(
+                        "Labels values dictionary values are not Utf8".to_string(),
+                    )
                 })?;
 
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
