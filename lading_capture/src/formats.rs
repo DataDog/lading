@@ -71,8 +71,8 @@ mod tests {
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
-        TimestampMillisecondArray, UInt64Array,
+        Array, ArrayAccessor, BinaryArray, DictionaryArray, Float64Array, MapArray, StringArray,
+        StructArray, TimestampMillisecondArray, UInt64Array, types::Int32Type,
     };
     use bytes::Bytes;
     use datadog_protos::metrics::Dogsketch;
@@ -505,13 +505,17 @@ mod tests {
                 let keys = labels_slice
                     .column(0)
                     .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label keys are strings");
+                    .downcast_ref::<DictionaryArray<Int32Type>>()
+                    .expect("label keys are Dictionary(Int32,Utf8)")
+                    .downcast_dict::<StringArray>()
+                    .expect("label key dictionary values are strings");
                 let values = labels_slice
                     .column(1)
                     .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label values are strings");
+                    .downcast_ref::<DictionaryArray<Int32Type>>()
+                    .expect("label values are Dictionary(Int32,Utf8)")
+                    .downcast_dict::<StringArray>()
+                    .expect("label value dictionary values are strings");
 
                 let mut labels = FxHashMap::default();
                 for i in 0..keys.len() {
