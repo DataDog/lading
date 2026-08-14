@@ -29,17 +29,14 @@ use crate::line;
 /// Resolve a label map column typed as [`label_dictionary_type`] to a typed
 /// dictionary view of its `Utf8` values.
 ///
-/// Both the label `key` and `value` columns are written as
-/// `Dictionary(Int32, Utf8)`, so every reader resolves them the same way. This
-/// is the single canonical decode path: readers in other crates (e.g. `captool`)
-/// call it too, so a schema change here surfaces in every reader at once. On
-/// failure returns a message prefixed with `column_name` (e.g. `"Labels keys"`)
-/// so callers can surface distinct errors for the key and value columns.
+/// The single decode path for both the `key` and `value` columns, shared across
+/// crates (e.g. `captool`) so a schema change surfaces everywhere at once.
+/// `column_name` prefixes the error so callers can tell the two columns apart.
 ///
 /// # Errors
 ///
-/// Returns an error message if `column` is not a `Dictionary(Int32, _)` or its
-/// dictionary values are not `Utf8`.
+/// Errors if `column` is not a `Dictionary(Int32, _)` or its values are not
+/// `Utf8`.
 pub fn resolve_label_dictionary<'a>(
     column: &'a dyn Array,
     column_name: &str,
@@ -237,8 +234,7 @@ impl<W: Write + Seek + Send> Format<W> {
         label_offsets.push(0i32);
         label_offsets.extend_from_slice(&self.buffers.label_offsets);
 
-        // Build the labels map array using pre-allocated buffers. Keys and
-        // values are dictionary-encoded (Int32,Utf8) so downstream readers
+        // Keys and values are dictionary-encoded (Int32,Utf8) so readers
         // materialize each distinct string once; labels dominate capture memory.
         let mut keys_builder = StringDictionaryBuilder::<Int32Type>::new();
         for key in &self.buffers.label_keys {
