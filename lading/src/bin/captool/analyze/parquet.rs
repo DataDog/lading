@@ -321,5 +321,7 @@ mod tests {
         let staging_stats = series.get(&staging_key).expect("staging series present");
         assert_eq!(staging_stats.min, 100.0);
         assert_eq!(staging_stats.max, 200.0);
+        assert_eq!(staging_stats.mean, 150.0);
+        assert!(staging_stats.is_monotonic);
     }
 }

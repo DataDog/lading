@@ -465,66 +465,108 @@ mod tests {
         }
     }
 
-    /// Roundtrip labels across multiple flushed batches.
+    /// Decode dictionary labels across multiple read batches.
     ///
-    /// The writer builds a fresh dictionary per `flush()`, so each batch encodes
-    /// its label strings in an independent dictionary whose indices restart at 0.
-    /// Flushing between chunks that share the same strings (`env=prod`) forces
-    /// those strings into separate per-batch dictionaries, exercising the reader's
-    /// per-batch dictionary reconciliation — a case a single-flush test cannot
-    /// reach. A reader that assumed one global dictionary would return wrong
-    /// labels here while passing the single-batch tests.
+    /// The parquet reader emits one `RecordBatch` per `batch_size` rows, and each
+    /// batch decodes its own `Dictionary(Int32, Utf8)` label columns independently
+    /// (indices are batch-local). Production files exceed the default batch size,
+    /// so they are always read as several such batches — a path a small
+    /// single-batch roundtrip never reaches. Here a small `batch_size` forces
+    /// multiple batches over rows that share label strings (`env=prod`) so each
+    /// batch resolves the shared strings from its own dictionary. A reader that
+    /// mishandled per-batch dictionaries (stale indices, assuming one global
+    /// dictionary) would return wrong labels for some batch. The test asserts it
+    /// actually produced more than one batch so the coverage claim cannot silently
+    /// lapse.
     #[test]
-    fn parquet_round_trip_multiple_batches() {
+    fn parquet_round_trip_multiple_read_batches() {
         let run_id = Uuid::from_u128(0x0fed_cba9_8765_4321_0fed_cba9_8765_4321);
-        let label_sets = [
-            [("env".to_string(), "prod".to_string())],
-            [("env".to_string(), "staging".to_string())],
-            [("env".to_string(), "prod".to_string())],
-        ];
+        let envs = ["prod", "staging", "prod", "staging", "prod", "staging"];
 
         let mut buffer = Cursor::new(Vec::new());
-        let mut input_lines: Vec<Line> = Vec::new();
+        let mut expected_labels: FxHashMap<u64, FxHashMap<String, String>> = FxHashMap::default();
         {
             let mut writer = super::parquet::Format::new(&mut buffer, 3).expect("create writer");
-            for (chunk_idx, labels) in label_sets.iter().enumerate() {
-                for row in 0u64..4 {
-                    let fetch_index = chunk_idx as u64 * 4 + row;
-                    let line = Line {
-                        run_id,
-                        time: 1_000 + u128::from(fetch_index),
-                        fetch_index,
-                        metric_name: "requests".to_string(),
-                        metric_kind: MetricKind::Counter,
-                        value: LineValue::Int(fetch_index),
-                        labels: labels.iter().cloned().collect(),
-                        value_histogram: Vec::new(),
-                    };
-                    writer.write_metric(&line).expect("write");
-                    input_lines.push(line);
-                }
-                // Flush between chunks so each lands in its own dictionary-encoded
-                // batch rather than one coalesced batch.
-                writer.flush().expect("flush");
+            for (i, env) in envs.iter().enumerate() {
+                let fetch_index = i as u64;
+                let labels: FxHashMap<String, String> = [("env".to_string(), (*env).to_string())]
+                    .into_iter()
+                    .collect();
+                let line = Line {
+                    run_id,
+                    time: 1_000 + u128::from(fetch_index),
+                    fetch_index,
+                    metric_name: "requests".to_string(),
+                    metric_kind: MetricKind::Counter,
+                    value: LineValue::Int(fetch_index),
+                    labels: labels.clone(),
+                    value_histogram: Vec::new(),
+                };
+                writer.write_metric(&line).expect("write");
+                expected_labels.insert(fetch_index, labels);
             }
+            writer.flush().expect("flush");
             writer.close().expect("close");
         }
         let bytes = buffer.into_inner();
 
-        let deserialized_lines = read_parquet_lines(&bytes).expect("read parquet");
+        // A batch size below the row count forces the reader to emit several
+        // batches, each decoding its labels from an independent dictionary.
+        let bytes_buf = Bytes::copy_from_slice(&bytes);
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes_buf)
+            .expect("reader builder")
+            .with_batch_size(2)
+            .build()
+            .expect("reader");
 
-        assert_eq!(input_lines.len(), deserialized_lines.len());
-        let mut by_fetch_index: FxHashMap<u64, &Line> = deserialized_lines
-            .iter()
-            .map(|l| (l.fetch_index, l))
-            .collect();
-        for input in &input_lines {
-            let output = by_fetch_index
-                .remove(&input.fetch_index)
-                .expect("row round-trips");
-            assert_eq!(input.labels, output.labels);
-            assert_eq!(input.metric_name, output.metric_name);
+        let mut batch_count = 0usize;
+        let mut seen = 0usize;
+        for batch_result in reader {
+            let batch = batch_result.expect("batch");
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            batch_count += 1;
+
+            let fetch_index_array = batch
+                .column_by_name("fetch_index")
+                .expect("fetch_index column")
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("fetch_index is UInt64Array");
+            let labels_array = batch
+                .column_by_name("labels")
+                .expect("labels column")
+                .as_any()
+                .downcast_ref::<MapArray>()
+                .expect("labels is MapArray");
+
+            for row in 0..batch.num_rows() {
+                let fetch_index = fetch_index_array.value(row);
+                let labels_slice: StructArray = labels_array.value(row);
+                let keys = resolve_label_dictionary(labels_slice.column(0), "Labels keys")
+                    .expect("label keys are Dictionary(Int32,Utf8)");
+                let values = resolve_label_dictionary(labels_slice.column(1), "Labels values")
+                    .expect("label values are Dictionary(Int32,Utf8)");
+                let decoded: FxHashMap<String, String> = (0..keys.len())
+                    .map(|i| (keys.value(i).to_string(), values.value(i).to_string()))
+                    .collect();
+                assert_eq!(
+                    &decoded,
+                    expected_labels
+                        .get(&fetch_index)
+                        .expect("known fetch_index"),
+                    "labels mismatch at fetch_index {fetch_index}"
+                );
+                seen += 1;
+            }
         }
+
+        assert!(
+            batch_count > 1,
+            "expected multiple read batches, got {batch_count}"
+        );
+        assert_eq!(seen, envs.len(), "every row decoded exactly once");
     }
 
     #[expect(clippy::too_many_lines)]
