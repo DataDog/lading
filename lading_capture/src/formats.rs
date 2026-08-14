@@ -465,19 +465,20 @@ mod tests {
         }
     }
 
-    /// Decode dictionary labels across multiple read batches.
+    /// Decode `Dictionary(Int32, Utf8)` labels when a file is read as several
+    /// `RecordBatch`es.
     ///
-    /// The parquet reader emits one `RecordBatch` per `batch_size` rows, and each
-    /// batch decodes its own `Dictionary(Int32, Utf8)` label columns independently
-    /// (indices are batch-local). Production files exceed the default batch size,
-    /// so they are always read as several such batches — a path a small
-    /// single-batch roundtrip never reaches. Here a small `batch_size` forces
-    /// multiple batches over rows that share label strings (`env=prod`) so each
-    /// batch resolves the shared strings from its own dictionary. A reader that
-    /// mishandled per-batch dictionaries (stale indices, assuming one global
-    /// dictionary) would return wrong labels for some batch. The test asserts it
-    /// actually produced more than one batch so the coverage claim cannot silently
-    /// lapse.
+    /// The parquet reader emits one `RecordBatch` per `batch_size` rows, so
+    /// production files — which exceed the default batch size — are always read as
+    /// several batches, a path a small single-batch roundtrip never reaches. Here a
+    /// small `batch_size` forces multiple batches, and each batch's labels are
+    /// decoded through the production `resolve_label_dictionary` helper and checked
+    /// against the values written. The test asserts it actually produced more than
+    /// one batch so the multi-batch coverage cannot silently lapse.
+    ///
+    /// This does not exercise divergent per-batch dictionaries: the writer emits a
+    /// single row group with one dictionary page, so every read batch shares that
+    /// one dictionary rather than decoding an independent, index-restarted one.
     #[test]
     fn parquet_round_trip_multiple_read_batches() {
         let run_id = Uuid::from_u128(0x0fed_cba9_8765_4321_0fed_cba9_8765_4321);
