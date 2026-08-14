@@ -10,8 +10,9 @@ use std::{
 };
 
 use arrow_array::{
-    ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array, builder::StringDictionaryBuilder, types::Int32Type,
+    Array, ArrayRef, BinaryArray, DictionaryArray, Float64Array, MapArray, RecordBatch,
+    StringArray, StructArray, TimestampMillisecondArray, TypedDictionaryArray, UInt64Array,
+    builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
@@ -24,6 +25,25 @@ use parquet::{
 };
 
 use crate::line;
+
+/// Resolve a label map column typed as [`label_dictionary_type`] to a typed
+/// dictionary view of its `Utf8` values.
+///
+/// Both the label `key` and `value` columns are written as
+/// `Dictionary(Int32, Utf8)`, so every reader resolves them the same way. On
+/// failure returns a message naming `column` (e.g. `"Labels keys"`) so callers
+/// can surface distinct errors for the key and value columns.
+pub(crate) fn resolve_label_dictionary<'a>(
+    column: &'a dyn Array,
+    column_name: &str,
+) -> Result<TypedDictionaryArray<'a, Int32Type, StringArray>, String> {
+    column
+        .as_any()
+        .downcast_ref::<DictionaryArray<Int32Type>>()
+        .ok_or_else(|| format!("{column_name} are not Dictionary(Int32,Utf8)"))?
+        .downcast_dict::<StringArray>()
+        .ok_or_else(|| format!("{column_name} dictionary values are not Utf8"))
+}
 
 /// Parquet format errors
 #[derive(thiserror::Error, Debug)]
