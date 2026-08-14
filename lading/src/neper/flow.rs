@@ -31,7 +31,7 @@ pub(crate) enum Action {
 /// Token-indexed flow storage.
 ///
 /// Flows are stored in a `Vec` indexed by token value. Removed slots become
-/// `None` and are not reused — tokens are monotonically increasing, matching
+/// `None` and are not reused - tokens are monotonically increasing, matching
 /// neper's behavior.
 pub(crate) struct FlowMap<S> {
     inner: Vec<Option<Flow<S>>>,
@@ -73,12 +73,16 @@ pub(crate) fn apply_action<S>(
         Action::Continue => {}
         Action::Reregister(interest) => {
             if let Some(flow) = flows.get_mut(token) {
-                let _ = registry.reregister(&mut flow.stream, flow.token, interest);
+                registry
+                    .reregister(&mut flow.stream, flow.token, interest)
+                    .expect("reregister of a live, owned flow must succeed");
             }
         }
         Action::Remove => {
             if let Some(mut flow) = flows.remove(token) {
-                let _ = registry.deregister(&mut flow.stream);
+                registry
+                    .deregister(&mut flow.stream)
+                    .expect("deregister of a registered, owned flow must succeed");
             }
         }
     }
