@@ -17,11 +17,9 @@ use arrow_array::{
     UInt64Array,
 };
 use lading_capture_schema::columns;
-
-use crate::formats::parquet::resolve_label_dictionary;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-use crate::validate::ValidationResult;
+use crate::{formats::parquet::resolve_label_dictionary, validate::ValidationResult};
 
 /// Errors for parquet validation
 #[derive(thiserror::Error, Debug)]
@@ -310,4 +308,67 @@ pub fn validate_parquet<P: AsRef<Path>>(
         min_seconds_errors,
         first_error,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::formats::parquet::Format;
+    use crate::line::{Line, LineValue, MetricKind};
+    use tempfile::NamedTempFile;
+    use uuid::Uuid;
+
+    /// A well-formed capture with dictionary-encoded labels validates cleanly.
+    ///
+    /// This drives the validator's own decode path — `resolve_label_dictionary`
+    /// plus the `sorted_labels` reconstruction that builds per-series keys from
+    /// the `Dictionary(Int32, Utf8)` label columns — which is distinct from the
+    /// reader path exercised elsewhere. Two label sets sharing a key (`env`) must
+    /// resolve to two separate series.
+    #[test]
+    fn validate_parquet_decodes_dictionary_labels() {
+        let run_id = Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888);
+
+        // fetch_index -> time is 1:1 across all rows (required invariant); each
+        // series' fetch_index and time are strictly increasing.
+        let mut lines: Vec<Line> = Vec::new();
+        for (env, count) in [("prod", 3u64), ("staging", 2u64)] {
+            for fetch_index in 0..count {
+                lines.push(Line {
+                    run_id,
+                    time: 1_000 + u128::from(fetch_index),
+                    fetch_index,
+                    metric_name: "requests".to_string(),
+                    metric_kind: MetricKind::Counter,
+                    value: LineValue::Int(fetch_index),
+                    labels: [("env".to_string(), env.to_string())].into_iter().collect(),
+                    value_histogram: Vec::new(),
+                });
+            }
+        }
+
+        let tmp = NamedTempFile::new().expect("create temp file");
+        {
+            let file = tmp.reopen().expect("reopen temp file");
+            let mut writer = Format::new(file, 3).expect("create writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write");
+            }
+            writer.flush().expect("flush");
+            writer.close().expect("close");
+        }
+
+        let result = validate_parquet(tmp.path(), None).expect("validate");
+
+        assert_eq!(result.line_count, 5);
+        assert_eq!(
+            result.unique_series, 2,
+            "prod and staging are distinct series"
+        );
+        assert_eq!(result.unique_fetch_indices, 3);
+        assert_eq!(result.fetch_index_errors, 0);
+        assert_eq!(result.per_series_errors, 0);
+        assert!(result.first_error.is_none(), "{:?}", result.first_error);
+    }
 }
