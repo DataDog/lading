@@ -77,11 +77,10 @@ fn labels_entry_field() -> Arc<Field> {
 
 /// Arrow logical type for label keys and values.
 ///
-/// Labels are a large portion of the memory used by capture consumers, and their
-/// key/value strings repeat heavily across rows. Typing them as
-/// `Dictionary(Int32, Utf8)` lets readers materialize each distinct string once
-/// and reference it by index, cutting resident memory rather than merely the
-/// on-disk size (which parquet page dictionary encoding already handled).
+/// Label strings repeat heavily across rows and dominate capture memory.
+/// `Dictionary(Int32, Utf8)` lets readers hold each distinct string once,
+/// cutting resident memory (not just on-disk size, which parquet already
+/// dictionary-encoded).
 #[must_use]
 pub fn label_dictionary_type() -> DataType {
     DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))

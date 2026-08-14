@@ -400,13 +400,11 @@ mod tests {
         }
     }
 
-    /// Roundtrip many rows that share identical label key/value strings.
+    /// Roundtrip many rows sharing identical label strings.
     ///
-    /// The property test draws random labels, so cross-row repetition is
-    /// incidental. This locks in that the `Dictionary(Int32, Utf8)` label columns
-    /// roundtrip correctly under the production pattern where a handful of
-    /// distinct strings (e.g. `env=prod`) repeat across every row and are
-    /// dictionary-deduplicated by the writer.
+    /// The property test's random labels only repeat by chance; this pins the
+    /// production pattern where a few distinct strings (`env=prod`) repeat across
+    /// every row and are dictionary-deduplicated.
     #[test]
     fn parquet_round_trip_repeated_labels() {
         let run_id = Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
@@ -417,8 +415,8 @@ mod tests {
         .into_iter()
         .collect();
 
-        // 500 rows all carrying the same two labels, plus one row with a distinct
-        // label so the dictionary holds more than a single entry.
+        // 500 rows sharing two labels, plus one distinct row so the dictionary
+        // holds more than one entry.
         let mut input_lines: Vec<Line> = (0u64..500)
             .map(|i| Line {
                 run_id,
@@ -468,17 +466,14 @@ mod tests {
     /// Decode `Dictionary(Int32, Utf8)` labels when a file is read as several
     /// `RecordBatch`es.
     ///
-    /// The parquet reader emits one `RecordBatch` per `batch_size` rows, so
-    /// production files — which exceed the default batch size — are always read as
-    /// several batches, a path a small single-batch roundtrip never reaches. Here a
-    /// small `batch_size` forces multiple batches, and each batch's labels are
-    /// decoded through the production `resolve_label_dictionary` helper and checked
-    /// against the values written. The test asserts it actually produced more than
-    /// one batch so the multi-batch coverage cannot silently lapse.
+    /// The reader emits one `RecordBatch` per `batch_size` rows, so production
+    /// files are read as several batches — a path a single-batch roundtrip misses.
+    /// A small `batch_size` forces that here; each batch's labels are decoded via
+    /// the production `resolve_label_dictionary` and checked, and the test asserts
+    /// more than one batch so the coverage cannot silently lapse.
     ///
-    /// This does not exercise divergent per-batch dictionaries: the writer emits a
-    /// single row group with one dictionary page, so every read batch shares that
-    /// one dictionary rather than decoding an independent, index-restarted one.
+    /// It does not exercise divergent per-batch dictionaries: the writer emits one
+    /// row group with a single dictionary page, shared by every batch.
     #[test]
     fn parquet_round_trip_multiple_read_batches() {
         let run_id = Uuid::from_u128(0x0fed_cba9_8765_4321_0fed_cba9_8765_4321);
@@ -512,7 +507,7 @@ mod tests {
         let bytes = buffer.into_inner();
 
         // A batch size below the row count forces the reader to emit several
-        // batches, each decoding its labels from an independent dictionary.
+        // batches.
         let bytes_buf = Bytes::copy_from_slice(&bytes);
         let reader = ParquetRecordBatchReaderBuilder::try_new(bytes_buf)
             .expect("reader builder")

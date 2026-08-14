@@ -258,13 +258,11 @@ mod tests {
         tmp
     }
 
-    /// `analyze_metric` reads captures written by the production parquet writer.
+    /// `analyze_metric` reads captures written by the production [`Format`] writer.
     ///
-    /// This binds `captool analyze` to the capture writer: the file is produced
-    /// by `lading_capture`'s [`Format`], so any change to the on-disk label
-    /// encoding (e.g. the `Dictionary(Int32, Utf8)` label columns) that the
-    /// analyzer fails to track breaks this test in CI rather than shipping a
-    /// silently broken tool.
+    /// Binds `captool analyze` to the writer's on-disk schema: a label-encoding
+    /// change the analyzer fails to track breaks this test rather than shipping
+    /// silently broken.
     #[test]
     #[expect(
         clippy::float_cmp,
