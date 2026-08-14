@@ -465,6 +465,68 @@ mod tests {
         }
     }
 
+    /// Roundtrip labels across multiple flushed batches.
+    ///
+    /// The writer builds a fresh dictionary per `flush()`, so each batch encodes
+    /// its label strings in an independent dictionary whose indices restart at 0.
+    /// Flushing between chunks that share the same strings (`env=prod`) forces
+    /// those strings into separate per-batch dictionaries, exercising the reader's
+    /// per-batch dictionary reconciliation — a case a single-flush test cannot
+    /// reach. A reader that assumed one global dictionary would return wrong
+    /// labels here while passing the single-batch tests.
+    #[test]
+    fn parquet_round_trip_multiple_batches() {
+        let run_id = Uuid::from_u128(0x0fed_cba9_8765_4321_0fed_cba9_8765_4321);
+        let label_sets = [
+            [("env".to_string(), "prod".to_string())],
+            [("env".to_string(), "staging".to_string())],
+            [("env".to_string(), "prod".to_string())],
+        ];
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut input_lines: Vec<Line> = Vec::new();
+        {
+            let mut writer = super::parquet::Format::new(&mut buffer, 3).expect("create writer");
+            for (chunk_idx, labels) in label_sets.iter().enumerate() {
+                for row in 0u64..4 {
+                    let fetch_index = chunk_idx as u64 * 4 + row;
+                    let line = Line {
+                        run_id,
+                        time: 1_000 + u128::from(fetch_index),
+                        fetch_index,
+                        metric_name: "requests".to_string(),
+                        metric_kind: MetricKind::Counter,
+                        value: LineValue::Int(fetch_index),
+                        labels: labels.iter().cloned().collect(),
+                        value_histogram: Vec::new(),
+                    };
+                    writer.write_metric(&line).expect("write");
+                    input_lines.push(line);
+                }
+                // Flush between chunks so each lands in its own dictionary-encoded
+                // batch rather than one coalesced batch.
+                writer.flush().expect("flush");
+            }
+            writer.close().expect("close");
+        }
+        let bytes = buffer.into_inner();
+
+        let deserialized_lines = read_parquet_lines(&bytes).expect("read parquet");
+
+        assert_eq!(input_lines.len(), deserialized_lines.len());
+        let mut by_fetch_index: FxHashMap<u64, &Line> = deserialized_lines
+            .iter()
+            .map(|l| (l.fetch_index, l))
+            .collect();
+        for input in &input_lines {
+            let output = by_fetch_index
+                .remove(&input.fetch_index)
+                .expect("row round-trips");
+            assert_eq!(input.labels, output.labels);
+            assert_eq!(input.metric_name, output.metric_name);
+        }
+    }
+
     #[expect(clippy::too_many_lines)]
     fn read_parquet_lines(bytes: &[u8]) -> Result<Vec<Line>, Box<dyn std::error::Error>> {
         let bytes_buf = Bytes::copy_from_slice(bytes);
@@ -568,9 +630,9 @@ mod tests {
                 };
 
                 let labels_slice: StructArray = labels_array.value(row_idx);
-                let keys = resolve_label_dictionary(labels_slice.column(0), "label keys")
+                let keys = resolve_label_dictionary(labels_slice.column(0), "Labels keys")
                     .expect("label keys are Dictionary(Int32,Utf8)");
-                let values = resolve_label_dictionary(labels_slice.column(1), "label values")
+                let values = resolve_label_dictionary(labels_slice.column(1), "Labels values")
                     .expect("label values are Dictionary(Int32,Utf8)");
 
                 let mut labels = FxHashMap::default();

@@ -107,6 +107,7 @@ async-pidfd = { version = "0.1" }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 tower-test = { version = "0.4" }
+uuid = { workspace = true }
 
 [build-dependencies]
 prost-build = { workspace = true }

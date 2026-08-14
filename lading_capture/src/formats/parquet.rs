@@ -30,10 +30,17 @@ use crate::line;
 /// dictionary view of its `Utf8` values.
 ///
 /// Both the label `key` and `value` columns are written as
-/// `Dictionary(Int32, Utf8)`, so every reader resolves them the same way. On
-/// failure returns a message naming `column` (e.g. `"Labels keys"`) so callers
-/// can surface distinct errors for the key and value columns.
-pub(crate) fn resolve_label_dictionary<'a>(
+/// `Dictionary(Int32, Utf8)`, so every reader resolves them the same way. This
+/// is the single canonical decode path: readers in other crates (e.g. `captool`)
+/// call it too, so a schema change here surfaces in every reader at once. On
+/// failure returns a message prefixed with `column_name` (e.g. `"Labels keys"`)
+/// so callers can surface distinct errors for the key and value columns.
+///
+/// # Errors
+///
+/// Returns an error message if `column` is not a `Dictionary(Int32, _)` or its
+/// dictionary values are not `Utf8`.
+pub fn resolve_label_dictionary<'a>(
     column: &'a dyn Array,
     column_name: &str,
 ) -> Result<TypedDictionaryArray<'a, Int32Type, StringArray>, String> {

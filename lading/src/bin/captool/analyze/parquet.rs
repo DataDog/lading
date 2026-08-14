@@ -7,7 +7,8 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
-use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
+use arrow_array::{Array, ArrayAccessor, Float64Array, MapArray, StringArray, UInt64Array};
+use lading_capture::formats::parquet::resolve_label_dictionary;
 use lading_capture_schema::columns;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use rustc_hash::FxHashMap;
@@ -170,16 +171,10 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
             // Extract labels
             let mut sorted_labels = BTreeSet::new();
             let labels_slice = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label keys not String".to_string()))?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label values not String".to_string()))?;
+            let key_array = resolve_label_dictionary(labels_slice.column(0), "Labels keys")
+                .map_err(Error::InvalidColumnType)?;
+            let value_array = resolve_label_dictionary(labels_slice.column(1), "Labels values")
+                .map_err(Error::InvalidColumnType)?;
 
             for i in 0..key_array.len() {
                 let key = key_array.value(i);
@@ -230,4 +225,101 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use lading_capture::formats::parquet::Format;
+    use lading_capture::line::{Line, LineValue, MetricKind};
+    use rustc_hash::FxHashMap;
+    use tempfile::NamedTempFile;
+    use uuid::Uuid;
+
+    fn labels(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    /// Write the given lines to a parquet capture file using the production
+    /// [`Format`] writer and return the backing temp file.
+    fn write_capture(lines: &[Line]) -> NamedTempFile {
+        let tmp = NamedTempFile::new().expect("create temp file");
+        let file = tmp.reopen().expect("reopen temp file");
+        let mut writer = Format::new(file, 3).expect("create parquet writer");
+        for line in lines {
+            writer.write_metric(line).expect("write metric");
+        }
+        writer.flush().expect("flush");
+        writer.close().expect("close");
+        tmp
+    }
+
+    /// `analyze_metric` reads captures written by the production parquet writer.
+    ///
+    /// This binds `captool analyze` to the capture writer: the file is produced
+    /// by `lading_capture`'s [`Format`], so any change to the on-disk label
+    /// encoding (e.g. the `Dictionary(Int32, Utf8)` label columns) that the
+    /// analyzer fails to track breaks this test in CI rather than shipping a
+    /// silently broken tool.
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "stats are computed from exact integer-valued inputs"
+    )]
+    fn analyze_metric_reads_writer_output() {
+        let run_id = Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
+        let prod = labels(&[("env", "prod"), ("service", "api")]);
+        let staging = labels(&[("env", "staging")]);
+
+        let mut lines: Vec<Line> = (0u64..3)
+            .map(|i| Line {
+                run_id,
+                time: 1_000 + u128::from(i),
+                fetch_index: i,
+                metric_name: "requests".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int((i + 1) * 10),
+                labels: prod.clone(),
+                value_histogram: Vec::new(),
+            })
+            .collect();
+        lines.extend((0u64..2).map(|i| Line {
+            run_id,
+            time: 2_000 + u128::from(i),
+            fetch_index: i,
+            metric_name: "requests".to_string(),
+            metric_kind: MetricKind::Counter,
+            value: LineValue::Int((i + 1) * 100),
+            labels: staging.clone(),
+            value_histogram: Vec::new(),
+        }));
+
+        let tmp = write_capture(&lines);
+
+        let metrics = list_metrics(tmp.path()).expect("list metrics");
+        assert!(
+            metrics.iter().any(|m| m.name == "requests"),
+            "requests metric should be listed, got {metrics:?}"
+        );
+
+        let series = analyze_metric(tmp.path(), "requests").expect("analyze requests");
+        assert_eq!(series.len(), 2, "two distinct label sets expected");
+
+        let prod_key: BTreeSet<String> = ["env:prod".to_string(), "service:api".to_string()].into();
+        let staging_key: BTreeSet<String> = ["env:staging".to_string()].into();
+
+        let prod_stats = series.get(&prod_key).expect("prod series present");
+        assert_eq!(prod_stats.min, 10.0);
+        assert_eq!(prod_stats.max, 30.0);
+        assert_eq!(prod_stats.mean, 20.0);
+        assert!(prod_stats.is_monotonic);
+
+        let staging_stats = series.get(&staging_key).expect("staging series present");
+        assert_eq!(staging_stats.min, 100.0);
+        assert_eq!(staging_stats.max, 200.0);
+    }
 }
