@@ -13,10 +13,12 @@ use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
 use arrow_array::{
-    Array, ArrayAccessor, DictionaryArray, MapArray, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array, types::Int32Type,
+    Array, ArrayAccessor, MapArray, StringArray, StructArray, TimestampMillisecondArray,
+    UInt64Array,
 };
 use lading_capture_schema::columns;
+
+use crate::formats::parquet::resolve_label_dictionary;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use crate::validate::ValidationResult;
@@ -182,36 +184,10 @@ pub fn validate_parquet<P: AsRef<Path>>(
             }
 
             let labels_slice: StructArray = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<DictionaryArray<Int32Type>>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType(
-                        "Labels keys are not Dictionary(Int32,Utf8)".to_string(),
-                    )
-                })?
-                .downcast_dict::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType(
-                        "Labels keys dictionary values are not Utf8".to_string(),
-                    )
-                })?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<DictionaryArray<Int32Type>>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType(
-                        "Labels values are not Dictionary(Int32,Utf8)".to_string(),
-                    )
-                })?
-                .downcast_dict::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType(
-                        "Labels values dictionary values are not Utf8".to_string(),
-                    )
-                })?;
+            let key_array = resolve_label_dictionary(labels_slice.column(0), "Labels keys")
+                .map_err(Error::InvalidColumnType)?;
+            let value_array = resolve_label_dictionary(labels_slice.column(1), "Labels values")
+                .map_err(Error::InvalidColumnType)?;
 
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
             for i in 0..key_array.len() {

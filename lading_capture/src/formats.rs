@@ -68,11 +68,12 @@ pub trait OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::jsonl;
+    use crate::formats::parquet::resolve_label_dictionary;
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, ArrayAccessor, BinaryArray, DictionaryArray, Float64Array, MapArray, StringArray,
-        StructArray, TimestampMillisecondArray, UInt64Array, types::Int32Type,
+        Array, ArrayAccessor, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
+        TimestampMillisecondArray, UInt64Array,
     };
     use bytes::Bytes;
     use datadog_protos::metrics::Dogsketch;
@@ -399,6 +400,71 @@ mod tests {
         }
     }
 
+    /// Roundtrip many rows that share identical label key/value strings.
+    ///
+    /// The property test draws random labels, so cross-row repetition is
+    /// incidental. This locks in that the `Dictionary(Int32, Utf8)` label columns
+    /// roundtrip correctly under the production pattern where a handful of
+    /// distinct strings (e.g. `env=prod`) repeat across every row and are
+    /// dictionary-deduplicated by the writer.
+    #[test]
+    fn parquet_round_trip_repeated_labels() {
+        let run_id = Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
+        let shared_labels: FxHashMap<String, String> = [
+            ("env".to_string(), "prod".to_string()),
+            ("service".to_string(), "api".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        // 500 rows all carrying the same two labels, plus one row with a distinct
+        // label so the dictionary holds more than a single entry.
+        let mut input_lines: Vec<Line> = (0u64..500)
+            .map(|i| Line {
+                run_id,
+                time: 1_000 + u128::from(i),
+                fetch_index: i,
+                metric_name: "requests".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(i),
+                labels: shared_labels.clone(),
+                value_histogram: Vec::new(),
+            })
+            .collect();
+        input_lines.push(Line {
+            run_id,
+            time: 2_000,
+            fetch_index: 500,
+            metric_name: "requests".to_string(),
+            metric_kind: MetricKind::Counter,
+            value: LineValue::Int(500),
+            labels: [("env".to_string(), "staging".to_string())]
+                .into_iter()
+                .collect(),
+            value_histogram: Vec::new(),
+        });
+
+        let mut buffer = Cursor::new(Vec::new());
+        {
+            let mut writer = super::parquet::Format::new(&mut buffer, 3).expect("create writer");
+            for line in &input_lines {
+                writer.write_metric(line).expect("write");
+            }
+            writer.flush().expect("flush");
+            writer.close().expect("close");
+        }
+        let bytes = buffer.into_inner();
+
+        let deserialized_lines = read_parquet_lines(&bytes).expect("read parquet");
+
+        assert_eq!(input_lines.len(), deserialized_lines.len());
+        for (input, output) in input_lines.iter().zip(deserialized_lines.iter()) {
+            assert_eq!(input.labels, output.labels);
+            assert_eq!(input.metric_name, output.metric_name);
+            assert_eq!(input.fetch_index, output.fetch_index);
+        }
+    }
+
     #[expect(clippy::too_many_lines)]
     fn read_parquet_lines(bytes: &[u8]) -> Result<Vec<Line>, Box<dyn std::error::Error>> {
         let bytes_buf = Bytes::copy_from_slice(bytes);
@@ -502,20 +568,10 @@ mod tests {
                 };
 
                 let labels_slice: StructArray = labels_array.value(row_idx);
-                let keys = labels_slice
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<DictionaryArray<Int32Type>>()
-                    .expect("label keys are Dictionary(Int32,Utf8)")
-                    .downcast_dict::<StringArray>()
-                    .expect("label key dictionary values are strings");
-                let values = labels_slice
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<DictionaryArray<Int32Type>>()
-                    .expect("label values are Dictionary(Int32,Utf8)")
-                    .downcast_dict::<StringArray>()
-                    .expect("label value dictionary values are strings");
+                let keys = resolve_label_dictionary(labels_slice.column(0), "label keys")
+                    .expect("label keys are Dictionary(Int32,Utf8)");
+                let values = resolve_label_dictionary(labels_slice.column(1), "label values")
+                    .expect("label values are Dictionary(Int32,Utf8)");
 
                 let mut labels = FxHashMap::default();
                 for i in 0..keys.len() {
