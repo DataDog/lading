@@ -348,3 +348,133 @@ impl Grpc {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use std::collections::HashSet;
+    use std::num::NonZeroU32;
+    use std::time::Duration;
+
+    /// Proves that `bytes_written` varies across runs despite a deterministic
+    /// block cache (same seed).
+    ///
+    /// The real gRPC generator does three things in its hot loop:
+    ///   1. `throttle.wait_for(block_size)` — wall-clock rate limiting
+    ///   2. `cache.advance()` — pick the next block (deterministic)
+    ///   3. `Self::req()` — perform a gRPC round-trip (variable latency)
+    ///
+    /// It stops when a time-based shutdown signal fires. Because both (1) and
+    /// (3) depend on wall-clock time, the exact number of blocks sent before
+    /// shutdown varies with OS/tokio scheduling jitter.
+    ///
+    /// This test reproduces the core loop with a simulated RPC delay. Without
+    /// the delay, the loop runs at pure CPU speed (~microseconds per block)
+    /// and is effectively deterministic; with it, each iteration takes O(1ms)
+    /// and cumulative timer jitter over hundreds of iterations causes
+    /// different trials to send different totals.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn same_seed_different_bytes_written_due_to_wall_clock_timing() {
+        let seed = [42u8; 32];
+        let trial_duration = Duration::from_millis(500);
+        let num_trials = 20;
+
+        // Build the cache once — deterministic for this seed.
+        let mut rng = StdRng::from_seed(seed);
+        let cache = block::Cache::fixed_with_max_overhead(
+            &mut rng,
+            NonZeroU32::new(524_288).unwrap(), // 512 KiB total cache
+            10_240,                             // 10 KiB max block
+            &lading_payload::Config::Ascii,
+            524_288,
+        )
+        .expect("failed to build block cache");
+
+        // Sanity: cache has variable-sized blocks.
+        let block_sizes: Vec<u32> = {
+            let mut h = cache.handle();
+            (0..cache.len())
+                .map(|_| cache.advance(&mut h).total_bytes.get())
+                .collect()
+        };
+        let unique_sizes: HashSet<u32> = block_sizes.iter().copied().collect();
+        assert!(
+            unique_sizes.len() > 1,
+            "Cache must have variable-sized blocks for this test"
+        );
+
+        let mut results = Vec::with_capacity(num_trials);
+
+        for _ in 0..num_trials {
+            // Fresh throttle each trial: same config, new RealClock rooted
+            // at Instant::now().  Rate is set high enough that the throttle
+            // never exhausts capacity during the 500 ms window, so the
+            // throughput is limited by the simulated RPC latency below.
+            let mut throttle = lading_throttle::Throttle::new_with_config(
+                lading_throttle::Config::Stable {
+                    maximum_capacity: NonZeroU32::new(5_242_880).unwrap(), // 5 MiB/s
+                    timeout_micros: 0,
+                },
+            );
+
+            let mut handle = cache.handle();
+            let mut bytes_written: u64 = 0;
+
+            let deadline = tokio::time::Instant::now() + trial_duration;
+            let sleep = tokio::time::sleep_until(deadline);
+            tokio::pin!(sleep);
+
+            loop {
+                let next_size = cache.peek_next_size(&handle);
+                tokio::select! {
+                    result = throttle.wait_for(next_size) => {
+                        let _ = result;
+                        let blk = cache.advance(&mut handle);
+                        bytes_written += blk.bytes.len() as u64;
+
+                        // Simulate the gRPC round-trip (Self::req) that the
+                        // real generator performs between blocks. Even on
+                        // localhost, each RPC takes O(100 µs–1 ms) of wall-
+                        // clock time. Tokio rounds sub-ms sleeps up to ~1 ms,
+                        // so each iteration takes ~1 ms with O(0.1 ms) jitter.
+                        // Over ~500 iterations that jitter compounds, causing
+                        // different trials to fit a different number of blocks
+                        // into the 500 ms window.
+                        tokio::time::sleep(Duration::from_micros(100)).await;
+                    }
+                    _ = &mut sleep => {
+                        break;
+                    }
+                }
+            }
+
+            results.push(bytes_written);
+            tokio::task::yield_now().await;
+        }
+
+        let distinct: HashSet<u64> = results.iter().copied().collect();
+
+        eprintln!(
+            "Block cache: {} blocks, sizes: {:?}",
+            cache.len(),
+            block_sizes
+        );
+        eprintln!("Trial results (bytes_written): {:?}", results);
+        eprintln!(
+            "Distinct values: {} out of {} trials",
+            distinct.len(),
+            num_trials
+        );
+
+        assert!(
+            distinct.len() > 1,
+            "Expected bytes_written to vary across {num_trials} trials due to \
+             wall-clock non-determinism, but all trials produced {} bytes.\n\
+             Block sizes in cache: {:?}",
+            results[0],
+            block_sizes,
+        );
+    }
+}
