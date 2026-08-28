@@ -42,7 +42,7 @@ fn default_copy_from_host() -> Vec<PathBuf> {
 /// Configuration of [`Procfs`]
 pub struct Config {
     /// Seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// Root path for `procfs` filesystem
     pub root: PathBuf,
     /// Total number of processes created
@@ -72,7 +72,7 @@ impl ProcFs {
     ///
     /// Function should never panic.
     pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
 
         let total_processes = config.total_processes.get();
         let mut processes = procfs::fixed(&mut rng, total_processes as usize)?;
