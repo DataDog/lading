@@ -11,6 +11,7 @@ use std::net::{self, SocketAddr};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use mio::net::{TcpListener, TcpStream};
@@ -183,11 +184,8 @@ pub(crate) async fn run_client(
 
     let flow_dist = thread::distribute_flows(flows, params.threads);
 
-    let thread_metrics = Arc::new(
-        (0..params.threads)
-            .map(|_| ThreadMetrics::new())
-            .collect::<Vec<_>>(),
-    );
+    let thread_metrics: Arc<[ThreadMetrics]> =
+        (0..params.threads).map(|_| ThreadMetrics::new()).collect();
 
     let metrics_handle = {
         let tm = Arc::clone(&thread_metrics);
@@ -361,7 +359,6 @@ fn handle_client_event(
 /// # Panics
 ///
 /// Panics if the ready-barrier tokio task is cancelled.
-#[allow(clippy::too_many_lines)]
 pub(crate) async fn run_server(
     params: ServerParams,
     metric_labels: Vec<(String, String)>,
@@ -371,11 +368,8 @@ pub(crate) async fn run_server(
     let shutdown_flag = thread::new_shutdown_flag();
     let num_threads = params.threads;
 
-    let thread_metrics = Arc::new(
-        (0..num_threads)
-            .map(|_| ThreadMetrics::new())
-            .collect::<Vec<_>>(),
-    );
+    let thread_metrics: Arc<[ThreadMetrics]> =
+        (0..num_threads).map(|_| ThreadMetrics::new()).collect();
 
     let metrics_handle = {
         let tm = Arc::clone(&thread_metrics);
@@ -386,12 +380,84 @@ pub(crate) async fn run_server(
         })
     };
 
-    // Pre-build thread 0's listener here so the BPF program is attached to the
-    // reuseport group before any other thread calls bind(). This removes the
-    // need for a cross-thread BPF barrier - if bind fails or panics, it
-    // propagates as an error directly from this task.
+    let mut handles =
+        prepare_data_listeners(&params, &shutdown_flag, &thread_metrics, thread_prefix).await?;
+
+    // All data listeners are up. Open control port so the generator can
+    // connect and know we're ready.
+    let control_addr = params.control_addr;
+    let ctrl_res = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
+        addr: control_addr,
+        source: Box::new(source),
+    });
+    if ctrl_res.is_err() {
+        shutdown_flag.store(true, Relaxed);
+    }
+    let control_listener = ctrl_res?;
+    control_listener
+        .set_nonblocking(true)
+        .expect("failed to set control listener nonblocking");
+    info!("control port listening on {control_addr}, waiting for generator");
+
+    handles.push(metrics_handle);
+
+    let flag = Arc::clone(&shutdown_flag);
+    let shutdown_clone = shutdown.clone();
+    tokio::spawn(async move {
+        shutdown_clone.recv().await;
+        flag.store(true, Relaxed);
+    });
+
+    let generator_connected = match wait_for_generator(
+        &control_listener,
+        control_addr,
+        params.flows,
+        &shutdown_flag,
+    )
+    .await
+    {
+        Ok(connected) => connected,
+        Err(e) => {
+            shutdown_flag.store(true, Relaxed);
+            return Err(e);
+        }
+    };
+    drop(control_listener);
+
+    if generator_connected {
+        shutdown.recv().await;
+        info!("shutdown signal received");
+    }
+    shutdown_flag.store(true, Relaxed);
+
+    thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+
+    Ok(())
+}
+
+/// Spawn the data-listener worker threads and wait until every one has bound
+/// its listener.
+///
+/// Thread 0's listener is built here, before any worker starts, so the
+/// reuseport eBPF program is attached to the group before any other thread
+/// calls `bind()`. That removes the need for a cross-thread BPF barrier - if
+/// bind fails or panics it propagates as an error directly from this task.
+///
+/// # Errors
+///
+/// Returns [`Error::ThreadPanicked`] if a worker dies before signalling
+/// ready. The remaining workers are signalled and joined before returning.
+async fn prepare_data_listeners(
+    params: &ServerParams,
+    shutdown_flag: &thread::ShutdownFlag,
+    thread_metrics: &Arc<[ThreadMetrics]>,
+    thread_prefix: &'static str,
+) -> Result<Vec<JoinHandle<()>>, Error> {
+    let num_threads = params.threads;
     let binding_addr = params.data_addr;
-    let thread0_listener = if num_threads > 1 {
+    let flows = params.flows;
+
+    let mut thread0_listener = if num_threads > 1 {
         Some(create_listener(
             0,
             num_threads,
@@ -409,15 +475,13 @@ pub(crate) async fn run_server(
     let (ready_tx, mut ready_rx) = mpsc::unbounded_channel::<()>();
 
     let mut handles = Vec::with_capacity(num_threads as usize);
-    let mut thread0_listener = thread0_listener;
-    let flows = params.flows;
     for i in 0..num_threads {
         let request_size = params.request_size;
         let response_size = params.response_size;
         let no_delay = params.no_delay;
         let backlog = params.backlog;
-        let flag = Arc::clone(&shutdown_flag);
-        let tm = Arc::clone(&thread_metrics);
+        let flag = Arc::clone(shutdown_flag);
+        let tm = Arc::clone(thread_metrics);
         let prebuilt = if i == 0 {
             thread0_listener.take()
         } else {
@@ -455,36 +519,30 @@ pub(crate) async fn run_server(
         }
     }
 
-    // All data listeners are up. Open control port so the generator can
-    // connect and know we're ready.
-    let control_addr = params.control_addr;
-    let ctrl_res = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
-        addr: control_addr,
-        source: Box::new(source),
-    });
-    if ctrl_res.is_err() {
-        shutdown_flag.store(true, Relaxed);
-    }
-    let control_listener = ctrl_res?;
-    control_listener
-        .set_nonblocking(true)
-        .expect("failed to set control listener nonblocking");
-    info!("control port listening on {control_addr}, waiting for generator");
+    Ok(handles)
+}
 
-    handles.push(metrics_handle);
-
-    let flag = Arc::clone(&shutdown_flag);
-    let shutdown_clone = shutdown.clone();
-    tokio::spawn(async move {
-        shutdown_clone.recv().await;
-        flag.store(true, Relaxed);
-    });
-    let mut generator_connected = false;
-    let flows_bytes = params.flows.to_be_bytes();
+/// Wait for the generator to connect to the control port, then hand it the
+/// flow count over that connection.
+///
+/// Returns `true` once the generator has connected and received the count,
+/// `false` if shutdown fired before any generator showed up.
+///
+/// # Errors
+///
+/// Returns an error if the handshake write fails or `accept` fails for a
+/// reason other than `WouldBlock`.
+async fn wait_for_generator(
+    control_listener: &net::TcpListener,
+    control_addr: SocketAddr,
+    flows: u16,
+    shutdown_flag: &AtomicBool,
+) -> Result<bool, Error> {
+    let flows_bytes = flows.to_be_bytes();
     loop {
         if shutdown_flag.load(Relaxed) {
             info!("shutdown before generator connected");
-            break;
+            return Ok(false);
         }
         match control_listener.accept() {
             Ok((mut conn, peer)) => {
@@ -493,22 +551,14 @@ pub(crate) async fn run_server(
                 // against a generator that connects but never reads.
                 conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
                     .expect("set_write_timeout on accepted TcpStream must succeed");
-                if let Err(err) = conn.write_all(&flows_bytes) {
-                    shutdown_flag.store(true, Relaxed);
-                    return Err(err.into());
-                }
-                info!(
-                    "generator connected from {peer}, sent flows={}, data threads running",
-                    params.flows
-                );
-                generator_connected = true;
-                break;
+                conn.write_all(&flows_bytes)?;
+                info!("generator connected from {peer}, sent flows={flows}, data threads running");
+                return Ok(true);
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => {
-                shutdown_flag.store(true, Relaxed);
                 return Err(Error::Bind {
                     addr: control_addr,
                     source: Box::new(e),
@@ -516,17 +566,6 @@ pub(crate) async fn run_server(
             }
         }
     }
-    drop(control_listener);
-
-    if generator_connected {
-        shutdown.recv().await;
-        info!("shutdown signal received");
-    }
-    shutdown_flag.store(true, Relaxed);
-
-    thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
-
-    Ok(())
 }
 
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
