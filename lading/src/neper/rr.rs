@@ -138,6 +138,29 @@ fn shutdown_and_join(err: Error, shutdown_flag: &AtomicBool, handles: Vec<Worker
     err
 }
 
+/// Wait for either the shutdown signal or the first worker failure.
+///
+/// Without the failure arm a worker that dies mid-run goes unnoticed until the
+/// join after `shutdown` fires, so an experiment that generates no load still
+/// burns its full duration before reporting the error. The channel only wakes
+/// this task; the error itself still travels back through the `JoinHandle`, so
+/// [`join_workers`] remains the single source of truth for what went wrong.
+async fn wait_for_shutdown_or_failure(
+    shutdown: lading_signal::Watcher,
+    fail_rx: &mut mpsc::UnboundedReceiver<()>,
+) {
+    tokio::select! {
+        () = shutdown.recv() => info!("shutdown signal received"),
+        msg = fail_rx.recv() => {
+            if msg.is_some() {
+                error!("worker thread reported a fatal error, aborting run");
+            } else {
+                error!("all worker threads exited early, aborting run");
+            }
+        },
+    }
+}
+
 /// Run the neper-style client (generator side).
 ///
 /// Connects `flows` TCP flows distributed across `threads` OS threads, then
@@ -193,6 +216,10 @@ pub(crate) async fn run_client(
         })?
     });
 
+    // Workers announce a fatal error here so the run can be aborted promptly
+    // rather than at the join below.
+    let (fail_tx, mut fail_rx) = mpsc::unbounded_channel::<()>();
+
     let data_addr = params.data_addr;
     let request_size = params.request_size;
     let response_size = params.response_size;
@@ -201,6 +228,7 @@ pub(crate) async fn run_client(
         let thread_flows = flow_dist[i as usize];
         let flag = Arc::clone(&shutdown_flag);
         let tm = Arc::clone(&thread_metrics);
+        let fail = fail_tx.clone();
         let spawned = thread::spawn_named(&format!("{thread_prefix}-client-{i}"), move || {
             let result = client_thread_main(
                 data_addr,
@@ -213,6 +241,9 @@ pub(crate) async fn run_client(
             );
             if let Err(ref e) = result {
                 error!("client thread {i} failed: {e}");
+                // Best effort: a closed receiver means the async side is
+                // already joining, which surfaces this error anyway.
+                let _ = fail.send(());
             }
             result
         });
@@ -228,8 +259,10 @@ pub(crate) async fn run_client(
         }
     }
 
-    shutdown.recv().await;
-    info!("shutdown signal received");
+    // Drop our own copy so fail_rx reports None once every worker is gone.
+    drop(fail_tx);
+
+    wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
     shutdown_flag.store(true, Relaxed);
 
     join_workers(worker_handles)?;
@@ -420,10 +453,22 @@ pub(crate) async fn run_server(
     let thread_metrics: Arc<[ThreadMetrics]> =
         (0..num_threads).map(|_| ThreadMetrics::new()).collect();
 
+    // Workers announce a fatal error here so the run can be aborted promptly
+    // rather than at the join below.
+    let (fail_tx, mut fail_rx) = mpsc::unbounded_channel::<()>();
+
     // Listeners first: until they are up there is nothing to report on, and
     // nothing to unwind if binding fails.
-    let mut handles =
-        prepare_data_listeners(&params, &shutdown_flag, &thread_metrics, thread_prefix).await?;
+    let mut handles = prepare_data_listeners(
+        &params,
+        &shutdown_flag,
+        &thread_metrics,
+        &fail_tx,
+        thread_prefix,
+    )
+    .await?;
+    // Drop our own copy so fail_rx reports None once every worker is gone.
+    drop(fail_tx);
 
     let metrics_spawn = {
         let tm = Arc::clone(&thread_metrics);
@@ -479,8 +524,7 @@ pub(crate) async fn run_server(
     drop(control_listener);
 
     if generator_connected {
-        shutdown.recv().await;
-        info!("shutdown signal received");
+        wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
     }
     shutdown_flag.store(true, Relaxed);
 
@@ -505,6 +549,7 @@ async fn prepare_data_listeners(
     params: &ServerParams,
     shutdown_flag: &thread::ShutdownFlag,
     thread_metrics: &Arc<[ThreadMetrics]>,
+    fail_tx: &mpsc::UnboundedSender<()>,
     thread_prefix: &'static str,
 ) -> Result<Vec<WorkerHandle>, Error> {
     let num_threads = params.threads;
@@ -542,6 +587,7 @@ async fn prepare_data_listeners(
             None
         };
         let tx = ready_tx.clone();
+        let fail = fail_tx.clone();
         let spawned = thread::spawn_named(&format!("{thread_prefix}-server-{i}"), move || {
             let result = server_thread_main(
                 i,
@@ -559,6 +605,9 @@ async fn prepare_data_listeners(
             );
             if let Err(ref e) = result {
                 error!("server thread {i} failed: {e}");
+                // Best effort: a closed receiver means the async side is
+                // already joining, which surfaces this error anyway.
+                let _ = fail.send(());
             }
             result
         });
