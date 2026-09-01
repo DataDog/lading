@@ -45,6 +45,10 @@ pub enum Error {
     /// Invalid configuration.
     #[error("invalid config: {0}")]
     Config(String),
+    /// The shutdown signal arrived before startup finished. Both halves report
+    /// this the same way so a stopped run fails identically on either side.
+    #[error("Shutdown before {0}")]
+    ShutdownDuringStartup(String),
 }
 
 /// Parameters for [`run_client`].
@@ -171,8 +175,9 @@ async fn wait_for_shutdown_or_failure(
 ///
 /// # Errors
 ///
-/// Returns an error if configuration is invalid, the blackhole control port
-/// is never reachable, or a worker thread reports a fatal error or panics.
+/// Returns an error if configuration is invalid, the blackhole control port is
+/// never reachable, shutdown arrives before startup finishes, or a worker
+/// thread reports a fatal error or panics.
 pub(crate) async fn run_client(
     params: ClientParams,
     metric_labels: Vec<(String, String)>,
@@ -278,16 +283,16 @@ pub(crate) async fn run_client(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] if the control port never becomes reachable, if
-/// shutdown fires first, or if the handshake read fails.
+/// Returns [`Error::ShutdownDuringStartup`] if shutdown fires first, or
+/// [`Error::Io`] if the control port never becomes reachable or the handshake
+/// read fails.
 fn wait_for_blackhole(control_addr: SocketAddr, shutdown_flag: &AtomicBool) -> Result<u16, Error> {
     info!("waiting for blackhole control port at {control_addr}");
     let deadline = Instant::now() + CONTROL_CONNECT_TIMEOUT;
     loop {
         if shutdown_flag.load(Relaxed) {
-            return Err(Error::Io(io::Error::new(
-                ErrorKind::ConnectionRefused,
-                format!("shutdown before blackhole control port {control_addr} became reachable"),
+            return Err(Error::ShutdownDuringStartup(format!(
+                "blackhole control port {control_addr} became reachable"
             )));
         }
         match net::TcpStream::connect(control_addr) {
@@ -439,8 +444,9 @@ fn handle_client_event(
 ///
 /// # Errors
 ///
-/// Returns an error if binding fails, if a worker thread reports a fatal
-/// error, or if a worker thread panics.
+/// Returns an error if binding fails, if shutdown arrives before the generator
+/// connects, if a worker thread reports a fatal error, or if a worker thread
+/// panics.
 pub(crate) async fn run_server(
     params: ServerParams,
     metric_labels: Vec<(String, String)>,
@@ -510,7 +516,7 @@ pub(crate) async fn run_server(
         flag.store(true, Relaxed);
     });
 
-    let generator_connected = match wait_for_generator(
+    if let Err(e) = wait_for_generator(
         &control_listener,
         control_addr,
         params.flows,
@@ -518,14 +524,11 @@ pub(crate) async fn run_server(
     )
     .await
     {
-        Ok(connected) => connected,
-        Err(e) => return Err(shutdown_and_join(e, &shutdown_flag, handles)),
-    };
+        return Err(shutdown_and_join(e, &shutdown_flag, handles));
+    }
     drop(control_listener);
 
-    if generator_connected {
-        wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
-    }
+    wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
     shutdown_flag.store(true, Relaxed);
 
     join_workers(handles)?;
@@ -639,24 +642,24 @@ async fn prepare_data_listeners(
 /// Wait for the generator to connect to the control port, then hand it the
 /// flow count over that connection.
 ///
-/// Returns `true` once the generator has connected and received the count,
-/// `false` if shutdown fired before any generator showed up.
-///
 /// # Errors
 ///
-/// Returns an error if the handshake write fails or `accept` fails for a
+/// Returns [`Error::ShutdownDuringStartup`] if shutdown fires before any
+/// generator connects, matching how the client reports the same event. Also
+/// returns an error if the handshake write fails or `accept` fails for a
 /// reason other than `WouldBlock`.
 async fn wait_for_generator(
     control_listener: &net::TcpListener,
     control_addr: SocketAddr,
     flows: u16,
     shutdown_flag: &AtomicBool,
-) -> Result<bool, Error> {
+) -> Result<(), Error> {
     let flows_bytes = flows.to_be_bytes();
     loop {
         if shutdown_flag.load(Relaxed) {
-            info!("shutdown before generator connected");
-            return Ok(false);
+            return Err(Error::ShutdownDuringStartup(
+                "the generator connected to the control port".to_string(),
+            ));
         }
         match control_listener.accept() {
             Ok((mut conn, peer)) => {
@@ -666,7 +669,7 @@ async fn wait_for_generator(
                 conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
                 conn.write_all(&flows_bytes)?;
                 info!("generator connected from {peer}, sent flows={flows}, data threads running");
-                return Ok(true);
+                return Ok(());
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
