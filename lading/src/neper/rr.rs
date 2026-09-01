@@ -705,11 +705,6 @@ fn server_thread_main(
         None => create_listener(thread_index, num_threads, binding_addr, backlog)?,
     };
 
-    // Signal that this thread's listener is bound and ready. If this send
-    // fails the receiver has gone away (blackhole is shutting down).
-    let _ = ready_tx.send(());
-    drop(ready_tx);
-
     let mut listener = TcpListener::from_std(std_listener);
     let mut poll = Poll::new()?;
     // Worst case under SO_REUSEPORT: every flow lands on this thread, so size
@@ -718,6 +713,11 @@ fn server_thread_main(
 
     poll.registry()
         .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)?;
+
+    // Signal that this thread's listener is bound and ready. If this send
+    // fails the receiver has gone away (blackhole is shutting down).
+    let _ = ready_tx.send(());
+    drop(ready_tx);
 
     let mut request_buf = vec![0u8; request_size];
     let response_buf = vec![0u8; response_size];
