@@ -34,8 +34,10 @@ use lading_capture::{counter_incr, gauge_set};
 use metrics::counter;
 use prost::Message;
 use serde::{Deserialize, Serialize};
+use serde_yaml::with::singleton_map_recursive;
 use std::{
     borrow::Cow,
+    collections::BTreeSet,
     io,
     net::SocketAddr,
     sync::Arc,
@@ -46,6 +48,9 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::General;
 use crate::proto::datadog::intake::metrics::MetricPayload;
+
+/// Namespace for incoming metrics; matches other target-originated metrics.
+const TARGET_PREFIX: &str = "target/";
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Datadog`].
@@ -91,13 +96,52 @@ pub enum Variant {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+/// Controls which received series this blackhole records as lading capture
+/// metrics.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub enum RecordPolicy {
+    /// Default behaviour, record every received series with all of its tags.
+    All,
+    /// Record no series at all. Aggregate `bytes_received` / `requests_received`
+    /// counters are still emitted and payloads are still decoded for
+    /// accounting.
+    Disabled,
+    /// Record only series whose metric name is listed. An empty list behaves
+    /// like `Disabled`.
+    SeriesToKeep(BTreeSet<String>),
+}
+
+impl Default for RecordPolicy {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+impl RecordPolicy {
+    /// Whether a series with the given metric name is recorded as a capture
+    /// metric.
+    fn records_series(&self, metric: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Disabled => false,
+            Self::SeriesToKeep(names) => names.contains(metric),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Datadog`].
 pub struct Config {
     /// The Datadog API variant to use
     #[serde(flatten)]
     pub variant: Variant,
+    /// Which received series to record as lading capture metrics. Defaults to
+    /// [`RecordPolicy::All`].
+    #[serde(default, with = "singleton_map_recursive")]
+    pub record: RecordPolicy,
 }
 
 #[derive(Debug)]
@@ -106,11 +150,13 @@ pub struct Datadog {
     binding_addr: SocketAddr,
     shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
+    record: RecordPolicy,
 }
 
 #[derive(Clone)]
 struct AppState {
     metric_labels: Arc<[(String, String)]>,
+    record: RecordPolicy,
 }
 
 impl Datadog {
@@ -133,6 +179,7 @@ impl Datadog {
             binding_addr,
             shutdown,
             metric_labels,
+            record: config.record,
         }
     }
 
@@ -146,7 +193,10 @@ impl Datadog {
     /// Function will return an error if the server fails to start.
     pub async fn run(self) -> Result<(), Error> {
         let metric_labels: Arc<[(String, String)]> = Arc::from(self.metric_labels);
-        let state = Arc::new(AppState { metric_labels });
+        let state = Arc::new(AppState {
+            metric_labels,
+            record: self.record,
+        });
 
         let listener = TcpListener::bind(self.binding_addr).await?;
         info!(
@@ -241,7 +291,7 @@ async fn handle_request(
 
     let status = match (path.as_str(), content_type) {
         ("/api/v2/series", "application/x-protobuf") => {
-            handle_v2_protobuf(&whole_body, content_encoding, &path, labels).await
+            handle_v2_protobuf(&whole_body, content_encoding, &path, labels, &state.record).await
         }
         _ => StatusCode::ACCEPTED,
     };
@@ -299,6 +349,7 @@ async fn handle_v2_protobuf(
     content_encoding: &str,
     path: &str,
     labels: &[(String, String)],
+    record: &RecordPolicy,
 ) -> StatusCode {
     let decompressed = match decompress_if_needed(body, content_encoding) {
         Ok(data) => data,
@@ -318,67 +369,74 @@ async fn handle_v2_protobuf(
                 payload.series.len()
             );
 
-            for series in &payload.series {
-                if series.points.is_empty() {
-                    continue;
-                }
+            if !matches!(record, RecordPolicy::Disabled) {
+                let mut scratch = String::new();
 
-                // Parse Datadog tags (format: "key:value" or "key") into label pairs.
-                // Key-only tags are represented with an empty value.
-                let tag_pairs: Vec<(&str, &str)> = series
-                    .tags
-                    .iter()
-                    .map(|tag| tag.split_once(':').unwrap_or((tag.as_str(), "")))
-                    .collect();
+                for series in payload.series.iter().filter(|series| {
+                    !series.points.is_empty() && record.records_series(&series.metric)
+                }) {
+                    scratch.clear();
+                    scratch.reserve(TARGET_PREFIX.len() + series.metric.len());
+                    scratch.push_str(TARGET_PREFIX);
+                    scratch.push_str(&series.metric);
 
-                // Metric types from the agent_payload.proto:
-                //
-                // - COUNT (1): Delta count over the interval
-                // - RATE (2): Per-second rate, converted into a counter by
-                //   multiplication with the interval.
-                // - GAUGE (3): Point-in-time value
-                //
-                // For COUNT/RATE we use counter_incr, for GAUGE we use
-                // gauge_set. Timestamps are Unix epoch.
-                for point in &series.points {
-                    let timestamp = unix_to_instant(point.timestamp);
+                    // Parse Datadog tags (format: "key:value" or "key") into label pairs.
+                    // Key-only tags are represented with an empty value.
+                    let tag_pairs: Vec<(&str, &str)> = series
+                        .tags
+                        .iter()
+                        .map(|tag| tag.split_once(':').unwrap_or((tag.as_str(), "")))
+                        .collect();
 
-                    let metrics_res = match series.r#type {
-                        1 => {
-                            // COUNT
-                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            let value = point.value.round() as u64;
-                            counter_incr(&series.metric, &tag_pairs, value, timestamp).await
-                        }
-                        2 => {
-                            // RATE
-                            let interval = series.interval;
-                            if interval <= 0 {
-                                warn!(
-                                    "RATE with non-positive interval for {metric}, ignoring",
-                                    metric = series.metric
-                                );
-                                continue;
+                    // Metric types from the agent_payload.proto:
+                    //
+                    // - COUNT (1): Delta count over the interval
+                    // - RATE (2): Per-second rate, converted into a counter by
+                    //   multiplication with the interval.
+                    // - GAUGE (3): Point-in-time value
+                    //
+                    // For COUNT/RATE we use counter_incr, for GAUGE we use
+                    // gauge_set. Timestamps are Unix epoch.
+                    for point in &series.points {
+                        let timestamp = unix_to_instant(point.timestamp);
+
+                        let metrics_res = match series.r#type {
+                            1 => {
+                                // COUNT
+                                #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                let value = point.value.round() as u64;
+                                counter_incr(&scratch, &tag_pairs, value, timestamp).await
                             }
-                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            let val = (point.value * interval as f64).round() as u64;
-                            counter_incr(&series.metric, &tag_pairs, val, timestamp).await
+                            2 => {
+                                // RATE
+                                let interval = series.interval;
+                                if interval <= 0 {
+                                    warn!(
+                                        "RATE with non-positive interval for {metric}, ignoring",
+                                        metric = series.metric
+                                    );
+                                    continue;
+                                }
+                                #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                let val = (point.value * interval as f64).round() as u64;
+                                counter_incr(&scratch, &tag_pairs, val, timestamp).await
+                            }
+                            3 => {
+                                // GAUGE
+                                gauge_set(&scratch, &tag_pairs, point.value, timestamp).await
+                            }
+                            i => {
+                                warn!("Unknown metric type, skipping: {i}");
+                                Ok(())
+                            }
+                        };
+                        if let Err(e) = metrics_res {
+                            warn!(
+                                "Failed to record metric {metric} at timestamp {ts}: {e}",
+                                metric = series.metric,
+                                ts = point.timestamp
+                            );
                         }
-                        3 => {
-                            // GAUGE
-                            gauge_set(&series.metric, &tag_pairs, point.value, timestamp).await
-                        }
-                        i => {
-                            warn!("Unknown metric type, skipping: {i}");
-                            Ok(())
-                        }
-                    };
-                    if let Err(e) = metrics_res {
-                        warn!(
-                            "Failed to record metric {metric} at timestamp {ts}: {e}",
-                            metric = series.metric,
-                            ts = point.timestamp
-                        );
                     }
                 }
             }
