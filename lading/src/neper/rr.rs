@@ -371,35 +371,40 @@ pub(crate) async fn run_server(
     let thread_metrics: Arc<[ThreadMetrics]> =
         (0..num_threads).map(|_| ThreadMetrics::new()).collect();
 
-    let metrics_handle = {
+    // Listeners first: until they are up there is nothing to report on, and
+    // prepare_data_listeners joins its own workers if it fails.
+    let mut handles =
+        prepare_data_listeners(&params, &shutdown_flag, &thread_metrics, thread_prefix).await?;
+
+    // The metrics handle goes into the same vec straight away so that every
+    // error path below joins it with the workers instead of detaching it.
+    handles.push({
         let tm = Arc::clone(&thread_metrics);
         let labels = metric_labels.clone();
         let flag = Arc::clone(&shutdown_flag);
         thread::spawn_named(&format!("{thread_prefix}-bh-metrics"), move || {
             metrics::run_metrics_thread(&tm, &labels, &flag);
         })
-    };
-
-    let mut handles =
-        prepare_data_listeners(&params, &shutdown_flag, &thread_metrics, thread_prefix).await?;
+    });
 
     // All data listeners are up. Open control port so the generator can
     // connect and know we're ready.
     let control_addr = params.control_addr;
-    let ctrl_res = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
-        addr: control_addr,
-        source: Box::new(source),
-    });
-    if ctrl_res.is_err() {
-        shutdown_flag.store(true, Relaxed);
-    }
-    let control_listener = ctrl_res?;
+    let control_listener = match net::TcpListener::bind(control_addr) {
+        Ok(listener) => listener,
+        Err(source) => {
+            shutdown_flag.store(true, Relaxed);
+            thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+            return Err(Error::Bind {
+                addr: control_addr,
+                source: Box::new(source),
+            });
+        }
+    };
     control_listener
         .set_nonblocking(true)
         .expect("failed to set control listener nonblocking");
     info!("control port listening on {control_addr}, waiting for generator");
-
-    handles.push(metrics_handle);
 
     let flag = Arc::clone(&shutdown_flag);
     let shutdown_clone = shutdown.clone();
@@ -419,6 +424,7 @@ pub(crate) async fn run_server(
         Ok(connected) => connected,
         Err(e) => {
             shutdown_flag.store(true, Relaxed);
+            thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
             return Err(e);
         }
     };

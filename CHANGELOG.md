@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.33.0]
+### Changed
+- **Breaking Change**: Datadog blackhole now records received series under the
+  `target/` prefix, matching the prometheus and expvar target metrics
+  collectors. The `record` policy still matches on the unprefixed series name.
+- **Breaking Change**: Datadog blackhole does not record any target metrics by
+  default.
+
+### Added
+- Datadog blackhole now accepts a `record` policy (`all` / `disabled` /
+  `series_to_keep: [...]`) controlling which received series are recorded as
+  capture metrics.
+- OpenTelemetry metric payloads now prefix generated metric names with their
+  metric kind to simplify intake debugging.
+- OpenTelemetry cumulative metric generation now updates cumulative sums using
+  aggregation temporality, preserves cumulative histogram min/max bounds, and
+  supports configurable histogram count limits. Cumulative explicit histograms
+  now retain their state across payload generations.
+- HTTP blackhole now supports an `openmetrics` body variant for generated
+  Prometheus/OpenMetrics scrape responses.
 - Updated to rand 0.10.x
 - `dogstatsd` generator now supports configurable pools for the `|c:` (container
   ID), `|e:` (external data), and `|card:` (cardinality) origin detection
@@ -13,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metric, or omits the field entirely if the pool is empty.
 - `dogstatsd` generator now supports DogStatsD protocol v1.3 `|T` timestamps
   for count and gauge metrics via `timestamp.range` and `timestamp.probability`.
-- Fixed: `dogstatsd` tag generation would silently fail with a misleading
+
+### Fixed
+- `dogstatsd` tag generation would silently fail with a misleading
   `StringGenerate` error for any `tag_length` whose range collapses after
   reserving one byte for the `:` separator -- every constant or single-value
   range (e.g. `Constant(3)`, `Constant(4)`, `Inclusive { min: 100, max: 100 }`)
@@ -22,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns a `Validation` error naming the offending range instead of the opaque
   `StringGenerate`.
 
-## Removed
+### Removed
 - Removed no longer used `smaps.private_hugetlb.by_pathname` procfs observer
   metric.
 - Removed no longer used `smaps.swap_pss.by_pathname` procfs observer metric.
