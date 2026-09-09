@@ -39,13 +39,27 @@ pub enum Error {
         #[source]
         source: Box<std::io::Error>,
     },
-    /// A listener socket setup step failed. Names the operation, since a bare
-    /// OS message cannot say which of the setup calls went wrong.
-    #[error("Failed to {operation} on listener socket for {addr}: {source}")]
+    /// A socket setup step failed. Names the operation, since a bare OS
+    /// message cannot say which of the setup calls went wrong.
+    #[error("Failed to {operation} for {addr}: {source}")]
     Socket {
-        /// The socket operation that failed, for instance "set `SO_REUSEADDR`".
+        /// The operation that failed, for instance "set `SO_REUSEADDR` on
+        /// listener socket".
         operation: &'static str,
-        /// Address the listener is being built for.
+        /// Address the socket serves.
+        addr: SocketAddr,
+        /// Underlying IO error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// An event loop setup step failed. Named for the same reason as
+    /// [`Error::Socket`]: the OS message alone cannot say which call failed.
+    #[error("Failed to {operation} for {addr}: {source}")]
+    Poll {
+        /// The operation that failed, for instance "register a flow with the
+        /// poll registry".
+        operation: &'static str,
+        /// Address the event loop serves.
         addr: SocketAddr,
         /// Underlying IO error.
         #[source]
@@ -359,7 +373,7 @@ fn client_thread_main(
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
 ) -> Result<(), Error> {
-    let mut poll = Poll::new()?;
+    let mut poll = Poll::new().map_err(poll_err("create the mio Poll", addr))?;
     let mut events = Events::with_capacity(num_flows as usize);
     let request_buf = vec![0u8; request_size];
     let mut response_buf = vec![0u8; response_size];
@@ -370,12 +384,15 @@ fn client_thread_main(
         match net::TcpStream::connect(addr) {
             Ok(std_stream) => {
                 let _ = std_stream.set_nodelay(no_delay);
-                std_stream.set_nonblocking(true)?;
+                std_stream
+                    .set_nonblocking(true)
+                    .map_err(socket_err("set O_NONBLOCK on flow socket", addr))?;
                 let mut stream = TcpStream::from_std(std_stream);
                 let token = Token(next_token);
                 next_token += 1;
                 poll.registry()
-                    .register(&mut stream, token, Interest::WRITABLE)?;
+                    .register(&mut stream, token, Interest::WRITABLE)
+                    .map_err(poll_err("register a flow with the poll registry", addr))?;
                 flows.insert(Flow {
                     stream,
                     token,
@@ -723,6 +740,15 @@ fn socket_err(operation: &'static str, addr: SocketAddr) -> impl Fn(io::Error) -
     }
 }
 
+/// Build a `map_err` closure that names the failed event loop operation.
+fn poll_err(operation: &'static str, addr: SocketAddr) -> impl Fn(io::Error) -> Error {
+    move |source| Error::Poll {
+        operation,
+        addr,
+        source: Box::new(source),
+    }
+}
+
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
 /// and (for thread 0) attaches the reuseport eBPF program.
 ///
@@ -743,21 +769,25 @@ fn create_listener(
         socket2::Domain::IPV6
     };
     let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
-        .map_err(socket_err("create socket", binding_addr))?;
-    socket
-        .set_nonblocking(true)
-        .map_err(socket_err("set O_NONBLOCK", binding_addr))?;
-    socket
-        .set_cloexec(true)
-        .map_err(socket_err("set FD_CLOEXEC", binding_addr))?;
-    socket
-        .set_reuse_address(true)
-        .map_err(socket_err("set SO_REUSEADDR", binding_addr))?;
+        .map_err(socket_err("create listener socket", binding_addr))?;
+    socket.set_nonblocking(true).map_err(socket_err(
+        "set O_NONBLOCK on listener socket",
+        binding_addr,
+    ))?;
+    socket.set_cloexec(true).map_err(socket_err(
+        "set FD_CLOEXEC on listener socket",
+        binding_addr,
+    ))?;
+    socket.set_reuse_address(true).map_err(socket_err(
+        "set SO_REUSEADDR on listener socket",
+        binding_addr,
+    ))?;
 
     if num_threads > 1 {
-        socket
-            .set_reuse_port(true)
-            .map_err(socket_err("set SO_REUSEPORT", binding_addr))?;
+        socket.set_reuse_port(true).map_err(socket_err(
+            "set SO_REUSEPORT on listener socket",
+            binding_addr,
+        ))?;
 
         if thread_index == 0 {
             match bpf::load_reuseport_ebpf(u32::from(num_threads)) {
@@ -781,7 +811,7 @@ fn create_listener(
         })?;
     socket
         .listen(backlog)
-        .map_err(socket_err("listen", binding_addr))?;
+        .map_err(socket_err("listen on listener socket", binding_addr))?;
 
     Ok(socket.into())
 }
@@ -809,13 +839,17 @@ fn server_thread_main(
     };
 
     let mut listener = TcpListener::from_std(std_listener);
-    let mut poll = Poll::new()?;
+    let mut poll = Poll::new().map_err(poll_err("create the mio Poll", binding_addr))?;
     // Worst case under SO_REUSEPORT: every flow lands on this thread, so size
     // for the total flow count plus the listener token.
     let mut events = Events::with_capacity(num_flows as usize + 1);
 
     poll.registry()
-        .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)?;
+        .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)
+        .map_err(poll_err(
+            "register the listener with the poll registry",
+            binding_addr,
+        ))?;
 
     // Signal that this thread's listener is bound and ready. If this send
     // fails the receiver has gone away (blackhole is shutting down).
@@ -844,7 +878,11 @@ fn server_thread_main(
                             next_token += 1;
                             let mut mio_stream = stream;
                             poll.registry()
-                                .register(&mut mio_stream, token, Interest::READABLE)?;
+                                .register(&mut mio_stream, token, Interest::READABLE)
+                                .map_err(poll_err(
+                                    "register a flow with the poll registry",
+                                    binding_addr,
+                                ))?;
                             flows.insert(Flow {
                                 stream: mio_stream,
                                 token,
