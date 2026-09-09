@@ -150,13 +150,8 @@ pub(crate) async fn run_client(
                 ),
             )));
         }
-        match net::TcpStream::connect(params.control_addr) {
-            Ok(mut conn) => {
-                conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
-                    .expect("set_read_timeout on connected TcpStream must succeed");
-                let mut buf = [0u8; HANDSHAKE_LEN];
-                conn.read_exact(&mut buf)?;
-                let received = u16::from_be_bytes(buf);
+        match try_control_handshake(params.control_addr) {
+            Ok(received) => {
                 info!("blackhole ready, {received} flows to open");
                 break received;
             }
@@ -165,11 +160,12 @@ pub(crate) async fn run_client(
                     return Err(Error::Io(io::Error::new(
                         ErrorKind::TimedOut,
                         format!(
-                            "blackhole control port {} not reachable after 5 minutes: {e}",
+                            "control handshake with blackhole at {} did not complete within 5 minutes: {e}",
                             params.control_addr
                         ),
                     )));
                 }
+                trace!("control handshake attempt failed: {e}");
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
@@ -227,6 +223,28 @@ pub(crate) async fn run_client(
     thread::join_all(worker_handles).map_err(|()| Error::ThreadPanicked)?;
 
     Ok(())
+}
+
+/// Make one attempt at the control handshake: connect to the blackhole, then
+/// read the flow count it writes.
+///
+/// Connect, timeout and read failures are all transient during startup, so
+/// they share one return type and the caller retries every one of them until
+/// its deadline. A peer that accepts and then resets before writing the two
+/// bytes is the case that matters: the blackhole drops its control listener
+/// once any peer completes the handshake, which resets connections still
+/// queued behind it.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from `connect`, `set_read_timeout` or
+/// `read_exact`.
+fn try_control_handshake(control_addr: SocketAddr) -> io::Result<u16> {
+    let mut conn = net::TcpStream::connect(control_addr)?;
+    conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let mut buf = [0u8; HANDSHAKE_LEN];
+    conn.read_exact(&mut buf)?;
+    Ok(u16::from_be_bytes(buf))
 }
 
 fn client_thread_main(
