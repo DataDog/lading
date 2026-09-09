@@ -39,6 +39,18 @@ pub enum Error {
         #[source]
         source: Box<std::io::Error>,
     },
+    /// A listener socket setup step failed. Names the operation, since a bare
+    /// OS message cannot say which of the setup calls went wrong.
+    #[error("Failed to {operation} on listener socket for {addr}: {source}")]
+    Socket {
+        /// The socket operation that failed, for instance "set `SO_REUSEADDR`".
+        operation: &'static str,
+        /// Address the listener is being built for.
+        addr: SocketAddr,
+        /// Underlying IO error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
     /// A worker thread panicked.
     #[error("Worker thread panicked")]
     ThreadPanicked,
@@ -702,13 +714,23 @@ async fn wait_for_generator(
     }
 }
 
+/// Build a `map_err` closure that names the failed socket operation.
+fn socket_err(operation: &'static str, addr: SocketAddr) -> impl Fn(io::Error) -> Error {
+    move |source| Error::Socket {
+        operation,
+        addr,
+        source: Box::new(source),
+    }
+}
+
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
 /// and (for thread 0) attaches the reuseport eBPF program.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Bind`] if `binding_addr` cannot be bound, or
-/// [`Error::Io`] if any of the socket options or `listen` fail.
+/// [`Error::Socket`] if socket creation, any socket option, or `listen`
+/// fails. The [`Error::Socket`] message names the operation.
 fn create_listener(
     thread_index: u16,
     num_threads: u16,
@@ -720,13 +742,22 @@ fn create_listener(
     } else {
         socket2::Domain::IPV6
     };
-    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
-    socket.set_nonblocking(true)?;
-    socket.set_cloexec(true)?;
-    socket.set_reuse_address(true)?;
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
+        .map_err(socket_err("create socket", binding_addr))?;
+    socket
+        .set_nonblocking(true)
+        .map_err(socket_err("set O_NONBLOCK", binding_addr))?;
+    socket
+        .set_cloexec(true)
+        .map_err(socket_err("set FD_CLOEXEC", binding_addr))?;
+    socket
+        .set_reuse_address(true)
+        .map_err(socket_err("set SO_REUSEADDR", binding_addr))?;
 
     if num_threads > 1 {
-        socket.set_reuse_port(true)?;
+        socket
+            .set_reuse_port(true)
+            .map_err(socket_err("set SO_REUSEPORT", binding_addr))?;
 
         if thread_index == 0 {
             match bpf::load_reuseport_ebpf(u32::from(num_threads)) {
@@ -748,7 +779,9 @@ fn create_listener(
             addr: binding_addr,
             source: Box::new(source),
         })?;
-    socket.listen(backlog)?;
+    socket
+        .listen(backlog)
+        .map_err(socket_err("listen", binding_addr))?;
 
     Ok(socket.into())
 }
