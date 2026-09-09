@@ -278,14 +278,13 @@ pub(crate) async fn run_client(
 /// Wait for the blackhole to be ready by connecting to its control port, then
 /// read the flow count over that connection.
 ///
-/// Retries the connect until the blackhole appears, giving up after five
-/// minutes or as soon as shutdown fires.
+/// Retries the whole handshake, not the connect alone, until the blackhole
+/// appears. Gives up after five minutes or as soon as shutdown fires.
 ///
 /// # Errors
 ///
 /// Returns [`Error::ShutdownDuringStartup`] if shutdown fires first, or
-/// [`Error::Io`] if the control port never becomes reachable or the handshake
-/// read fails.
+/// [`Error::Io`] if the handshake does not complete before the deadline.
 fn wait_for_blackhole(control_addr: SocketAddr, shutdown_flag: &AtomicBool) -> Result<u16, Error> {
     info!("waiting for blackhole control port at {control_addr}");
     let deadline = Instant::now() + CONTROL_CONNECT_TIMEOUT;
@@ -295,12 +294,8 @@ fn wait_for_blackhole(control_addr: SocketAddr, shutdown_flag: &AtomicBool) -> R
                 "blackhole control port {control_addr} became reachable"
             )));
         }
-        match net::TcpStream::connect(control_addr) {
-            Ok(mut conn) => {
-                conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-                let mut buf = [0u8; HANDSHAKE_LEN];
-                conn.read_exact(&mut buf)?;
-                let flows = u16::from_be_bytes(buf);
+        match try_control_handshake(control_addr) {
+            Ok(flows) => {
                 info!("blackhole ready, {flows} flows to open");
                 return Ok(flows);
             }
@@ -309,15 +304,38 @@ fn wait_for_blackhole(control_addr: SocketAddr, shutdown_flag: &AtomicBool) -> R
                     return Err(Error::Io(io::Error::new(
                         ErrorKind::TimedOut,
                         format!(
-                            "blackhole control port {control_addr} not reachable after {}s: {e}",
+                            "control handshake with blackhole at {control_addr} did not complete within {}s: {e}",
                             CONTROL_CONNECT_TIMEOUT.as_secs()
                         ),
                     )));
                 }
+                trace!("control handshake attempt failed: {e}");
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
     }
+}
+
+/// Make one attempt at the control handshake: connect to the blackhole, then
+/// read the flow count it writes.
+///
+/// Connect, timeout and read failures are all transient during startup, so
+/// they share one return type and the caller retries every one of them until
+/// its deadline. A peer that accepts and then resets before writing the two
+/// bytes is the case that matters: the blackhole drops its control listener
+/// once any peer completes the handshake, which resets connections still
+/// queued behind it.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from `connect`, `set_read_timeout` or
+/// `read_exact`.
+fn try_control_handshake(control_addr: SocketAddr) -> io::Result<u16> {
+    let mut conn = net::TcpStream::connect(control_addr)?;
+    conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let mut buf = [0u8; HANDSHAKE_LEN];
+    conn.read_exact(&mut buf)?;
+    Ok(u16::from_be_bytes(buf))
 }
 
 fn client_thread_main(
