@@ -2039,6 +2039,7 @@ dependencies = [
  "proptest-derive",
  "prost",
  "rand 0.10.1",
+ "rmp",
  "rmp-serde",
  "rustc-hash",
  "serde",
