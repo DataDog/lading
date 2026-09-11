@@ -17,6 +17,8 @@
 
 use std::sync::Arc;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use rustc_hash::FxHashMap;
 
 use super::{AttributeValue, Span, SpanEvent, SpanLink, TraceChunk, TracerPayload};
@@ -45,116 +47,61 @@ fn golden_payload(name: &str) -> Vec<u8> {
         .iter()
         .find(|case| case.name == name)
         .unwrap_or_else(|| panic!("golden capture '{name}' should exist"));
-    decode_base64(&case.payload_base64)
-}
-
-/// Decodes standard, padded base64.
-///
-/// Test-only, and self-checking: the golden assertions compare the decoded bytes against
-/// hand-verified values, so a decoding bug fails the tests loudly rather than passing silently.
-fn decode_base64(encoded: &str) -> Vec<u8> {
-    fn value(byte: u8) -> u8 {
-        match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => panic!("invalid base64 byte {byte:#x}"),
-        }
-    }
-
-    let bytes: Vec<u8> = encoded
-        .bytes()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect();
-    assert!(
-        !bytes.is_empty() && bytes.len().is_multiple_of(4),
-        "invalid base64 length {}",
-        bytes.len()
-    );
-
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for chunk in bytes.chunks(4) {
-        // Padding appears only in the final group: one `=` drops the third byte, two drop the
-        // third and fourth.
-        let pads = match chunk {
-            [_, _, _, b'='] if chunk[2] == b'=' => 2,
-            [_, _, _, b'='] => 1,
-            _ => 0,
-        };
-        let digits: [u8; 4] = chunk
-            .iter()
-            .map(|&b| if b == b'=' { 0 } else { value(b) })
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("four digits");
-        let group = (u32::from(digits[0]) << 18)
-            | (u32::from(digits[1]) << 12)
-            | (u32::from(digits[2]) << 6)
-            | u32::from(digits[3]);
-        // Four six-bit digits form 24 bits; the shifts below select whole bytes, so the casts
-        // only drop zero high bits.
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            out.push((group >> 16) as u8);
-            if pads < 2 {
-                out.push((group >> 8) as u8);
-            }
-            if pads < 1 {
-                out.push(group as u8);
-            }
-        }
-    }
-    out
+    STANDARD
+        .decode(&case.payload_base64)
+        .expect("golden capture should be valid base64")
 }
 
 /// A schema-aware reader over a v1.0 `MessagePack` payload.
+///
+/// Primitive `MessagePack` framing is delegated to `rmp::decode`. The schema layered on top of
+/// it, meaning field identifiers, the streaming string table and the attribute layout, stays
+/// transcribed from the reference implementations, so this remains an independent check on the
+/// encoder rather than a mirror of it.
 struct Decoder<'a> {
+    /// The unread remainder of the payload. Both `rmp::decode` reads and `take` advance it.
     data: &'a [u8],
-    pos: usize,
+    /// The payload's original length, so `pos` can report how far reading got.
+    total: usize,
     /// Streaming string table: index 0 is the pre-seeded empty string, and each inline string
     /// takes the next index in write order.
     strings: FxHashMap<u64, String>,
     next_string_index: u64,
 }
 
+/// Renders an `rmp` read failure as the test-facing error string.
+fn read_error<E: std::fmt::Debug>(error: E) -> String {
+    format!("malformed MessagePack: {error:?}")
+}
+
 impl<'a> Decoder<'a> {
     fn new(data: &'a [u8]) -> Self {
         Self {
             data,
-            pos: 0,
+            total: data.len(),
             strings: FxHashMap::from_iter([(0, String::new())]),
             next_string_index: 1,
         }
     }
 
-    fn byte(&mut self) -> Result<u8, String> {
-        let byte = *self
-            .data
-            .get(self.pos)
-            .ok_or_else(|| "unexpected end of payload".to_string())?;
-        self.pos += 1;
-        Ok(byte)
+    /// The number of bytes consumed so far.
+    fn pos(&self) -> usize {
+        self.total - self.data.len()
     }
 
     fn peek(&self) -> Result<u8, String> {
         self.data
-            .get(self.pos)
+            .first()
             .copied()
             .ok_or_else(|| "unexpected end of payload".to_string())
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
-        let end = self
-            .pos
-            .checked_add(n)
-            .ok_or_else(|| "payload length overflow".to_string())?;
-        let slice = self
-            .data
-            .get(self.pos..end)
-            .ok_or_else(|| "unexpected end of payload".to_string())?;
-        self.pos = end;
+        if self.data.len() < n {
+            return Err("unexpected end of payload".to_string());
+        }
+        let (slice, rest) = self.data.split_at(n);
+        self.data = rest;
         Ok(slice)
     }
 
@@ -162,84 +109,33 @@ impl<'a> Decoder<'a> {
     /// routes some numeric fields through its signed path, so positive values may also carry
     /// signed markers.
     fn uint(&mut self) -> Result<u64, String> {
-        let marker = self.byte()?;
-        match marker {
-            0x00..=0x7F => Ok(u64::from(marker)),
-            0xCC => Ok(u64::from(self.byte()?)),
-            0xCD => Ok(u64::from(u16::from_be_bytes(
-                self.take(2)?.try_into().expect("two bytes"),
-            ))),
-            0xCE => Ok(u64::from(u32::from_be_bytes(
-                self.take(4)?.try_into().expect("four bytes"),
-            ))),
-            0xCF => Ok(u64::from_be_bytes(
-                self.take(8)?.try_into().expect("eight bytes"),
-            )),
-            0xD0..=0xD3 => {
-                let value = self.signed_value(marker)?;
-                u64::try_from(value).map_err(|_| format!("negative value in uint field: {value}"))
-            }
-            _ => Err(format!("not an unsigned integer: 0x{marker:02x}")),
-        }
-    }
-
-    fn signed_value(&mut self, marker: u8) -> Result<i64, String> {
-        match marker {
-            0xD0 => Ok(i8::from_be_bytes(self.take(1)?.try_into().expect("one byte")).into()),
-            0xD1 => Ok(i16::from_be_bytes(self.take(2)?.try_into().expect("two bytes")).into()),
-            0xD2 => Ok(i32::from_be_bytes(self.take(4)?.try_into().expect("four bytes")).into()),
-            0xD3 => Ok(i64::from_be_bytes(
-                self.take(8)?.try_into().expect("eight bytes"),
-            )),
-            _ => Err(format!("not a signed integer: 0x{marker:02x}")),
-        }
+        rmp::decode::read_int(&mut self.data).map_err(read_error)
     }
 
     fn signed(&mut self) -> Result<i64, String> {
-        let marker = self.byte()?;
-        match marker {
-            0x00..=0x7F => Ok(i64::from(marker)),
-            0xE0..=0xFF => Ok(i64::from(marker) - 256),
-            0xD0..=0xD3 => self.signed_value(marker),
-            _ => Err(format!("not a signed integer: 0x{marker:02x}")),
-        }
+        rmp::decode::read_int(&mut self.data).map_err(read_error)
     }
 
     fn boolean(&mut self) -> Result<bool, String> {
-        match self.byte()? {
-            0xC2 => Ok(false),
-            0xC3 => Ok(true),
-            marker => Err(format!("not a boolean: 0x{marker:02x}")),
-        }
+        rmp::decode::read_bool(&mut self.data).map_err(read_error)
     }
 
     fn double(&mut self) -> Result<f64, String> {
-        match self.byte()? {
-            0xCB => Ok(f64::from_be_bytes(
-                self.take(8)?.try_into().expect("eight bytes"),
-            )),
-            marker => Err(format!("not a double: 0x{marker:02x}")),
-        }
+        rmp::decode::read_f64(&mut self.data).map_err(read_error)
     }
 
     fn inline_str(&mut self) -> Result<String, String> {
-        let marker = self.byte()?;
-        let len = match marker {
-            0xA0..=0xBF => usize::from(marker & 0x1F),
-            0xD9 => usize::from(self.byte()?),
-            0xDA => usize::from(u16::from_be_bytes(
-                self.take(2)?.try_into().expect("two bytes"),
-            )),
-            0xDB => u32::from_be_bytes(self.take(4)?.try_into().expect("four bytes")) as usize,
-            _ => return Err(format!("not a string: 0x{marker:02x}")),
-        };
-        String::from_utf8(self.take(len)?.to_vec()).map_err(|e| format!("invalid UTF-8: {e}"))
+        let len = rmp::decode::read_str_len(&mut self.data).map_err(read_error)?;
+        let bytes = self.take(len as usize)?;
+        String::from_utf8(bytes.to_vec()).map_err(|e| format!("invalid UTF-8: {e}"))
     }
 
     /// Reads a streaming string: inline on its first appearance, by table index thereafter.
+    ///
+    /// The discriminant is the raw marker byte, since a table index and an inline string occupy
+    /// the same slot: fixstr, str8, str16 and str32 mean inline, anything else is an index.
     fn string(&mut self) -> Result<String, String> {
-        let marker = self.peek();
-        if matches!(marker, Ok(0xA0..=0xBF | 0xD9 | 0xDA | 0xDB)) {
+        if matches!(self.peek(), Ok(0xA0..=0xBF | 0xD9 | 0xDA | 0xDB)) {
             let s = self.inline_str()?;
             let index = self.next_string_index;
             self.strings.insert(index, s.clone());
@@ -255,40 +151,20 @@ impl<'a> Decoder<'a> {
     }
 
     fn bin(&mut self) -> Result<Vec<u8>, String> {
-        let marker = self.byte()?;
-        let len = match marker {
-            0xC4 => usize::from(self.byte()?),
-            0xC5 => usize::from(u16::from_be_bytes(
-                self.take(2)?.try_into().expect("two bytes"),
-            )),
-            0xC6 => u32::from_be_bytes(self.take(4)?.try_into().expect("four bytes")) as usize,
-            _ => return Err(format!("not a byte string: 0x{marker:02x}")),
-        };
-        Ok(self.take(len)?.to_vec())
+        let len = rmp::decode::read_bin_len(&mut self.data).map_err(read_error)?;
+        Ok(self.take(len as usize)?.to_vec())
     }
 
     fn arr_len(&mut self) -> Result<usize, String> {
-        let marker = self.byte()?;
-        match marker {
-            0x90..=0x9F => Ok(usize::from(marker & 0x0F)),
-            0xDC => Ok(usize::from(u16::from_be_bytes(
-                self.take(2)?.try_into().expect("two bytes"),
-            ))),
-            0xDD => Ok(u32::from_be_bytes(self.take(4)?.try_into().expect("four bytes")) as usize),
-            _ => Err(format!("not an array header: 0x{marker:02x}")),
-        }
+        rmp::decode::read_array_len(&mut self.data)
+            .map(|len| len as usize)
+            .map_err(read_error)
     }
 
     fn map_len(&mut self) -> Result<usize, String> {
-        let marker = self.byte()?;
-        match marker {
-            0x80..=0x8F => Ok(usize::from(marker & 0x0F)),
-            0xDE => Ok(usize::from(u16::from_be_bytes(
-                self.take(2)?.try_into().expect("two bytes"),
-            ))),
-            0xDF => Ok(u32::from_be_bytes(self.take(4)?.try_into().expect("four bytes")) as usize),
-            _ => Err(format!("not a map header: 0x{marker:02x}")),
-        }
+        rmp::decode::read_map_len(&mut self.data)
+            .map(|len| len as usize)
+            .map_err(read_error)
     }
 
     /// Reads a field identifier. All v1.0 field IDs are 1-16 and encode as one byte.
@@ -458,8 +334,8 @@ impl<'a> Decoder<'a> {
 fn decode(data: &[u8]) -> Result<TracerPayload, String> {
     let mut decoder = Decoder::new(data);
     let payload = decoder.tracer_payload()?;
-    if decoder.pos != data.len() {
-        return Err(format!("decoded {} of {} bytes", decoder.pos, data.len()));
+    if decoder.pos() != data.len() {
+        return Err(format!("decoded {} of {} bytes", decoder.pos(), data.len()));
     }
     Ok(payload)
 }
