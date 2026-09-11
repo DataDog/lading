@@ -181,8 +181,7 @@ pub struct Config {
 
     /// Sampling priority set on every chunk.
     ///
-    /// Defaults to `1`, the tracer's automatic keep decision, which leaves the sampling decision
-    /// to the receiving agent.
+    /// Defaults to `1`, the tracer's automatic keep decision, ensuring the agent keeps the chunk.
     pub priority: i32,
 
     /// Services in the graph. The operations of the **first** service are the entry points: every
@@ -251,9 +250,7 @@ impl Config {
             }
 
             for operation in &service.operations {
-                // The trace-agent's normalizer substitutes the span name for an empty resource and
-                // rejects an empty name outright, so both must be set here or the sent payload and
-                // the received one disagree on every span the operation produces.
+                // The trace-agent's normalizer requires both of these to be set.
                 if operation.name.is_empty() || operation.resource.is_empty() {
                     return Err(Error::Validation(format!(
                         "Operation '{}/{}' must have a non-empty name and resource.",
