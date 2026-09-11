@@ -1178,6 +1178,8 @@ impl TracerPayload {
 }
 
 #[cfg(test)]
+mod golden;
+#[cfg(test)]
 mod test {
     use rand::{SeedableRng, rngs::SmallRng};
     use rustc_hash::FxHashMap;
