@@ -232,11 +232,14 @@ impl Cache {
                 )?
             }
             crate::Config::TraceAgent(config) => {
-                use crate::trace_agent::{self, v04};
+                use crate::trace_agent::{self, Serializer, v1, v04};
 
                 let mut ta = match config {
                     trace_agent::Config::V04(v04_config) => {
-                        v04::V04::with_config(*v04_config, &mut rng)?
+                        Serializer::V04(v04::V04::with_config(*v04_config, &mut rng)?)
+                    }
+                    trace_agent::Config::V1(v1_config) => {
+                        Serializer::V1(v1::V1::with_config(v1_config.clone(), &mut rng)?)
                     }
                 };
 

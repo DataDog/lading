@@ -1,0 +1,57 @@
+generator:
+  - id: "trace_agent_v1_tcp"
+    tcp:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]
+      addr: "127.0.0.1:8126"
+      variant:
+        trace_agent:
+          v1.0:
+            error_rate: 0.1
+            chunks_per_payload: 1
+            language_name: "go"
+            language_version: "1.24.2"
+            tracer_version: "2.5.0"
+            env: "production"
+            app_version: "1.0.0"
+            priority: 1
+            services:
+              - name: "api-gateway"
+                operations:
+                  - id: "get-product"
+                    name: "http.request"
+                    resource: "GET /api/v1/products/{id}"
+                    span_type: "web"
+                    kind: 2
+                    component: "net/http"
+                    attributes:
+                      http.method: "GET"
+                    suboperations:
+                      - to: "product-service/get-product"
+                        rate: 1.0
+              - name: "product-service"
+                operations:
+                  - id: "get-product"
+                    name: "grpc.server.request"
+                    resource: "/ProductService/GetProduct"
+                    span_type: "web"
+                    kind: 2
+                    component: "grpc"
+                    suboperations:
+                      - to: "product-cache/get-product-by-id"
+                        rate: 1.0
+              - name: "product-cache"
+                operations:
+                  - id: "get-product-by-id"
+                    name: "redis.command"
+                    resource: "GET products:by_id:$1"
+                    span_type: "redis"
+                    kind: 3
+                    component: "redis"
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"

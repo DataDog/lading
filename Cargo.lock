@@ -2029,6 +2029,7 @@ name = "lading-payload"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "base64",
  "byte-unit",
  "bytes",
  "chrono",
@@ -2039,6 +2040,7 @@ dependencies = [
  "proptest-derive",
  "prost",
  "rand 0.10.1",
+ "rmp",
  "rmp-serde",
  "rustc-hash",
  "serde",

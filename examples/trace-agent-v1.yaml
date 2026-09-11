@@ -1,0 +1,69 @@
+generator:
+  - id: "trace_agent_v1"
+    trace_agent:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      target_uri: "http://localhost:8126"
+      backoff_behavior:
+        obey:
+          max_retries: 3
+      variant:
+        v1.0:
+          error_rate: 0.05
+          chunks_per_payload: 1
+          language_name: "go"
+          language_version: "1.24.2"
+          tracer_version: "2.5.0"
+          env: "production"
+          app_version: "1.0.0"
+          priority: 1
+          services:
+            - name: "api-gateway"
+              operations:
+                - id: "get-product"
+                  name: "http.request"
+                  resource: "GET /api/v1/products/{id}"
+                  span_type: "web"
+                  kind: 2
+                  component: "net/http"
+                  attributes:
+                    http.method: "GET"
+                  suboperations:
+                    - to: "product-service/get-product"
+                      rate: 1.0
+            - name: "product-service"
+              operations:
+                - id: "get-product"
+                  name: "grpc.server.request"
+                  resource: "/ProductService/GetProduct"
+                  span_type: "web"
+                  kind: 2
+                  component: "grpc"
+                  suboperations:
+                    - to: "product-cache/get-product-by-id"
+                      rate: 0.9
+                    - to: "product-db/select-product-by-id"
+                      rate: 0.5
+            - name: "product-cache"
+              operations:
+                - id: "get-product-by-id"
+                  name: "redis.command"
+                  resource: "GET products:by_id:$1"
+                  span_type: "redis"
+                  kind: 3
+                  component: "redis"
+            - name: "product-db"
+              operations:
+                - id: "select-product-by-id"
+                  name: "postgres.query"
+                  resource: "SELECT * FROM products WHERE id = $1"
+                  span_type: "sql"
+                  kind: 3
+                  component: "postgresql"
+      bytes_per_second: "50 MiB"
+      maximum_block_size: "1 MiB"
+      maximum_prebuild_cache_size_bytes: "256 MiB"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "0.0.0.0:8126"
