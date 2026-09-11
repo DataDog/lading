@@ -31,6 +31,7 @@
 use std::io::Write;
 use std::sync::Arc;
 
+use rmp::encode::ValueWriteError;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use rand::{Rng, RngExt, seq::IndexedRandom};
@@ -831,8 +832,9 @@ fn cast_error(error: std::num::TryFromIntError) -> Error {
 /// crate error type.
 fn map_write_error(error: rmp::encode::ValueWriteError<std::io::Error>) -> Error {
     match error {
-        rmp::encode::ValueWriteError::InvalidMarkerWrite(e)
-        | rmp::encode::ValueWriteError::InvalidDataWrite(e) => Error::Io(e),
+        ValueWriteError::InvalidMarkerWrite(e) | ValueWriteError::InvalidDataWrite(e) => {
+            Error::Io(e)
+        }
     }
 }
 
@@ -1195,7 +1197,7 @@ mod test {
         AttributeValue, Config, Operation, Service, Span, SubOperation, TraceChunk, TracerPayload,
         V1,
     };
-    use crate::Serialize as _;
+    use crate::Serialize;
 
     fn service_graph() -> Config {
         Config {
@@ -1373,8 +1375,8 @@ mod test {
     fn error_injection_marks_spans_the_way_real_tracers_do() {
         let mut config = service_graph();
         config.error_rate = 1.0;
-        let generator =
-            V1::with_config(config, &mut SmallRng::seed_from_u64(0)).expect("config should be valid");
+        let generator = V1::with_config(config, &mut SmallRng::seed_from_u64(0))
+            .expect("config should be valid");
         let mut rng = SmallRng::seed_from_u64(11);
 
         let chunk = generator
