@@ -568,10 +568,17 @@ impl V1 {
         let span_id = random_span_id(rng);
         let error = rng.random_bool(self.config.error_rate);
         let attributes = if error {
+            // Real tracers mark a span as failed with the error bit plus error attributes rather
+            // than a transport status code, which is what the receiving agent's dashboards and
+            // error tracking read.
             let mut attributes = resolved.attributes.to_vec();
             attributes.push((
-                "http.status_code".to_string(),
-                AttributeValue::String("500".to_string()),
+                "error.type".to_string(),
+                AttributeValue::String("RuntimeError".to_string()),
+            ));
+            attributes.push((
+                "error.message".to_string(),
+                AttributeValue::String("synthetic error".to_string()),
             ));
             Arc::from(attributes)
         } else {
@@ -1360,6 +1367,41 @@ mod test {
         let mut config = service_graph();
         config.services[0].operations[0].resource = String::new();
         assert!(config.valid().is_err());
+    }
+
+    #[test]
+    fn error_injection_marks_spans_the_way_real_tracers_do() {
+        let mut config = service_graph();
+        config.error_rate = 1.0;
+        let generator =
+            V1::with_config(config, &mut SmallRng::seed_from_u64(0)).expect("config should be valid");
+        let mut rng = SmallRng::seed_from_u64(11);
+
+        let chunk = generator
+            .generate_chunk(&mut rng)
+            .expect("should not fail to generate");
+        assert!(!chunk.spans.is_empty());
+        for span in &chunk.spans {
+            assert!(span.error, "every span should carry the error bit");
+            let find = |key: &str| {
+                span.attributes
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, value)| value)
+                    .expect("attribute is present")
+            };
+            // The error bit plus error attributes is what real tracers emit and what the
+            // receiving agent's error tracking reads; never a transport status code.
+            assert_eq!(
+                find("error.type"),
+                &AttributeValue::String("RuntimeError".to_string())
+            );
+            assert_eq!(
+                find("error.message"),
+                &AttributeValue::String("synthetic error".to_string())
+            );
+            assert!(!span.attributes.iter().any(|(k, _)| k == "http.status_code"));
+        }
     }
 
     #[test]
