@@ -16,13 +16,22 @@
 //! The trace-agent normalizes v1.0 spans on receipt (`pkg/trace/agent/normalizer.go`), so a corpus
 //! that trips normalization would diverge from what the sender produced for reasons unrelated to
 //! the pipeline under test. The generator therefore emits values that are already normalized:
-//! non-empty services, names, and resources, non-zero span IDs distinct from their parents, and
-//! timestamps constrained so that neither the start time nor the start-plus-duration overflows a
-//! signed 64-bit integer. Configurations that violate this are rejected by [`Config::validate`]
-//! where they can be detected statically.
+//! non-empty services, names, and resources, non-zero span IDs, and timestamps constrained so
+//! that neither the start time nor the start-plus-duration overflows a signed 64-bit integer.
+//! Configurations that violate this are rejected by [`Config::validate`] where they can be
+//! detected statically.
+//!
+//! # Wire-format validation
+//!
+//! The encoder is validated against a raw `/v1.0/traces` body captured from a real
+//! `dd-trace-go` tracer: the golden tests in this module decode both the captured fixture and
+//! this encoder's output through a decoder transcribed from the reference implementations, and
+//! require them to agree. Regenerate the fixture only alongside an intentional encoder change,
+//! and re-verify it against a real tracer.
 use std::io::Write;
+use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use rand::{Rng, RngExt, seq::IndexedRandom};
 use serde::{Deserialize, Serialize};
@@ -76,6 +85,7 @@ impl ConfigAttributeValue {
 /// A call from one operation to an operation on another service.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields)]
 pub struct SubOperation {
     /// The called operation, as `service-name/operation-id`.
     pub to: String,
@@ -91,6 +101,7 @@ fn default_rate() -> f64 {
 /// An operation a service can perform, producing one span.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields)]
 pub struct Operation {
     /// Identifier used to reference this operation from a [`SubOperation`]. Unique within a
     /// service.
@@ -119,6 +130,7 @@ pub struct Operation {
 /// A service in the generated graph.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields)]
 pub struct Service {
     /// Service name, used verbatim as the span's service.
     pub name: String,
@@ -201,8 +213,9 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if a rate falls outside `0.0..=1.0`, if there are no services or no
-    /// operations to start from, if any span field the trace-agent's normalizer would rewrite is
-    /// left empty, or if a suboperation references an operation that does not exist.
+    /// operations to start from, if the same operation is declared more than once, if any span
+    /// field the trace-agent's normalizer would rewrite is left empty, or if a suboperation
+    /// references an operation that does not exist.
     pub fn valid(&self) -> Result<(), Error> {
         for (name, rate) in [
             ("error_rate", self.error_rate),
@@ -228,7 +241,7 @@ impl Config {
             ));
         }
 
-        let mut operation_keys = Vec::new();
+        let mut operation_keys = FxHashSet::default();
         for service in &self.services {
             if service.name.is_empty() {
                 return Err(Error::Validation(
@@ -247,7 +260,12 @@ impl Config {
                     )));
                 }
 
-                operation_keys.push(format!("{}/{}", service.name, operation.id));
+                let key = format!("{}/{}", service.name, operation.id);
+                if !operation_keys.insert(key.clone()) {
+                    return Err(Error::Validation(format!(
+                        "Operation '{key}' is declared more than once."
+                    )));
+                }
             }
         }
 
@@ -292,29 +310,32 @@ enum AttributeValue {
 }
 
 /// A single span.
+///
+/// Strings and attributes are reference-counted handles into the resolved operation graph, so a
+/// span is assembled by cloning cheap handles rather than re-allocating its fields.
 #[allow(clippy::struct_field_names)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Span {
-    service: String,
-    name: String,
-    resource: String,
+    service: Arc<str>,
+    name: Arc<str>,
+    resource: Arc<str>,
     span_id: u64,
     parent_id: u64,
     start: u64,
     duration: u64,
     error: bool,
-    attributes: Vec<(String, AttributeValue)>,
-    span_type: String,
+    attributes: Arc<[(String, AttributeValue)]>,
+    span_type: Arc<str>,
     links: Vec<SpanLink>,
     events: Vec<SpanEvent>,
-    env: String,
-    version: String,
-    component: String,
+    env: Arc<str>,
+    version: Arc<str>,
+    component: Arc<str>,
     kind: u32,
 }
 
 /// A link from a span to a span in another trace.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct SpanLink {
     trace_id: [u8; 16],
     span_id: u64,
@@ -324,7 +345,7 @@ struct SpanLink {
 }
 
 /// A timestamped event recorded during a span.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct SpanEvent {
     time: u64,
     name: String,
@@ -332,7 +353,7 @@ struct SpanEvent {
 }
 
 /// A group of spans belonging to one trace.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct TraceChunk {
     priority: Option<i32>,
     origin: String,
@@ -344,7 +365,7 @@ struct TraceChunk {
 }
 
 /// One v1.0 tracer payload: the unit a tracer POSTs to `/v1.0/traces`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct TracerPayload {
     container_id: String,
     language_name: String,
@@ -358,21 +379,45 @@ struct TracerPayload {
     chunks: Vec<TraceChunk>,
 }
 
+/// An operation with its service resolved and its span fields interned.
+///
+/// Everything a span needs except its identity and timing is computed once at construction, so
+/// the per-span hot path clones reference-counted handles instead of re-deriving sorted
+/// attributes from the configuration's `HashMap`.
+#[derive(Debug)]
+struct ResolvedOperation {
+    service: Arc<str>,
+    name: Arc<str>,
+    resource: Arc<str>,
+    span_type: Arc<str>,
+    component: Arc<str>,
+    kind: u32,
+    /// Attributes sorted by key: a `HashMap` iterates in an unspecified order, and two runs of
+    /// the same seed must produce byte-identical payloads.
+    attributes: Arc<[(String, AttributeValue)]>,
+    suboperations: Vec<SubOperation>,
+}
+
 /// Generates v1.0 trace payloads from a service graph.
 #[derive(Debug)]
 pub struct V1 {
     config: Config,
-    /// Every operation in the graph, keyed by `service-name/operation-id`, paired with its service
-    /// name.
-    operations: FxHashMap<String, (String, Operation)>,
+    /// Every operation in the graph, keyed by `service-name/operation-id`.
+    operations: FxHashMap<String, ResolvedOperation>,
     /// Entry-point keys: the operations of the first configured service.
     entry_points: Vec<String>,
+    /// Span `env` and `version` fields, shared by every generated span.
+    env: Arc<str>,
+    version: Arc<str>,
     /// Number of spans in the most recently generated payload, for metrics.
     last_span_count: u64,
 }
 
 impl V1 {
     /// Create a new v1.0 payload generator with the provided configuration.
+    ///
+    /// `_rng` is accepted for signature parity with the other payload generators, which seed
+    /// internal state from it at construction; v1.0 generation keeps no such state.
     ///
     /// # Errors
     ///
@@ -383,13 +428,26 @@ impl V1 {
         let mut operations = FxHashMap::default();
         for service in &config.services {
             for operation in &service.operations {
-                let key = format!("{}/{}", service.name, operation.id);
-                if operations
-                    .insert(key.clone(), (service.name.clone(), operation.clone()))
-                    .is_some()
-                {
-                    return Err(Error::Validation(format!("Duplicate operation '{key}'.")));
-                }
+                let mut attributes: Vec<(String, AttributeValue)> = operation
+                    .attributes
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.to_attribute_value()))
+                    .collect();
+                attributes.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+                operations.insert(
+                    format!("{}/{}", service.name, operation.id),
+                    ResolvedOperation {
+                        service: service.name.as_str().into(),
+                        name: operation.name.as_str().into(),
+                        resource: operation.resource.as_str().into(),
+                        span_type: operation.span_type.as_str().into(),
+                        component: operation.component.as_str().into(),
+                        kind: operation.kind,
+                        attributes: attributes.into(),
+                        suboperations: operation.suboperations.clone(),
+                    },
+                );
             }
         }
 
@@ -398,17 +456,22 @@ impl V1 {
             .iter()
             .map(|operation| format!("{}/{}", config.services[0].name, operation.id))
             .collect();
+        let env = config.env.as_str().into();
+        let version = config.app_version.as_str().into();
 
         Ok(Self {
             config,
             operations,
             entry_points,
+            env,
+            version,
             last_span_count: 0,
         })
     }
 
     /// Generates one encoded tracer payload with `chunk_count` trace chunks, paired with the
     /// number of spans it contains.
+    #[cfg(test)]
     fn generate_payload<R>(
         &mut self,
         rng: &mut R,
@@ -417,14 +480,13 @@ impl V1 {
     where
         R: Rng + ?Sized,
     {
+        let mut chunks = Vec::with_capacity(chunk_count);
         let mut span_count = 0;
-        let chunks = (0..chunk_count)
-            .map(|_| {
-                let chunk = self.generate_chunk(rng);
-                span_count += chunk.spans.len() as u64;
-                chunk
-            })
-            .collect();
+        for _ in 0..chunk_count {
+            let chunk = self.generate_chunk(rng)?;
+            span_count += chunk.spans.len() as u64;
+            chunks.push(chunk);
+        }
 
         let payload = TracerPayload {
             language_name: self.config.language_name.clone(),
@@ -436,29 +498,45 @@ impl V1 {
             ..Default::default()
         };
 
-        let encoded = payload.encode()?;
-        Ok((encoded, span_count))
+        Ok((payload.encode()?, span_count))
     }
 
-    fn generate_chunk<R>(&self, rng: &mut R) -> TraceChunk
+    /// Encodes a tracer payload carrying `chunks` as its trace chunks.
+    fn encode_chunks(&self, chunks: &[TraceChunk]) -> Result<Vec<u8>, Error> {
+        let payload = TracerPayload {
+            language_name: self.config.language_name.clone(),
+            language_version: self.config.language_version.clone(),
+            tracer_version: self.config.tracer_version.clone(),
+            env: self.config.env.clone(),
+            app_version: self.config.app_version.clone(),
+            chunks: chunks.to_vec(),
+            ..Default::default()
+        };
+        payload.encode()
+    }
+
+    fn generate_chunk<R>(&self, rng: &mut R) -> Result<TraceChunk, Error>
     where
         R: Rng + ?Sized,
     {
-        let entry_point = self
-            .entry_points
-            .choose(rng)
-            .expect("entry points are non-empty, as `Config::valid` requires");
+        let Some(entry_point) = self.entry_points.choose(rng) else {
+            // Unreachable while `Config::valid` rejects a first service with no operations, but
+            // reported rather than panicked on, per the crate's no-panic rule.
+            return Err(Error::Validation(
+                "configuration has no entry-point operations.".to_string(),
+            ));
+        };
 
         let (start, duration) = safe_start_and_duration(rng);
         let mut spans = Vec::new();
         self.append_spans(rng, entry_point, 0, start, duration, &mut spans, 0);
 
-        TraceChunk {
+        Ok(TraceChunk {
             priority: Some(self.config.priority),
             spans,
             trace_id: random_trace_id(rng),
             ..Default::default()
-        }
+        })
     }
 
     /// Appends the span for `operation_key` and, recursively, the spans of the operations it
@@ -483,27 +561,22 @@ impl V1 {
             return;
         }
 
-        let Some((service_name, operation)) = self.operations.get(operation_key) else {
+        let Some(resolved) = self.operations.get(operation_key) else {
             return;
         };
 
         let span_id = random_span_id(rng);
-        let mut attributes = operation
-            .attributes
-            .iter()
-            .map(|(key, value)| (key.clone(), value.to_attribute_value()))
-            .collect::<Vec<_>>();
-        // A `HashMap` iterates in an unspecified order, so sort to keep generation reproducible
-        // across runs: two runs of the same seed must produce byte-identical payloads.
-        attributes.sort_by(|(left, _), (right, _)| left.cmp(right));
-
         let error = rng.random_bool(self.config.error_rate);
-        if error {
+        let attributes = if error {
+            let mut attributes = resolved.attributes.to_vec();
             attributes.push((
                 "http.status_code".to_string(),
                 AttributeValue::String("500".to_string()),
             ));
-        }
+            Arc::from(attributes)
+        } else {
+            Arc::clone(&resolved.attributes)
+        };
 
         let links = if rng.random_bool(self.config.link_rate) {
             vec![SpanLink {
@@ -533,27 +606,25 @@ impl V1 {
         };
 
         spans.push(Span {
-            service: service_name.clone(),
-            name: operation.name.clone(),
-            resource: operation.resource.clone(),
+            service: Arc::clone(&resolved.service),
+            name: Arc::clone(&resolved.name),
+            resource: Arc::clone(&resolved.resource),
             span_id,
             parent_id,
             start,
             duration,
             error,
             attributes,
-            span_type: operation.span_type.clone(),
+            span_type: Arc::clone(&resolved.span_type),
             links,
             events,
-            env: self.config.env.clone(),
-            version: self.config.app_version.clone(),
-            component: operation.component.clone(),
-            kind: operation.kind,
+            env: Arc::clone(&self.env),
+            version: Arc::clone(&self.version),
+            component: Arc::clone(&resolved.component),
+            kind: resolved.kind,
         });
 
-        // Cloned so the recursive call can borrow `self.operations` again.
-        let suboperations = operation.suboperations.clone();
-        for suboperation in &suboperations {
+        for suboperation in &resolved.suboperations {
             if !rng.random_bool(suboperation.rate) {
                 continue;
             }
@@ -583,51 +654,59 @@ impl crate::Serialize for V1 {
         }
 
         // A v1.0 payload is a single structured object, so a block is one tracer payload whose
-        // chunk count is scaled to approach `max_bytes`. The count starts at the configured floor
-        // and grows geometrically: chunk generation dominates the cost, so re-probing every
-        // candidate additively would be quadratic in the block size. A binary search over the
-        // last doubling window then finds the largest payload that fits. The largest fitting
-        // encoding is written directly — re-encoding a found count would generate a *different*
-        // payload, since the source of randomness has advanced.
+        // chunk count is scaled to approach `max_bytes`. Chunks are generated exactly once, into
+        // a pool, and every candidate payload is an encoding of a prefix of that pool: probing a
+        // candidate count by generating its chunks from scratch, as the search over counts
+        // requires, would redo the dominant cost, generation, many times over.
         let floor = self.config.chunks_per_payload.max(1);
 
         // A payload must carry at least the configured number of chunks. If even that exceeds
         // `max_bytes`, nothing is written: the caller treats an empty block as a rejection and
         // scales up the minimum block size it asks for.
-        let (mut best, mut best_spans) = self.generate_payload(&mut rng, floor)?;
-        if best.len() > max_bytes {
+        let mut chunks: Vec<TraceChunk> = Vec::new();
+        for _ in 0..floor {
+            chunks.push(self.generate_chunk(&mut rng)?);
+        }
+        if self.encode_chunks(&chunks)?.len() > max_bytes {
+            // No block was written, so there is no span count to report.
+            self.last_span_count = 0;
             return Ok(());
         }
 
-        let mut low = floor;
-        let mut high = floor * 2;
+        // Grow the pool geometrically until its encoding no longer fits, then binary search the
+        // last doubling window for the largest prefix that does. Probes re-encode prefixes of the
+        // pool, which is cheap next to generating their chunks.
+        let mut low = chunks.len();
         loop {
-            let (encoded, spans) = self.generate_payload(&mut rng, high)?;
-            if encoded.len() > max_bytes {
+            // `chunks.len()` cannot approach `usize::MAX`: every chunk owns multiple heap
+            // allocations.
+            let target = chunks.len().saturating_mul(2).max(chunks.len() + 1);
+            chunks.reserve(target - chunks.len());
+            for _ in chunks.len()..target {
+                chunks.push(self.generate_chunk(&mut rng)?);
+            }
+            if self.encode_chunks(&chunks)?.len() > max_bytes {
                 break;
             }
-            low = high;
-            best = encoded;
-            best_spans = spans;
-            high *= 2;
+            low = chunks.len();
         }
 
+        let mut high = chunks.len();
         while low + 1 < high {
             let mid = usize::midpoint(low, high);
-            let (encoded, spans) = self.generate_payload(&mut rng, mid)?;
-            if encoded.len() <= max_bytes {
+            if self.encode_chunks(&chunks[..mid])?.len() <= max_bytes {
                 low = mid;
-                best = encoded;
-                best_spans = spans;
             } else {
                 high = mid;
             }
         }
 
+        let best = self.encode_chunks(&chunks[..low])?;
         writer.write_all(&best)?;
-        // Report the span count of the payload actually written, not whichever probe happened to
-        // run last: the final binary-search probe is thrown away roughly half the time.
-        self.last_span_count = best_spans;
+        self.last_span_count = chunks[..low]
+            .iter()
+            .map(|chunk| chunk.spans.len() as u64)
+            .sum();
 
         Ok(())
     }
@@ -762,10 +841,6 @@ fn write_u64<W: Write>(w: &mut W, value: u64) -> Result<(), Error> {
         .map_err(map_write_error)
 }
 
-fn write_field<W: Write>(w: &mut W, field: u32) -> Result<(), Error> {
-    write_u32(w, field)
-}
-
 fn write_map_len<W: Write>(w: &mut W, len: usize) -> Result<(), Error> {
     rmp::encode::write_map_len(w, u32::try_from(len).map_err(cast_error)?)
         .map(|_| ())
@@ -854,18 +929,18 @@ fn write_tracer_payload<W: Write>(
 
     for (field, value) in string_fields {
         if !value.is_empty() {
-            write_field(w, field)?;
+            write_u32(w, field)?;
             write_streaming_string(w, strings, value)?;
         }
     }
 
     if !payload.attributes.is_empty() {
-        write_field(w, 10)?;
+        write_u32(w, 10)?;
         write_attributes(w, strings, &payload.attributes)?;
     }
 
     if !payload.chunks.is_empty() {
-        write_field(w, 11)?;
+        write_u32(w, 11)?;
         write_array_len(w, payload.chunks.len())?;
         for chunk in &payload.chunks {
             write_chunk(w, strings, chunk)?;
@@ -890,24 +965,24 @@ fn write_chunk<W: Write>(
     write_map_len(w, num_fields)?;
 
     if let Some(priority) = chunk.priority {
-        write_field(w, 1)?;
+        write_u32(w, 1)?;
         rmp::encode::write_sint(w, i64::from(priority))
             .map(|_| ())
             .map_err(map_write_error)?;
     }
 
     if !chunk.origin.is_empty() {
-        write_field(w, 2)?;
+        write_u32(w, 2)?;
         write_streaming_string(w, strings, &chunk.origin)?;
     }
 
     if !chunk.attributes.is_empty() {
-        write_field(w, 3)?;
+        write_u32(w, 3)?;
         write_attributes(w, strings, &chunk.attributes)?;
     }
 
     if !chunk.spans.is_empty() {
-        write_field(w, 4)?;
+        write_u32(w, 4)?;
         write_array_len(w, chunk.spans.len())?;
         for span in &chunk.spans {
             write_span(w, strings, span)?;
@@ -915,17 +990,17 @@ fn write_chunk<W: Write>(
     }
 
     if chunk.dropped_trace {
-        write_field(w, 5)?;
+        write_u32(w, 5)?;
         write_bool(w, true)?;
     }
 
     if chunk.trace_id != [0u8; 16] {
-        write_field(w, 6)?;
+        write_u32(w, 6)?;
         write_bin(w, &chunk.trace_id)?;
     }
 
     if chunk.sampling_mechanism != 0 {
-        write_field(w, 7)?;
+        write_u32(w, 7)?;
         write_u32(w, chunk.sampling_mechanism)?;
     }
 
@@ -952,73 +1027,73 @@ fn write_span<W: Write>(w: &mut W, strings: &mut StringTable, span: &Span) -> Re
     write_map_len(w, num_fields)?;
 
     if !span.service.is_empty() {
-        write_field(w, 1)?;
+        write_u32(w, 1)?;
         write_streaming_string(w, strings, &span.service)?;
     }
     if !span.name.is_empty() {
-        write_field(w, 2)?;
+        write_u32(w, 2)?;
         write_streaming_string(w, strings, &span.name)?;
     }
     if !span.resource.is_empty() {
-        write_field(w, 3)?;
+        write_u32(w, 3)?;
         write_streaming_string(w, strings, &span.resource)?;
     }
     if span.span_id != 0 {
-        write_field(w, 4)?;
+        write_u32(w, 4)?;
         write_u64(w, span.span_id)?;
     }
     if span.parent_id != 0 {
-        write_field(w, 5)?;
+        write_u32(w, 5)?;
         write_u64(w, span.parent_id)?;
     }
     if span.start != 0 {
-        write_field(w, 6)?;
+        write_u32(w, 6)?;
         write_u64(w, span.start)?;
     }
     if span.duration != 0 {
-        write_field(w, 7)?;
+        write_u32(w, 7)?;
         write_u64(w, span.duration)?;
     }
     if span.error {
-        write_field(w, 8)?;
+        write_u32(w, 8)?;
         write_bool(w, true)?;
     }
     if !span.attributes.is_empty() {
-        write_field(w, 9)?;
+        write_u32(w, 9)?;
         write_attributes(w, strings, &span.attributes)?;
     }
     if !span.span_type.is_empty() {
-        write_field(w, 10)?;
+        write_u32(w, 10)?;
         write_streaming_string(w, strings, &span.span_type)?;
     }
     if !span.links.is_empty() {
-        write_field(w, 11)?;
+        write_u32(w, 11)?;
         write_array_len(w, span.links.len())?;
         for link in &span.links {
             write_span_link(w, strings, link)?;
         }
     }
     if !span.events.is_empty() {
-        write_field(w, 12)?;
+        write_u32(w, 12)?;
         write_array_len(w, span.events.len())?;
         for event in &span.events {
             write_span_event(w, strings, event)?;
         }
     }
     if !span.env.is_empty() {
-        write_field(w, 13)?;
+        write_u32(w, 13)?;
         write_streaming_string(w, strings, &span.env)?;
     }
     if !span.version.is_empty() {
-        write_field(w, 14)?;
+        write_u32(w, 14)?;
         write_streaming_string(w, strings, &span.version)?;
     }
     if !span.component.is_empty() {
-        write_field(w, 15)?;
+        write_u32(w, 15)?;
         write_streaming_string(w, strings, &span.component)?;
     }
     if span.kind != 0 {
-        write_field(w, 16)?;
+        write_u32(w, 16)?;
         write_u32(w, span.kind)?;
     }
 
@@ -1038,23 +1113,23 @@ fn write_span_link<W: Write>(
     write_map_len(w, num_fields)?;
 
     if link.trace_id != [0u8; 16] {
-        write_field(w, 1)?;
+        write_u32(w, 1)?;
         write_bin(w, &link.trace_id)?;
     }
     if link.span_id != 0 {
-        write_field(w, 2)?;
+        write_u32(w, 2)?;
         write_u64(w, link.span_id)?;
     }
     if !link.attributes.is_empty() {
-        write_field(w, 3)?;
+        write_u32(w, 3)?;
         write_attributes(w, strings, &link.attributes)?;
     }
     if !link.tracestate.is_empty() {
-        write_field(w, 4)?;
+        write_u32(w, 4)?;
         write_streaming_string(w, strings, &link.tracestate)?;
     }
     if link.flags != 0 {
-        write_field(w, 5)?;
+        write_u32(w, 5)?;
         write_u32(w, link.flags)?;
     }
 
@@ -1072,15 +1147,15 @@ fn write_span_event<W: Write>(
     write_map_len(w, num_fields)?;
 
     if event.time != 0 {
-        write_field(w, 1)?;
+        write_u32(w, 1)?;
         write_u64(w, event.time)?;
     }
     if !event.name.is_empty() {
-        write_field(w, 2)?;
+        write_u32(w, 2)?;
         write_streaming_string(w, strings, &event.name)?;
     }
     if !event.attributes.is_empty() {
-        write_field(w, 3)?;
+        write_u32(w, 3)?;
         write_attributes(w, strings, &event.attributes)?;
     }
 
@@ -1197,39 +1272,59 @@ mod test {
         }
     }
 
-    #[test]
-    fn the_same_seed_produces_byte_identical_payloads() {
-        let config = service_graph();
-        let mut first = V1::with_config(config.clone(), &mut SmallRng::seed_from_u64(0))
-            .expect("config should be valid");
-        let mut second = V1::with_config(config, &mut SmallRng::seed_from_u64(0))
-            .expect("config should be valid");
+    proptest::proptest! {
+        #[test]
+        fn the_same_seed_produces_byte_identical_payloads(seed: u64) {
+            let config = service_graph();
+            let mut first = V1::with_config(config.clone(), &mut SmallRng::seed_from_u64(0))
+                .expect("config should be valid");
+            let mut second = V1::with_config(config, &mut SmallRng::seed_from_u64(0))
+                .expect("config should be valid");
 
-        let mut rng_one = SmallRng::seed_from_u64(42);
-        let mut rng_two = SmallRng::seed_from_u64(42);
+            let mut rng_one = SmallRng::seed_from_u64(seed);
+            let mut rng_two = SmallRng::seed_from_u64(seed);
 
-        let (payload_one, _) = first
-            .generate_payload(&mut rng_one, 1)
-            .expect("should not fail to generate");
-        let (payload_two, _) = second
-            .generate_payload(&mut rng_two, 1)
-            .expect("should not fail to generate");
+            let (payload_one, _) = first
+                .generate_payload(&mut rng_one, 1)
+                .expect("should not fail to generate");
+            let (payload_two, _) = second
+                .generate_payload(&mut rng_two, 1)
+                .expect("should not fail to generate");
 
-        assert_eq!(payload_one, payload_two);
+            proptest::prop_assert_eq!(payload_one, payload_two);
+        }
     }
 
-    #[test]
-    fn child_spans_are_nested_inside_their_parents_window() {
-        let config = service_graph();
-        let mut generator = V1::with_config(config, &mut SmallRng::seed_from_u64(0))
-            .expect("config should be valid");
+    proptest::proptest! {
+        #[test]
+        fn child_spans_are_nested_inside_their_parents_window(seed: u64) {
+            let config = service_graph();
+            let generator =
+                V1::with_config(config, &mut SmallRng::seed_from_u64(0))
+                    .expect("config should be valid");
+            let mut rng = SmallRng::seed_from_u64(seed);
 
-        let mut rng = SmallRng::seed_from_u64(1234);
-        for _ in 0..100 {
-            let (payload, _) = generator
-                .generate_payload(&mut rng, 1)
-                .expect("should not fail to generate");
-            assert!(!payload.is_empty());
+            for _ in 0..16 {
+                let chunk = generator
+                    .generate_chunk(&mut rng)
+                    .expect("should not fail to generate");
+                let parents: FxHashMap<u64, &Span> =
+                    chunk.spans.iter().map(|span| (span.span_id, span)).collect();
+                for span in &chunk.spans {
+                    if span.parent_id == 0 {
+                        continue;
+                    }
+                    // A parent is always generated into the chunk before its children, so the
+                    // lookup cannot miss.
+                    let parent = parents
+                        .get(&span.parent_id)
+                        .expect("parent span exists in chunk");
+                    proptest::prop_assert!(span.start >= parent.start);
+                    proptest::prop_assert!(
+                        span.start + span.duration <= parent.start + parent.duration
+                    );
+                }
+            }
         }
     }
 
@@ -1240,6 +1335,14 @@ mod test {
         assert!(config.valid().is_err());
 
         config.error_rate = -0.1;
+        assert!(config.valid().is_err());
+    }
+
+    #[test]
+    fn validation_rejects_a_duplicated_operation() {
+        let mut config = service_graph();
+        let duplicated = config.services[0].operations[0].clone();
+        config.services[0].operations.push(duplicated);
         assert!(config.valid().is_err());
     }
 
@@ -1363,7 +1466,7 @@ mod test {
             hostname: "svc".to_string(),
             chunks: vec![TraceChunk {
                 spans: vec![Span {
-                    service: "svc".to_string(),
+                    service: "svc".into(),
                     span_id: 1,
                     ..Default::default()
                 }],
