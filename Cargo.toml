@@ -4,6 +4,7 @@ members = [
   "integration/sheepdog",
   "integration/ducks",
   "lading",
+  "lading_antithesis",
   "lading_capture_schema",
   "lading_capture",
   "lading_fuzz",
@@ -69,6 +70,7 @@ ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c
 datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
 protobuf = { version = "3.7" }
 enum_dispatch = { version = "0.3" }
+antithesis_sdk = { git = "https://github.com/antithesishq/antithesis-sdk-rust", rev = "78c9db56771f0f6b01cb5404765c5a96852c159c", default-features = false } # 0.2.8 is pinned to rand 0.8, rev version allows us to select workspace rand
 
 [workspace.lints.clippy]
 all = "deny"
