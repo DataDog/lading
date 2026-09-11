@@ -5,6 +5,8 @@
 //! ([`FlowMap`]), and the [`Action`] enum that event handlers return to
 //! drive flow lifecycle.
 
+use std::io;
+
 use mio::net::TcpStream;
 use mio::{Interest, Registry, Token};
 
@@ -31,7 +33,7 @@ pub(crate) enum Action {
 /// Token-indexed flow storage.
 ///
 /// Flows are stored in a `Vec` indexed by token value. Removed slots become
-/// `None` and are not reused — tokens are monotonically increasing, matching
+/// `None` and are not reused - tokens are monotonically increasing, matching
 /// neper's behavior.
 pub(crate) struct FlowMap<S> {
     inner: Vec<Option<Flow<S>>>,
@@ -63,23 +65,31 @@ impl<S> FlowMap<S> {
 }
 
 /// Apply an [`Action`] to a flow via the poll registry.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if the registry rejects the reregister
+/// or deregister. A live, owned flow should always accept both, so a failure
+/// here means the thread's event loop can no longer be driven correctly and
+/// the caller is expected to treat it as fatal for that thread.
 pub(crate) fn apply_action<S>(
     action: Action,
     token: Token,
     flows: &mut FlowMap<S>,
     registry: &Registry,
-) {
+) -> io::Result<()> {
     match action {
         Action::Continue => {}
         Action::Reregister(interest) => {
             if let Some(flow) = flows.get_mut(token) {
-                let _ = registry.reregister(&mut flow.stream, flow.token, interest);
+                registry.reregister(&mut flow.stream, flow.token, interest)?;
             }
         }
         Action::Remove => {
             if let Some(mut flow) = flows.remove(token) {
-                let _ = registry.deregister(&mut flow.stream);
+                registry.deregister(&mut flow.stream)?;
             }
         }
     }
+    Ok(())
 }

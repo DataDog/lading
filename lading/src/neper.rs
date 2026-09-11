@@ -11,4 +11,5 @@ pub(crate) mod bpf;
 pub(crate) mod bpf;
 pub(crate) mod flow;
 pub(crate) mod metrics;
+pub(crate) mod rr;
 pub(crate) mod thread;
