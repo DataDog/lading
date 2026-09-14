@@ -1,0 +1,137 @@
+# Lading load generator - sends 100 MiB/s of DogStatsD metrics to the Datadog agent
+#
+# This deployment generates synthetic load matching the uds_dogstatsd_to_api regression test:
+# - High cardinality: 1,000-10,000 unique metric contexts
+# - Heavy tagging: 2-50 tags per metric, 3-150 chars each
+# - Unix domain socket: connects to agent at /var/run/datadog/dsd.socket
+# - Deterministic: uses fixed seed for reproducible load patterns
+# - Infinite runtime: runs until manually stopped
+#
+# The Service exposes Prometheus metrics at :9000/metrics for monitoring lading itself.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lading-config
+  namespace: default
+data:
+  lading.yaml: |
+    # From datadog-agent test/regression/cases/uds_dogstatsd_to_api
+    generator:
+      - unix_datagram:
+          seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+                 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+          path: "/var/run/datadog/dsd.socket"
+          variant:
+            dogstatsd:
+              contexts:
+                inclusive:
+                  min: 1000
+                  max: 10000
+              name_length:
+                inclusive:
+                  min: 1
+                  max: 200
+              tag_length:
+                inclusive:
+                  min: 3
+                  max: 150
+              tags_per_msg:
+                inclusive:
+                  min: 2
+                  max: 50
+              multivalue_count:
+                inclusive:
+                  min: 2
+                  max: 32
+              multivalue_pack_probability: 0.08
+              kind_weights:
+                metric: 90
+                event: 5
+                service_check: 5
+              metric_weights:
+                count: 100
+                gauge: 10
+                timer: 0
+                distribution: 0
+                set: 0
+                histogram: 0
+          bytes_per_second: "100 MiB"
+          maximum_prebuild_cache_size_bytes: "500 MiB"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lading
+  namespace: default
+  labels:
+    app: lading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lading
+  template:
+    metadata:
+      labels:
+        app: lading
+    spec:
+      containers:
+      - name: lading
+        image: ghcr.io/datadog/lading:0.29.2
+        command: ["lading"]
+        args:
+        - "--config-path"
+        - "/etc/lading/lading.yaml"
+        - "--no-target"
+        - "--prometheus-addr"
+        - "0.0.0.0:9000"
+        - "--experiment-duration-infinite"
+        resources:
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/lading
+          readOnly: true
+        - name: dsdsocket
+          mountPath: /var/run/datadog
+      volumes:
+      - name: config
+        configMap:
+          name: lading-config
+      - name: dsdsocket
+        hostPath:
+          path: /var/run/datadog
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lading
+  namespace: default
+  annotations:
+    ad.datadoghq.com/service.checks: |
+      {
+        "openmetrics": {
+          "init_config": {},
+          "instances": [
+            {
+              "openmetrics_endpoint": "http://%%host%%:9000/metrics",
+              "namespace": "lading",
+              "metrics": [".*"]
+            }
+          ]
+        }
+      }
+spec:
+  selector:
+    app: lading
+  ports:
+  - name: prometheus
+    port: 9000
+    targetPort: 9000
