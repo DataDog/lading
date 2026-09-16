@@ -605,6 +605,7 @@ where
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
+    let mut consecutive_rejections = 0;
 
     info!(
         ?max_block_size,
@@ -633,6 +634,7 @@ where
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
                 success_block_sizes += 1;
+                consecutive_rejections = 0;
 
                 let total_bytes = block.total_bytes.get();
                 max_actual_block_size = max_actual_block_size.max(total_bytes);
@@ -643,6 +645,14 @@ where
             Err(SpinError::EmptyBlock) => {
                 debug!(?block_size, "rejected block");
                 rejected_block_sizes += 1;
+                // A payload's minimum size can exceed every allowed block size. Bound the
+                // search so an impossible configuration fails instead of hanging startup.
+                consecutive_rejections += 1;
+                if consecutive_rejections >= 1024 {
+                    return Err(SpinError::InvalidConfig(format!(
+                        "No payload fit after 1024 consecutive attempts with maximum_block_size={max_block_size} bytes; increase maximum_block_size or reduce the payload size (for v1.0, chunks_per_payload or the service graph)."
+                    )));
+                }
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
                 // break. We do know that there's some true minimum viable size

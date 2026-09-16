@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
+  graph, streaming string interning, error injection, span links and events,
+  and an exact `chunks_per_payload` batch size.
+
+### Fixed
+- Block-cache construction now fails with an actionable error after 1024
+  consecutive rejected blocks instead of retrying indefinitely.
+
 ## [0.33.0]
 ### Changed
 - **Breaking Change**: Datadog blackhole now records received series under the

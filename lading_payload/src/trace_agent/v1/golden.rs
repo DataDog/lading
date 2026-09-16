@@ -2,7 +2,7 @@
 //!
 //! The fixtures in `testdata/golden_captures.json` are raw `/v1.0/traces` request bodies
 //! captured from `dd-trace-go` v2.11.0-dev.1 (via the `apm-v1-trace-smoke` traced application):
-//! three services with nested parent/child spans and error spans, six chunks per payload, and a
+//! nested parent/child spans across services and error spans, six chunks per payload, and a
 //! second capture also carrying a span link and a span event. The hand-written byte-literal
 //! tests elsewhere in this module only prove the encoder agrees with itself; these tests prove
 //! it agrees with the reference implementations.
@@ -14,10 +14,14 @@
 //! `dd-trace-go` (`ddtrace/tracer/payload_v1.go`) and the receiving decoder in Saluki
 //! (`saluki-components/src/decoders/datadog`). The generator's encoder is only correct if bytes
 //! it produces decode, through this independent path, to the same payload the real tracer sent.
+//!
+//! Structural comparison deliberately permits different attribute orders and `MessagePack`
+//! integer widths. These change streaming string indices and bytes without changing meaning.
+//! Keep this test-only reader schema-level; do not grow it into a general-purpose decoder.
 
 use std::sync::Arc;
 
-use base64::Engine as _;
+use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rustc_hash::FxHashMap;
 
@@ -331,7 +335,7 @@ impl<'a> Decoder<'a> {
 }
 
 /// Decodes a v1.0 payload through the independent reference path.
-fn decode(data: &[u8]) -> Result<TracerPayload, String> {
+pub(super) fn decode(data: &[u8]) -> Result<TracerPayload, String> {
     let mut decoder = Decoder::new(data);
     let payload = decoder.tracer_payload()?;
     if decoder.pos() != data.len() {
@@ -399,7 +403,7 @@ fn golden_fixture_decodes_to_the_expected_tracer_payload() {
         )
     );
 
-    // The tracer batched three emission rounds, the first two carrying a failing trace.
+    // Two rounds, each carrying a checkout, a failing search, and a background job.
     assert_eq!(golden.chunks.len(), 6);
     assert_eq!(
         golden
@@ -521,22 +525,9 @@ fn golden_fixture_decodes_to_the_expected_tracer_payload() {
 }
 
 #[test]
-fn lading_encoding_of_the_golden_chunk_decodes_identically() {
-    let golden = decode(&golden_payload("nested_service_graph")).expect("fixture should decode");
-
-    // The payload-level metadata plus the first chunk, as lading's own encoder would carry them.
-    let expected = TracerPayload {
-        container_id: golden.container_id.clone(),
-        language_name: golden.language_name.clone(),
-        language_version: golden.language_version.clone(),
-        tracer_version: golden.tracer_version.clone(),
-        runtime_id: golden.runtime_id.clone(),
-        env: golden.env.clone(),
-        hostname: golden.hostname.clone(),
-        app_version: golden.app_version.clone(),
-        attributes: golden.attributes.clone(),
-        chunks: vec![golden.chunks[0].clone()],
-    };
+fn lading_encoding_of_the_complete_golden_payload_decodes_identically() {
+    // Include error chunks and string-table references across chunk boundaries.
+    let expected = decode(&golden_payload("nested_service_graph")).expect("fixture should decode");
 
     let encoded = expected
         .encode()
@@ -602,20 +593,7 @@ fn golden_links_and_events_decode_to_the_expected_values() {
 
 #[test]
 fn lading_encoding_of_golden_links_and_events_decodes_identically() {
-    let golden = decode(&golden_payload("links_and_events")).expect("fixture should decode");
-
-    let expected = TracerPayload {
-        container_id: golden.container_id.clone(),
-        hostname: golden.hostname.clone(),
-        language_name: golden.language_name.clone(),
-        language_version: golden.language_version.clone(),
-        tracer_version: golden.tracer_version.clone(),
-        runtime_id: golden.runtime_id.clone(),
-        env: golden.env.clone(),
-        app_version: golden.app_version.clone(),
-        attributes: golden.attributes.clone(),
-        chunks: vec![golden.chunks[0].clone()],
-    };
+    let expected = decode(&golden_payload("links_and_events")).expect("fixture should decode");
 
     let encoded = expected
         .encode()

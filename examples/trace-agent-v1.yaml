@@ -9,7 +9,7 @@ generator:
       variant:
         v1.0:
           error_rate: 0.05
-          chunks_per_payload: 1
+          chunks_per_payload: 1 # Exact chunks per HTTP request; not a minimum.
           language_name: "go"
           language_version: "1.24.2"
           tracer_version: "2.5.0"
