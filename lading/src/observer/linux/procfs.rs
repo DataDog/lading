@@ -12,7 +12,7 @@ use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashMap;
-use tracing::{error, warn};
+use tracing::{error, warn, info};
 
 use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 
@@ -235,6 +235,8 @@ impl Sampler {
 
         let uptime = uptime::poll().await?;
 
+        info!("include_smaps {include_smaps}");
+        info!("enable_smaps_rollup: {0}", self.enable_smaps_rollup);
         // `/proc/{pid}/stat`, most especially per-process CPU data.
         if let Err(e) = pinfo.stat_sampler.poll(pid, uptime, &labels).await {
             // We don't want to bail out entirely if we can't read stats
