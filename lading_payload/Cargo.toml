@@ -67,6 +67,10 @@ name = "dogstatsd"
 harness = false
 
 [[bench]]
+name = "dogstatsd_http"
+harness = false
+
+[[bench]]
 name = "fluent"
 harness = false
 
