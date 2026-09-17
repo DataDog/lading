@@ -18,6 +18,11 @@ at index zero. Attributes are flat arrays of key/type/value triples.
   the byte limit or reduce the batch size or service graph.
 - Every trace starts at a uniformly selected operation of the first service.
   Calls are independently gated by their configured rates.
+- `timestamp_mode: realtime` captures the wall clock once while constructing
+  the prebuilt payload cache. Root spans start within the preceding minute and
+  finish no later than that captured instant. Fixed mode uses a configured
+  `anchor_unix_nanos` and is the deterministic default for fingerprints and
+  same-seed reproducibility.
 - Traversal stops at depth 10 (root depth zero) or 100 spans per chunk.
   Cyclic and broad graphs can therefore be truncated.
 - Span IDs are nonzero, child timing is nested inside parent timing, and
@@ -51,12 +56,11 @@ cross-chunk string references, links, and events. Generated-payload tests
 decode actual serializer output and check exact batching, span counts,
 error attributes, enabled links/events, and determinism.
 
-The v1 fingerprint intentionally changes with exact batching: the fixture
-now emits one chunk per payload instead of filling each block with chunks.
-Each body repeats its metadata and starts a new string table; geometric
-size probes also no longer consume RNG draws. Its measured corpus entropy
-changes from 7.0414 to 6.6439 bits/byte. This records the requested batching
-change, not an attempt to tune entropy by changing the workload.
+The v1 fingerprint intentionally reflects exact batching and fixed timestamps:
+the fixture emits one chunk per payload, and its configured 2025 anchor keeps
+the corpus deterministic without generating future spans. Its measured corpus
+entropy is 6.6435 bits/byte. This records the requested workload constraints,
+not an attempt to tune entropy by changing the workload.
 
 The test reader is retained because semantic equality permits different
 attribute order and MessagePack integer widths. Byte equality alone would

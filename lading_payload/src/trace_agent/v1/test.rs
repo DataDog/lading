@@ -1,12 +1,13 @@
 //! Invariants for configuration, generation, and serialization.
-use std::num::NonZeroU32;
+use std::{cell::Cell, num::NonZeroU32};
 
 use rand::{SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
 
 use super::golden::decode;
 use super::{
-    AttributeValue, Config, Operation, Service, Span, SubOperation, TraceChunk, TracerPayload, V1,
+    AttributeValue, Config, Operation, Service, Span, SubOperation, TimestampMode, TraceChunk,
+    TracerPayload, V1,
 };
 use crate::Serialize;
 use crate::block::Cache;
@@ -14,6 +15,9 @@ use crate::trace_agent;
 
 fn service_graph() -> Config {
     Config {
+        timestamp_mode: TimestampMode::Fixed {
+            anchor_unix_nanos: 1_735_689_600_000_000_000,
+        },
         error_rate: 0.0,
         link_rate: 0.0,
         event_rate: 0.0,
@@ -97,6 +101,29 @@ fn service_graph() -> Config {
 }
 
 proptest::proptest! {
+    /// For every seed and valid fixed anchor, all root intervals remain inside the Agent's valid
+    /// timestamp range and finish no later than the configured anchor.
+    #[test]
+    fn root_spans_never_exceed_the_fixed_anchor(
+        seed: u64,
+        anchor in super::YEAR_2000_NANOS..=(i64::MAX as u64),
+    ) {
+        let mut config = service_graph();
+        config.timestamp_mode = TimestampMode::Fixed { anchor_unix_nanos: anchor };
+        let generator = V1::with_config(config, &mut SmallRng::seed_from_u64(0))
+            .expect("config should be valid");
+        let mut rng = SmallRng::seed_from_u64(seed);
+
+        for _ in 0..16 {
+            let chunk = generator.generate_chunk(&mut rng).expect("generate chunk");
+            for root in chunk.spans.iter().filter(|span| span.parent_id == 0) {
+                proptest::prop_assert!(root.start >= super::YEAR_2000_NANOS);
+                proptest::prop_assert!(root.start <= anchor);
+                proptest::prop_assert!(root.start + root.duration <= anchor);
+            }
+        }
+    }
+
     /// For every seed and batch size, successful serialization preserves the exact chunk count,
     /// reports the decoded span count, and emits enabled errors, links, and events.
     #[test]
@@ -259,6 +286,49 @@ fn validation_rejects_a_rate_outside_the_unit_interval() {
 
     config.error_rate = -0.1;
     assert!(config.valid().is_err());
+}
+
+#[test]
+fn validation_rejects_fixed_anchors_outside_signed_agent_bounds() {
+    let mut config = service_graph();
+    config.timestamp_mode = TimestampMode::Fixed {
+        anchor_unix_nanos: super::YEAR_2000_NANOS - 1,
+    };
+    assert!(config.valid().is_err());
+
+    config.timestamp_mode = TimestampMode::Fixed {
+        anchor_unix_nanos: i64::MAX as u64 + 1,
+    };
+    assert!(config.valid().is_err());
+}
+
+#[test]
+fn realtime_anchor_is_captured_once_during_construction() {
+    let anchor = 1_735_689_600_000_000_000;
+    let calls = Cell::new(0);
+    let mut config = service_graph();
+    config.timestamp_mode = TimestampMode::Realtime;
+    let generator = V1::with_config_and_realtime_anchor(config, || {
+        calls.set(calls.get() + 1);
+        Ok(anchor)
+    })
+    .expect("config should be valid");
+    let mut rng = SmallRng::seed_from_u64(19);
+
+    for _ in 0..4 {
+        let chunk = generator.generate_chunk(&mut rng).expect("generate chunk");
+        assert!(
+            chunk
+                .spans
+                .iter()
+                .filter(|span| span.parent_id == 0)
+                .all(|span| {
+                    span.start >= anchor - super::TIMESTAMP_LOOKBACK_NANOS
+                        && span.start + span.duration <= anchor
+                })
+        );
+    }
+    assert_eq!(calls.get(), 1);
 }
 
 #[test]

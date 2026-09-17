@@ -8,6 +8,7 @@ generator:
           max_retries: 3
       variant:
         v1.0:
+          timestamp_mode: realtime
           error_rate: 0.05
           chunks_per_payload: 1 # Exact chunks per HTTP request; not a minimum.
           language_name: "go"

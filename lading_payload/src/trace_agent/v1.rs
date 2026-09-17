@@ -30,6 +30,7 @@
 //! and re-verify it against a real tracer.
 use std::io::Write;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustc_hash::FxHashMap;
 
@@ -39,7 +40,7 @@ use crate::Error;
 
 mod config;
 mod encoder;
-pub use config::{Config, ConfigAttributeValue, Operation, Service, SubOperation};
+pub use config::{Config, ConfigAttributeValue, Operation, Service, SubOperation, TimestampMode};
 
 /// Nanoseconds between the Unix epoch and 2000-01-01T00:00:00Z.
 ///
@@ -49,6 +50,9 @@ const YEAR_2000_NANOS: u64 = 946_684_800_000_000_000;
 
 /// Upper bound on a generated span's duration, in nanoseconds. Ten seconds.
 const MAX_SPAN_DURATION_NANOS: u64 = 10_000_000_000;
+
+/// Realtime root spans start at most one minute before their captured anchor.
+const TIMESTAMP_LOOKBACK_NANOS: u64 = 60_000_000_000;
 
 /// Maximum call depth walked from an entry-point operation.
 ///
@@ -160,7 +164,15 @@ struct ResolvedOperation {
 /// Generates v1.0 trace payloads from a service graph.
 #[derive(Debug)]
 pub struct V1 {
-    config: Config,
+    /// Configuration fields used while generating payloads.
+    ///
+    /// Construction is already allocation-heavy, so one indirection here keeps the
+    /// version-dispatched serializer compact without adding work to the hot path.
+    config: Box<Config>,
+    /// Earliest possible root-span start.
+    timestamp_earliest_start_nanos: u64,
+    /// Latest possible root-span end, resolved once during construction.
+    timestamp_anchor_nanos: u64,
     /// Every operation in the graph, keyed by `service-name/operation-id`.
     operations: FxHashMap<String, ResolvedOperation>,
     /// Entry-point keys: the operations of the first configured service.
@@ -182,7 +194,31 @@ impl V1 {
     ///
     /// Returns an error if the configuration is invalid. See [`Config::valid`].
     pub fn with_config(config: Config, _rng: &mut impl Rng) -> Result<Self, Error> {
+        Self::with_config_and_realtime_anchor(config, current_unix_time_nanos)
+    }
+
+    /// Creates a generator with an injectable realtime anchor source.
+    ///
+    /// The source is called exactly once for realtime configurations and never for fixed ones.
+    fn with_config_and_realtime_anchor<F>(config: Config, realtime_anchor: F) -> Result<Self, Error>
+    where
+        F: FnOnce() -> Result<u64, Error>,
+    {
         config.valid()?;
+
+        let (timestamp_earliest_start_nanos, timestamp_anchor_nanos) = match config.timestamp_mode {
+            TimestampMode::Realtime => {
+                let anchor = realtime_anchor()?;
+                (
+                    anchor
+                        .saturating_sub(TIMESTAMP_LOOKBACK_NANOS)
+                        .max(YEAR_2000_NANOS),
+                    anchor,
+                )
+            }
+            TimestampMode::Fixed { anchor_unix_nanos } => (YEAR_2000_NANOS, anchor_unix_nanos),
+        };
+        validate_timestamp_anchor(timestamp_anchor_nanos)?;
 
         let mut operations = FxHashMap::default();
         for service in &config.services {
@@ -219,7 +255,9 @@ impl V1 {
         let version = config.app_version.as_str().into();
 
         Ok(Self {
-            config,
+            config: Box::new(config),
+            timestamp_earliest_start_nanos,
+            timestamp_anchor_nanos,
             operations,
             entry_points,
             env,
@@ -271,7 +309,11 @@ impl V1 {
             ));
         };
 
-        let (start, duration) = safe_start_and_duration(rng);
+        let (start, duration) = safe_start_and_duration(
+            rng,
+            self.timestamp_earliest_start_nanos,
+            self.timestamp_anchor_nanos,
+        );
         let mut spans = Vec::new();
         self.append_spans(rng, entry_point, 0, start, duration, &mut spans, 0);
 
@@ -422,17 +464,44 @@ impl crate::Serialize for V1 {
     }
 }
 
-/// Draws a start time and duration the trace-agent's normalizer leaves untouched.
+/// Returns the current Unix timestamp in nanoseconds.
+fn current_unix_time_nanos() -> Result<u64, Error> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            Error::Validation(format!("system clock is before the Unix epoch: {error}"))
+        })?;
+    u64::try_from(elapsed.as_nanos()).map_err(|_| {
+        Error::Validation("system clock exceeds the supported nanosecond range.".to_string())
+    })
+}
+
+/// Validates an upper timestamp bound used for generated spans.
+fn validate_timestamp_anchor(anchor: u64) -> Result<(), Error> {
+    if anchor < YEAR_2000_NANOS {
+        return Err(Error::Validation(format!(
+            "timestamp anchor must be at or after {YEAR_2000_NANOS} nanoseconds since the Unix epoch, got {anchor}."
+        )));
+    }
+    if anchor > i64::MAX as u64 {
+        return Err(Error::Validation(format!(
+            "timestamp anchor must fit in a signed 64-bit integer, got {anchor}."
+        )));
+    }
+    Ok(())
+}
+
+/// Draws a completed start time and duration the trace-agent's normalizer leaves untouched.
 ///
-/// Start at or after [`YEAR_2000_NANOS`] to avoid the agent's start-time repair.
-/// Conservatively bound start and end by `i64::MAX` for downstream paths using signed
-/// timestamps, even though the v1.0 wire fields are unsigned.
-fn safe_start_and_duration<R>(rng: &mut R) -> (u64, u64)
+/// The entire root window falls between the selected lower bound and the resolved anchor. Realtime
+/// mode selects a bounded lookback, avoiding future stats buckets while preserving signed
+/// timestamp bounds used by downstream paths.
+fn safe_start_and_duration<R>(rng: &mut R, earliest_start: u64, anchor: u64) -> (u64, u64)
 where
     R: Rng + ?Sized,
 {
-    let start = rng.random_range(YEAR_2000_NANOS..=i64::MAX as u64);
-    let max_duration = (i64::MAX as u64 - start).min(MAX_SPAN_DURATION_NANOS);
+    let start = rng.random_range(earliest_start..=anchor);
+    let max_duration = (anchor - start).min(MAX_SPAN_DURATION_NANOS);
     let duration = rng.random_range(0..=max_duration);
     (start, duration)
 }

@@ -5,6 +5,30 @@ use serde::{Deserialize, Serialize};
 use super::AttributeValue;
 use crate::Error;
 
+/// Controls the time range used for generated trace spans.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(rename_all = "snake_case")]
+pub enum TimestampMode {
+    /// Capture wall-clock time once when the payload generator is constructed.
+    Realtime,
+    /// Use a configured Unix timestamp, in nanoseconds, as the upper bound.
+    Fixed {
+        /// Unix timestamp in nanoseconds used as the latest possible span end.
+        anchor_unix_nanos: u64,
+    },
+}
+
+impl Default for TimestampMode {
+    fn default() -> Self {
+        Self::Fixed {
+            // 2025-01-01T00:00:00Z. Keeping the default fixed preserves the same-seed
+            // byte-identical contract for existing configurations.
+            anchor_unix_nanos: 1_735_689_600_000_000_000,
+        }
+    }
+}
+
 /// A statically declared attribute value.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -92,6 +116,12 @@ pub struct Service {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Time source for span timestamps.
+    ///
+    /// Fixed mode is deterministic and is the default. Realtime mode captures the wall clock once
+    /// during generator construction, so a prebuilt cache remains internally consistent.
+    pub timestamp_mode: TimestampMode,
+
     /// Probability in `0.0..=1.0` that a generated span is marked as an error. Defaults to `0.0`,
     /// meaning no span is ever marked as an error.
     pub error_rate: f64,
@@ -140,6 +170,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            timestamp_mode: TimestampMode::default(),
             error_rate: 0.0,
             link_rate: 0.0,
             event_rate: 0.0,
@@ -165,6 +196,10 @@ impl Config {
     /// field the trace-agent's normalizer would rewrite is left empty, or if a suboperation
     /// references an operation that does not exist.
     pub fn valid(&self) -> Result<(), Error> {
+        if let TimestampMode::Fixed { anchor_unix_nanos } = self.timestamp_mode {
+            super::validate_timestamp_anchor(anchor_unix_nanos)?;
+        }
+
         for (name, rate) in [
             ("error_rate", self.error_rate),
             ("link_rate", self.link_rate),

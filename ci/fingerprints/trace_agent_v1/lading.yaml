@@ -6,6 +6,9 @@ generator:
       variant:
         trace_agent:
           v1.0:
+            timestamp_mode:
+              fixed:
+                anchor_unix_nanos: 1735689600000000000
             error_rate: 0.1
             chunks_per_payload: 1
             language_name: "go"
