@@ -38,7 +38,7 @@ fn default_parallel_connections() -> u16 {
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The path of the socket to write to.
     pub path: PathBuf,
     /// The payload variant
@@ -150,7 +150,7 @@ impl UnixStream {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
         let labels = MetricsBuilder::new("unix_stream")
             .with_id(general.id)
             .build();

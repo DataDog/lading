@@ -253,6 +253,7 @@ fn shannon_entropy(data: &[u8]) -> f64 {
     entropy
 }
 
+use lading::common::Seed;
 use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -283,12 +284,12 @@ struct Args {
 
 fn generate_and_check(
     config: &lading_payload::Config,
-    seed: [u8; 32],
+    seed: Seed,
     total_bytes: NonZeroU32,
     max_block_size: Byte,
     args: &Args,
 ) -> Result<Option<Fingerprint>> {
-    let mut rng = StdRng::from_seed(seed);
+    let mut rng = StdRng::from_seed(*seed);
     let start = Instant::now();
     let blocks = match block::Cache::fixed_with_max_overhead(
         &mut rng,
