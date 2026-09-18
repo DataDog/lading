@@ -3,7 +3,9 @@
 This README explains where trace ingestion code lives in the Datadog Agent, how
 to understand the protocol definitions, and how data flows through the
 system. Analysis done as of 8cc5eb3e024ee54283efad4614175a065642bd9c. We'll
-focus only on v0.4 with msgpack encoding for now.
+focus on v0.4 below. For v1.0 generation, batching, limitations, and fixture
+provenance, see the [v1.0 payload notes](v1/README.md) and
+[example configuration](../../../examples/trace-agent-v1.yaml).
 
 ## The Trace Agent Code
 
