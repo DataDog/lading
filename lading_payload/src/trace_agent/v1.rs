@@ -276,7 +276,17 @@ impl V1 {
     where
         R: Rng + ?Sized,
     {
-        let mut chunks = Vec::with_capacity(chunk_count);
+        let mut chunks = Vec::new();
+        // Fallible reservation: an absurd `chunks_per_payload` (for example
+        // `usize::MAX`) must surface as a configuration error, not a capacity
+        // overflow panic.
+        chunks
+            .try_reserve_exact(chunk_count)
+            .map_err(|_| {
+                Error::Validation(format!(
+                    "Unable to reserve memory for {chunk_count} trace chunks; reduce chunks_per_payload."
+                ))
+            })?;
         let mut span_count = 0;
         for _ in 0..chunk_count {
             let chunk = self.generate_chunk(rng)?;

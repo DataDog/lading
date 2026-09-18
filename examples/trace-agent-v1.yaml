@@ -8,7 +8,9 @@ generator:
           max_retries: 3
       variant:
         v1.0:
-          timestamp_mode: realtime
+          timestamp_mode:
+            fixed:
+              anchor_unix_nanos: 1767225600000000000 # 2026-01-01T00:00:00Z; deterministic across runs
           error_rate: 0.05
           chunks_per_payload: 1 # Exact chunks per HTTP request; not a minimum.
           language_name: "go"

@@ -569,6 +569,35 @@ impl Cache {
     }
 }
 
+/// Probe the maximum block budget directly.
+///
+/// A rejection streak only shows that random sampling missed the viable sizes;
+/// it is not proof that no payload fits. If even the maximum budget cannot be
+/// constructed, no size in the allowed range can fit and the configuration is
+/// genuinely invalid.
+///
+/// # Errors
+///
+/// Returns [`SpinError::InvalidConfig`] if a block at `max_block_size` cannot
+/// be constructed. Propagates any other construction error unchanged.
+fn probe_maximum_block_size<R, S>(
+    rng: &mut R,
+    serializer: &mut S,
+    max_block_size: u32,
+) -> Result<Block, SpinError>
+where
+    S: crate::Serialize,
+    R: Rng + ?Sized,
+{
+    match construct_block(rng, serializer, max_block_size) {
+        Ok(block) => Ok(block),
+        Err(SpinError::EmptyBlock) => Err(SpinError::InvalidConfig(format!(
+            "No payload fit after 1024 consecutive attempts, including a direct attempt at maximum_block_size={max_block_size} bytes; increase maximum_block_size or reduce the payload size (for v1.0, chunks_per_payload or the service graph)."
+        ))),
+        Err(e) => Err(e),
+    }
+}
+
 /// Construct a new block cache of form defined by `serializer`.
 ///
 /// A "block cache" is a pre-made vec of serialized arbitrary instances of the
@@ -649,9 +678,19 @@ where
                 // search so an impossible configuration fails instead of hanging startup.
                 consecutive_rejections += 1;
                 if consecutive_rejections >= 1024 {
-                    return Err(SpinError::InvalidConfig(format!(
-                        "No payload fit after 1024 consecutive attempts with maximum_block_size={max_block_size} bytes; increase maximum_block_size or reduce the payload size (for v1.0, chunks_per_payload or the service graph)."
-                    )));
+                    // A streak of misses is not proof that no payload fits. If only a
+                    // narrow tail of sizes just under `max_block_size` is viable, random
+                    // sampling can miss it many times in a row even though the
+                    // configuration is valid. Probe the maximum budget directly.
+                    let block = probe_maximum_block_size(&mut rng, serializer, max_block_size)?;
+                    consecutive_rejections = 0;
+                    success_block_sizes += 1;
+                    let total_bytes = block.total_bytes.get();
+                    max_actual_block_size = max_actual_block_size.max(total_bytes);
+                    min_actual_block_size = min_actual_block_size.min(total_bytes);
+                    bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
+                    block_cache.push(block);
+                    continue;
                 }
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
