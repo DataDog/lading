@@ -29,7 +29,7 @@
 //! require them to agree. Regenerate the fixture only alongside an intentional encoder change,
 //! and re-verify it against a real tracer.
 use std::io::Write;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustc_hash::FxHashMap;
@@ -39,7 +39,7 @@ use rand::{Rng, RngExt, seq::IndexedRandom};
 use crate::Error;
 
 mod config;
-mod encoder;
+pub mod encoder;
 pub use config::{Config, ConfigAttributeValue, Operation, Service, SubOperation, TimestampMode};
 
 /// Nanoseconds between the Unix epoch and 2000-01-01T00:00:00Z.
@@ -79,21 +79,21 @@ enum AttributeValue {
 #[allow(clippy::struct_field_names)]
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Span {
-    service: Arc<str>,
-    name: Arc<str>,
-    resource: Arc<str>,
+    service: Rc<str>,
+    name: Rc<str>,
+    resource: Rc<str>,
     span_id: u64,
     parent_id: u64,
     start: u64,
     duration: u64,
     error: bool,
-    attributes: Arc<[(String, AttributeValue)]>,
-    span_type: Arc<str>,
+    attributes: Rc<[(String, AttributeValue)]>,
+    span_type: Rc<str>,
     links: Vec<SpanLink>,
     events: Vec<SpanEvent>,
-    env: Arc<str>,
-    version: Arc<str>,
-    component: Arc<str>,
+    env: Rc<str>,
+    version: Rc<str>,
+    component: Rc<str>,
     kind: u32,
 }
 
@@ -149,15 +149,15 @@ struct TracerPayload {
 /// attributes from the configuration's `HashMap`.
 #[derive(Debug)]
 struct ResolvedOperation {
-    service: Arc<str>,
-    name: Arc<str>,
-    resource: Arc<str>,
-    span_type: Arc<str>,
-    component: Arc<str>,
+    service: Rc<str>,
+    name: Rc<str>,
+    resource: Rc<str>,
+    span_type: Rc<str>,
+    component: Rc<str>,
     kind: u32,
     /// Attributes sorted by key: a `HashMap` iterates in an unspecified order, and two runs of
     /// the same seed must produce byte-identical payloads.
-    attributes: Arc<[(String, AttributeValue)]>,
+    attributes: Rc<[(String, AttributeValue)]>,
     suboperations: Vec<SubOperation>,
 }
 
@@ -178,8 +178,8 @@ pub struct V1 {
     /// Entry-point keys: the operations of the first configured service.
     entry_points: Vec<String>,
     /// Span `env` and `version` fields, shared by every generated span.
-    env: Arc<str>,
-    version: Arc<str>,
+    env: Rc<str>,
+    version: Rc<str>,
     /// Number of spans in the most recently generated payload, for metrics.
     last_span_count: u64,
 }
@@ -366,9 +366,9 @@ impl V1 {
                     attributes.push((key.to_string(), AttributeValue::String(value.to_string())));
                 }
             }
-            Arc::from(attributes)
+            Rc::from(attributes)
         } else {
-            Arc::clone(&resolved.attributes)
+            Rc::clone(&resolved.attributes)
         };
 
         let links = if rng.random_bool(self.config.link_rate) {
@@ -399,21 +399,21 @@ impl V1 {
         };
 
         spans.push(Span {
-            service: Arc::clone(&resolved.service),
-            name: Arc::clone(&resolved.name),
-            resource: Arc::clone(&resolved.resource),
+            service: Rc::clone(&resolved.service),
+            name: Rc::clone(&resolved.name),
+            resource: Rc::clone(&resolved.resource),
             span_id,
             parent_id,
             start,
             duration,
             error,
             attributes,
-            span_type: Arc::clone(&resolved.span_type),
+            span_type: Rc::clone(&resolved.span_type),
             links,
             events,
-            env: Arc::clone(&self.env),
-            version: Arc::clone(&self.version),
-            component: Arc::clone(&resolved.component),
+            env: Rc::clone(&self.env),
+            version: Rc::clone(&self.version),
+            component: Rc::clone(&resolved.component),
             kind: resolved.kind,
         });
 

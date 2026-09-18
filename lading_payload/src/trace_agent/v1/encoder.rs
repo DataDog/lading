@@ -1,11 +1,21 @@
 //! Streaming string-table `MessagePack` encoder for v1.0 payloads.
-use std::io::Write;
+use std::io;
 
 use rmp::encode::ValueWriteError;
 use rustc_hash::FxHashMap;
 
 use super::{AttributeValue, Span, SpanEvent, SpanLink, TraceChunk, TracerPayload};
-use crate::Error;
+
+/// Encoder failure modes.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The underlying writer failed while emitting `MessagePack` bytes.
+    #[error("MessagePack write failed: {0}")]
+    Write(#[from] ValueWriteError<io::Error>),
+    /// A map or array length exceeded the format's `u32` bound.
+    #[error("map or array length exceeds the MessagePack u32 bound")]
+    LengthOverflow,
+}
 
 /// Encoder-side streaming string table.
 ///
@@ -26,375 +36,107 @@ impl StringTable {
     }
 }
 
-/// Writes a streaming string: inline on its first appearance, by index thereafter.
+/// Bundles the destination buffer with its streaming string table.
 ///
-/// The empty string is always index 0. Writing it inline would consume a table slot on the reading
-/// side and shift every later index, so it is never written as a literal.
-fn write_streaming_string<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    s: &str,
-) -> Result<(), Error> {
-    if s.is_empty() {
-        return write_u32(w, 0);
-    }
-
-    if let Some(index) = strings.indices.get(s) {
-        return write_u32(w, *index);
-    }
-
-    rmp::encode::write_str(w, s).map_err(map_write_error)?;
-    strings.indices.insert(s.to_string(), strings.next_index);
-    strings.next_index += 1;
-    Ok(())
+/// Grouping the two frees every write step from threading a writer and a table through its
+/// signature separately.
+struct Encoder {
+    writer: Vec<u8>,
+    strings: StringTable,
 }
 
-/// Maps a length that exceeds the format's `u32` bound into the crate error type.
-fn cast_error(error: std::num::TryFromIntError) -> Error {
-    Error::Validation(error.to_string())
-}
+impl Encoder {
+    /// Writes a streaming string: inline on its first appearance, by index thereafter.
+    ///
+    /// The empty string is always index 0. Writing it inline would consume a table slot on the
+    /// reading side and shift every later index, so it is never written as a literal.
+    fn write_streaming_string(&mut self, s: &str) -> Result<(), Error> {
+        if s.is_empty() {
+            return self.write_u32(0);
+        }
 
-/// Maps an `rmp` encoding error, which wraps an `io::Error` when writing to a std writer, into the
-/// crate error type.
-fn map_write_error(error: rmp::encode::ValueWriteError<std::io::Error>) -> Error {
-    match error {
-        ValueWriteError::InvalidMarkerWrite(e) | ValueWriteError::InvalidDataWrite(e) => {
-            Error::Io(e)
+        if let Some(&index) = self.strings.indices.get(s) {
+            return self.write_u32(index);
+        }
+
+        rmp::encode::write_str(&mut self.writer, s)?;
+        self.strings
+            .indices
+            .insert(s.to_string(), self.strings.next_index);
+        self.strings.next_index += 1;
+        Ok(())
+    }
+
+    fn write_u32(&mut self, value: u32) -> Result<(), Error> {
+        rmp::encode::write_uint(&mut self.writer, u64::from(value))?;
+        Ok(())
+    }
+
+    fn write_u64(&mut self, value: u64) -> Result<(), Error> {
+        rmp::encode::write_uint(&mut self.writer, value)?;
+        Ok(())
+    }
+
+    fn write_sint(&mut self, value: i64) -> Result<(), Error> {
+        rmp::encode::write_sint(&mut self.writer, value)?;
+        Ok(())
+    }
+
+    fn write_bool(&mut self, value: bool) -> Result<(), Error> {
+        // `write_bool` reports a bare writer error: its only write is the marker byte.
+        rmp::encode::write_bool(&mut self.writer, value)
+            .map_err(|e| Error::Write(ValueWriteError::InvalidMarkerWrite(e)))
+    }
+
+    fn write_bin(&mut self, value: &[u8]) -> Result<(), Error> {
+        rmp::encode::write_bin(&mut self.writer, value)?;
+        Ok(())
+    }
+
+    fn write_map_len(&mut self, len: usize) -> Result<(), Error> {
+        let len = u32::try_from(len).map_err(|_| Error::LengthOverflow)?;
+        rmp::encode::write_map_len(&mut self.writer, len)?;
+        Ok(())
+    }
+
+    fn write_array_len(&mut self, len: usize) -> Result<(), Error> {
+        let len = u32::try_from(len).map_err(|_| Error::LengthOverflow)?;
+        rmp::encode::write_array_len(&mut self.writer, len)?;
+        Ok(())
+    }
+
+    /// Writes an attribute map as a flat `[key, type, value]` array, three slots per entry.
+    fn write_attributes(&mut self, attributes: &[(String, AttributeValue)]) -> Result<(), Error> {
+        self.write_array_len(attributes.len() * 3)?;
+        for (key, value) in attributes {
+            self.write_streaming_string(key)?;
+            self.write_any_value(value)?;
+        }
+        Ok(())
+    }
+
+    /// Writes an `AnyValue`: a `uint32` type discriminant followed by the value itself.
+    fn write_any_value(&mut self, value: &AttributeValue) -> Result<(), Error> {
+        match value {
+            AttributeValue::String(s) => {
+                self.write_u32(1)?;
+                self.write_streaming_string(s)
+            }
+            AttributeValue::Bool(b) => {
+                self.write_u32(2)?;
+                self.write_bool(*b)
+            }
+            AttributeValue::Double(d) => {
+                self.write_u32(3)?;
+                rmp::encode::write_f64(&mut self.writer, *d)?;
+                Ok(())
+            }
+            AttributeValue::Int(i) => {
+                self.write_u32(4)?;
+                self.write_sint(*i)
+            }
         }
     }
-}
-
-fn write_u32<W: Write>(w: &mut W, value: u32) -> Result<(), Error> {
-    rmp::encode::write_uint(w, u64::from(value))
-        .map(|_| ())
-        .map_err(map_write_error)
-}
-
-fn write_u64<W: Write>(w: &mut W, value: u64) -> Result<(), Error> {
-    rmp::encode::write_uint(w, value)
-        .map(|_| ())
-        .map_err(map_write_error)
-}
-
-fn write_map_len<W: Write>(w: &mut W, len: usize) -> Result<(), Error> {
-    rmp::encode::write_map_len(w, u32::try_from(len).map_err(cast_error)?)
-        .map(|_| ())
-        .map_err(map_write_error)
-}
-
-fn write_array_len<W: Write>(w: &mut W, len: usize) -> Result<(), Error> {
-    rmp::encode::write_array_len(w, u32::try_from(len).map_err(cast_error)?)
-        .map(|_| ())
-        .map_err(map_write_error)
-}
-
-fn write_bool<W: Write>(w: &mut W, value: bool) -> Result<(), Error> {
-    rmp::encode::write_bool(w, value).map_err(Error::Io)
-}
-
-fn write_bin<W: Write>(w: &mut W, value: &[u8]) -> Result<(), Error> {
-    rmp::encode::write_bin(w, value).map_err(map_write_error)
-}
-
-/// Writes an attribute map as a flat `[key, type, value]` array, three slots per entry.
-fn write_attributes<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    attributes: &[(String, AttributeValue)],
-) -> Result<(), Error> {
-    write_array_len(w, attributes.len() * 3)?;
-    for (key, value) in attributes {
-        write_streaming_string(w, strings, key)?;
-        write_any_value(w, strings, value)?;
-    }
-    Ok(())
-}
-
-/// Writes an `AnyValue`: a `uint32` type discriminant followed by the value itself.
-fn write_any_value<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    value: &AttributeValue,
-) -> Result<(), Error> {
-    match value {
-        AttributeValue::String(s) => {
-            write_u32(w, 1)?;
-            write_streaming_string(w, strings, s)
-        }
-        AttributeValue::Bool(b) => {
-            write_u32(w, 2)?;
-            write_bool(w, *b)
-        }
-        AttributeValue::Double(d) => {
-            write_u32(w, 3)?;
-            rmp::encode::write_f64(w, *d).map_err(map_write_error)
-        }
-        AttributeValue::Int(i) => {
-            write_u32(w, 4)?;
-            rmp::encode::write_sint(w, *i)
-                .map(|_| ())
-                .map_err(map_write_error)
-        }
-    }
-}
-
-fn write_tracer_payload<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    payload: &TracerPayload,
-) -> Result<(), Error> {
-    // The reference encoder omits every field holding its zero value, and counts the survivors to
-    // size the map header. Field 1, the explicit string table, is never emitted: strings stream
-    // inline instead.
-    let string_fields = [
-        (2, &payload.container_id),
-        (3, &payload.language_name),
-        (4, &payload.language_version),
-        (5, &payload.tracer_version),
-        (6, &payload.runtime_id),
-        (7, &payload.env),
-        (8, &payload.hostname),
-        (9, &payload.app_version),
-    ];
-
-    let num_fields = string_fields.iter().filter(|(_, v)| !v.is_empty()).count()
-        + usize::from(!payload.attributes.is_empty())
-        + usize::from(!payload.chunks.is_empty());
-    write_map_len(w, num_fields)?;
-
-    for (field, value) in string_fields {
-        if !value.is_empty() {
-            write_u32(w, field)?;
-            write_streaming_string(w, strings, value)?;
-        }
-    }
-
-    if !payload.attributes.is_empty() {
-        write_u32(w, 10)?;
-        write_attributes(w, strings, &payload.attributes)?;
-    }
-
-    if !payload.chunks.is_empty() {
-        write_u32(w, 11)?;
-        write_array_len(w, payload.chunks.len())?;
-        for chunk in &payload.chunks {
-            write_chunk(w, strings, chunk)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn write_chunk<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    chunk: &TraceChunk,
-) -> Result<(), Error> {
-    let num_fields = usize::from(chunk.priority.is_some())
-        + usize::from(!chunk.origin.is_empty())
-        + usize::from(!chunk.attributes.is_empty())
-        + usize::from(!chunk.spans.is_empty())
-        + usize::from(chunk.dropped_trace)
-        + usize::from(chunk.trace_id != [0u8; 16])
-        + usize::from(chunk.sampling_mechanism != 0);
-    write_map_len(w, num_fields)?;
-
-    if let Some(priority) = chunk.priority {
-        write_u32(w, 1)?;
-        rmp::encode::write_sint(w, i64::from(priority))
-            .map(|_| ())
-            .map_err(map_write_error)?;
-    }
-
-    if !chunk.origin.is_empty() {
-        write_u32(w, 2)?;
-        write_streaming_string(w, strings, &chunk.origin)?;
-    }
-
-    if !chunk.attributes.is_empty() {
-        write_u32(w, 3)?;
-        write_attributes(w, strings, &chunk.attributes)?;
-    }
-
-    if !chunk.spans.is_empty() {
-        write_u32(w, 4)?;
-        write_array_len(w, chunk.spans.len())?;
-        for span in &chunk.spans {
-            write_span(w, strings, span)?;
-        }
-    }
-
-    if chunk.dropped_trace {
-        write_u32(w, 5)?;
-        write_bool(w, true)?;
-    }
-
-    if chunk.trace_id != [0u8; 16] {
-        write_u32(w, 6)?;
-        write_bin(w, &chunk.trace_id)?;
-    }
-
-    if chunk.sampling_mechanism != 0 {
-        write_u32(w, 7)?;
-        write_u32(w, chunk.sampling_mechanism)?;
-    }
-
-    Ok(())
-}
-
-fn write_span<W: Write>(w: &mut W, strings: &mut StringTable, span: &Span) -> Result<(), Error> {
-    let num_fields = usize::from(!span.service.is_empty())
-        + usize::from(!span.name.is_empty())
-        + usize::from(!span.resource.is_empty())
-        + usize::from(span.span_id != 0)
-        + usize::from(span.parent_id != 0)
-        + usize::from(span.start != 0)
-        + usize::from(span.duration != 0)
-        + usize::from(span.error)
-        + usize::from(!span.attributes.is_empty())
-        + usize::from(!span.span_type.is_empty())
-        + usize::from(!span.links.is_empty())
-        + usize::from(!span.events.is_empty())
-        + usize::from(!span.env.is_empty())
-        + usize::from(!span.version.is_empty())
-        + usize::from(!span.component.is_empty())
-        + usize::from(span.kind != 0);
-    write_map_len(w, num_fields)?;
-
-    if !span.service.is_empty() {
-        write_u32(w, 1)?;
-        write_streaming_string(w, strings, &span.service)?;
-    }
-    if !span.name.is_empty() {
-        write_u32(w, 2)?;
-        write_streaming_string(w, strings, &span.name)?;
-    }
-    if !span.resource.is_empty() {
-        write_u32(w, 3)?;
-        write_streaming_string(w, strings, &span.resource)?;
-    }
-    if span.span_id != 0 {
-        write_u32(w, 4)?;
-        write_u64(w, span.span_id)?;
-    }
-    if span.parent_id != 0 {
-        write_u32(w, 5)?;
-        write_u64(w, span.parent_id)?;
-    }
-    if span.start != 0 {
-        write_u32(w, 6)?;
-        write_u64(w, span.start)?;
-    }
-    if span.duration != 0 {
-        write_u32(w, 7)?;
-        write_u64(w, span.duration)?;
-    }
-    if span.error {
-        write_u32(w, 8)?;
-        write_bool(w, true)?;
-    }
-    if !span.attributes.is_empty() {
-        write_u32(w, 9)?;
-        write_attributes(w, strings, &span.attributes)?;
-    }
-    if !span.span_type.is_empty() {
-        write_u32(w, 10)?;
-        write_streaming_string(w, strings, &span.span_type)?;
-    }
-    if !span.links.is_empty() {
-        write_u32(w, 11)?;
-        write_array_len(w, span.links.len())?;
-        for link in &span.links {
-            write_span_link(w, strings, link)?;
-        }
-    }
-    if !span.events.is_empty() {
-        write_u32(w, 12)?;
-        write_array_len(w, span.events.len())?;
-        for event in &span.events {
-            write_span_event(w, strings, event)?;
-        }
-    }
-    if !span.env.is_empty() {
-        write_u32(w, 13)?;
-        write_streaming_string(w, strings, &span.env)?;
-    }
-    if !span.version.is_empty() {
-        write_u32(w, 14)?;
-        write_streaming_string(w, strings, &span.version)?;
-    }
-    if !span.component.is_empty() {
-        write_u32(w, 15)?;
-        write_streaming_string(w, strings, &span.component)?;
-    }
-    if span.kind != 0 {
-        write_u32(w, 16)?;
-        write_u32(w, span.kind)?;
-    }
-
-    Ok(())
-}
-
-fn write_span_link<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    link: &SpanLink,
-) -> Result<(), Error> {
-    let num_fields = usize::from(link.trace_id != [0u8; 16])
-        + usize::from(link.span_id != 0)
-        + usize::from(!link.attributes.is_empty())
-        + usize::from(!link.tracestate.is_empty())
-        + usize::from(link.flags != 0);
-    write_map_len(w, num_fields)?;
-
-    if link.trace_id != [0u8; 16] {
-        write_u32(w, 1)?;
-        write_bin(w, &link.trace_id)?;
-    }
-    if link.span_id != 0 {
-        write_u32(w, 2)?;
-        write_u64(w, link.span_id)?;
-    }
-    if !link.attributes.is_empty() {
-        write_u32(w, 3)?;
-        write_attributes(w, strings, &link.attributes)?;
-    }
-    if !link.tracestate.is_empty() {
-        write_u32(w, 4)?;
-        write_streaming_string(w, strings, &link.tracestate)?;
-    }
-    if link.flags != 0 {
-        write_u32(w, 5)?;
-        write_u32(w, link.flags)?;
-    }
-
-    Ok(())
-}
-
-fn write_span_event<W: Write>(
-    w: &mut W,
-    strings: &mut StringTable,
-    event: &SpanEvent,
-) -> Result<(), Error> {
-    let num_fields = usize::from(event.time != 0)
-        + usize::from(!event.name.is_empty())
-        + usize::from(!event.attributes.is_empty());
-    write_map_len(w, num_fields)?;
-
-    if event.time != 0 {
-        write_u32(w, 1)?;
-        write_u64(w, event.time)?;
-    }
-    if !event.name.is_empty() {
-        write_u32(w, 2)?;
-        write_streaming_string(w, strings, &event.name)?;
-    }
-    if !event.attributes.is_empty() {
-        write_u32(w, 3)?;
-        write_attributes(w, strings, &event.attributes)?;
-    }
-
-    Ok(())
 }
 
 impl TracerPayload {
@@ -405,9 +147,260 @@ impl TracerPayload {
     /// Returns an error if the underlying writer fails. Writing into an in-memory buffer cannot
     /// fail, so callers that do so can treat this as infallible.
     pub(super) fn encode(&self) -> Result<Vec<u8>, Error> {
-        let mut buf = Vec::new();
-        let mut strings = StringTable::new();
-        write_tracer_payload(&mut buf, &mut strings, self)?;
-        Ok(buf)
+        let mut encoder = Encoder {
+            writer: Vec::new(),
+            strings: StringTable::new(),
+        };
+        self.write(&mut encoder)?;
+        Ok(encoder.writer)
+    }
+
+    fn write(&self, encoder: &mut Encoder) -> Result<(), Error> {
+        // The reference encoder omits every field holding its zero value, and counts the survivors
+        // to size the map header. Field 1, the explicit string table, is never emitted: strings
+        // stream inline instead.
+        let string_fields = [
+            (2, &self.container_id),
+            (3, &self.language_name),
+            (4, &self.language_version),
+            (5, &self.tracer_version),
+            (6, &self.runtime_id),
+            (7, &self.env),
+            (8, &self.hostname),
+            (9, &self.app_version),
+        ];
+
+        let num_fields = string_fields.iter().filter(|(_, v)| !v.is_empty()).count()
+            + usize::from(!self.attributes.is_empty())
+            + usize::from(!self.chunks.is_empty());
+        encoder.write_map_len(num_fields)?;
+
+        for (field, value) in string_fields {
+            if !value.is_empty() {
+                encoder.write_u32(field)?;
+                encoder.write_streaming_string(value)?;
+            }
+        }
+
+        if !self.attributes.is_empty() {
+            encoder.write_u32(10)?;
+            encoder.write_attributes(&self.attributes)?;
+        }
+
+        if !self.chunks.is_empty() {
+            encoder.write_u32(11)?;
+            encoder.write_array_len(self.chunks.len())?;
+            for chunk in &self.chunks {
+                chunk.write(encoder)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl TraceChunk {
+    fn write(&self, encoder: &mut Encoder) -> Result<(), Error> {
+        let num_fields = usize::from(self.priority.is_some())
+            + usize::from(!self.origin.is_empty())
+            + usize::from(!self.attributes.is_empty())
+            + usize::from(!self.spans.is_empty())
+            + usize::from(self.dropped_trace)
+            + usize::from(self.trace_id != [0u8; 16])
+            + usize::from(self.sampling_mechanism != 0);
+        encoder.write_map_len(num_fields)?;
+
+        if let Some(priority) = self.priority {
+            encoder.write_u32(1)?;
+            encoder.write_sint(i64::from(priority))?;
+        }
+
+        if !self.origin.is_empty() {
+            encoder.write_u32(2)?;
+            encoder.write_streaming_string(&self.origin)?;
+        }
+
+        if !self.attributes.is_empty() {
+            encoder.write_u32(3)?;
+            encoder.write_attributes(&self.attributes)?;
+        }
+
+        if !self.spans.is_empty() {
+            encoder.write_u32(4)?;
+            encoder.write_array_len(self.spans.len())?;
+            for span in &self.spans {
+                span.write(encoder)?;
+            }
+        }
+
+        if self.dropped_trace {
+            encoder.write_u32(5)?;
+            encoder.write_bool(true)?;
+        }
+
+        if self.trace_id != [0u8; 16] {
+            encoder.write_u32(6)?;
+            encoder.write_bin(&self.trace_id)?;
+        }
+
+        if self.sampling_mechanism != 0 {
+            encoder.write_u32(7)?;
+            encoder.write_u32(self.sampling_mechanism)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Span {
+    fn write(&self, encoder: &mut Encoder) -> Result<(), Error> {
+        let num_fields = usize::from(!self.service.is_empty())
+            + usize::from(!self.name.is_empty())
+            + usize::from(!self.resource.is_empty())
+            + usize::from(self.span_id != 0)
+            + usize::from(self.parent_id != 0)
+            + usize::from(self.start != 0)
+            + usize::from(self.duration != 0)
+            + usize::from(self.error)
+            + usize::from(!self.attributes.is_empty())
+            + usize::from(!self.span_type.is_empty())
+            + usize::from(!self.links.is_empty())
+            + usize::from(!self.events.is_empty())
+            + usize::from(!self.env.is_empty())
+            + usize::from(!self.version.is_empty())
+            + usize::from(!self.component.is_empty())
+            + usize::from(self.kind != 0);
+        encoder.write_map_len(num_fields)?;
+
+        if !self.service.is_empty() {
+            encoder.write_u32(1)?;
+            encoder.write_streaming_string(&self.service)?;
+        }
+        if !self.name.is_empty() {
+            encoder.write_u32(2)?;
+            encoder.write_streaming_string(&self.name)?;
+        }
+        if !self.resource.is_empty() {
+            encoder.write_u32(3)?;
+            encoder.write_streaming_string(&self.resource)?;
+        }
+        if self.span_id != 0 {
+            encoder.write_u32(4)?;
+            encoder.write_u64(self.span_id)?;
+        }
+        if self.parent_id != 0 {
+            encoder.write_u32(5)?;
+            encoder.write_u64(self.parent_id)?;
+        }
+        if self.start != 0 {
+            encoder.write_u32(6)?;
+            encoder.write_u64(self.start)?;
+        }
+        if self.duration != 0 {
+            encoder.write_u32(7)?;
+            encoder.write_u64(self.duration)?;
+        }
+        if self.error {
+            encoder.write_u32(8)?;
+            encoder.write_bool(true)?;
+        }
+        if !self.attributes.is_empty() {
+            encoder.write_u32(9)?;
+            encoder.write_attributes(&self.attributes)?;
+        }
+        if !self.span_type.is_empty() {
+            encoder.write_u32(10)?;
+            encoder.write_streaming_string(&self.span_type)?;
+        }
+        if !self.links.is_empty() {
+            encoder.write_u32(11)?;
+            encoder.write_array_len(self.links.len())?;
+            for link in &self.links {
+                link.write(encoder)?;
+            }
+        }
+        if !self.events.is_empty() {
+            encoder.write_u32(12)?;
+            encoder.write_array_len(self.events.len())?;
+            for event in &self.events {
+                event.write(encoder)?;
+            }
+        }
+        if !self.env.is_empty() {
+            encoder.write_u32(13)?;
+            encoder.write_streaming_string(&self.env)?;
+        }
+        if !self.version.is_empty() {
+            encoder.write_u32(14)?;
+            encoder.write_streaming_string(&self.version)?;
+        }
+        if !self.component.is_empty() {
+            encoder.write_u32(15)?;
+            encoder.write_streaming_string(&self.component)?;
+        }
+        if self.kind != 0 {
+            encoder.write_u32(16)?;
+            encoder.write_u32(self.kind)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl SpanLink {
+    fn write(&self, encoder: &mut Encoder) -> Result<(), Error> {
+        let num_fields = usize::from(self.trace_id != [0u8; 16])
+            + usize::from(self.span_id != 0)
+            + usize::from(!self.attributes.is_empty())
+            + usize::from(!self.tracestate.is_empty())
+            + usize::from(self.flags != 0);
+        encoder.write_map_len(num_fields)?;
+
+        if self.trace_id != [0u8; 16] {
+            encoder.write_u32(1)?;
+            encoder.write_bin(&self.trace_id)?;
+        }
+        if self.span_id != 0 {
+            encoder.write_u32(2)?;
+            encoder.write_u64(self.span_id)?;
+        }
+        if !self.attributes.is_empty() {
+            encoder.write_u32(3)?;
+            encoder.write_attributes(&self.attributes)?;
+        }
+        if !self.tracestate.is_empty() {
+            encoder.write_u32(4)?;
+            encoder.write_streaming_string(&self.tracestate)?;
+        }
+        if self.flags != 0 {
+            encoder.write_u32(5)?;
+            encoder.write_u32(self.flags)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl SpanEvent {
+    fn write(&self, encoder: &mut Encoder) -> Result<(), Error> {
+        let num_fields = usize::from(self.time != 0)
+            + usize::from(!self.name.is_empty())
+            + usize::from(!self.attributes.is_empty());
+        encoder.write_map_len(num_fields)?;
+
+        if self.time != 0 {
+            encoder.write_u32(1)?;
+            encoder.write_u64(self.time)?;
+        }
+        if !self.name.is_empty() {
+            encoder.write_u32(2)?;
+            encoder.write_streaming_string(&self.name)?;
+        }
+        if !self.attributes.is_empty() {
+            encoder.write_u32(3)?;
+            encoder.write_attributes(&self.attributes)?;
+        }
+
+        Ok(())
     }
 }

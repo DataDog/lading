@@ -14,6 +14,7 @@ members = [
 [workspace.dependencies]
 anyhow = "1.0"
 arc-swap = { version = "1.8" }
+base64 = "0.22"
 arrow-array = { version = "57.0", default-features = false }
 arrow-buffer = { version = "57.0", default-features = false }
 arrow-schema = { version = "57.0", default-features = false }
@@ -29,6 +30,7 @@ metrics-util = "0.20"
 metrics-exporter-prometheus = { version = "0.18", default-features = false, features = [
   "uds-listener",
 ] }
+rmp = { version = "0.8", default-features = false }
 prost = "0.14"
 prost-build = "0.14"
 rand = { version = "0.10", default-features = false }

@@ -19,7 +19,7 @@
 //! integer widths. These change streaming string indices and bytes without changing meaning.
 //! Keep this test-only reader schema-level; do not grow it into a general-purpose decoder.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -73,9 +73,52 @@ struct Decoder<'a> {
     next_string_index: u64,
 }
 
-/// Renders an `rmp` read failure as the test-facing error string.
-fn read_error<E: std::fmt::Debug>(error: E) -> String {
-    format!("malformed MessagePack: {error:?}")
+/// Golden-decoder failure modes, so test failures read precisely rather than as opaque strings.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum DecodeError {
+    /// The payload ended before a complete value was read.
+    #[error("unexpected end of payload")]
+    UnexpectedEnd,
+    /// A `MessagePack` marker or value did not match its declared shape.
+    #[error("malformed MessagePack: {0:?}")]
+    Malformed(#[from] rmp::decode::ValueReadError),
+    /// A `MessagePack` integer could not be read in the requested shape.
+    #[error("malformed MessagePack integer: {0:?}")]
+    MalformedInt(#[from] rmp::decode::NumValueReadError),
+    /// An inline string's bytes were not valid UTF-8.
+    #[error("invalid UTF-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+    /// A streaming string referenced a table index that was never assigned.
+    #[error("reference to unassigned string index {0}")]
+    UnassignedStringIndex(u64),
+    /// A field identifier fell outside the v1.0 range of 1-16.
+    #[error("field identifier out of range: {0}")]
+    FieldOutOfRange(u64),
+    /// An attribute array's length was not a multiple of the three slots per entry.
+    #[error("attribute array length {0} is not a multiple of 3")]
+    AttributeSlots(usize),
+    /// An attribute value carried an unknown type discriminant.
+    #[error("unsupported attribute value type {0}")]
+    AttributeValueType(u64),
+    /// A map carried a field identifier unknown to the schema.
+    #[error("unknown {context} field {id}")]
+    UnknownField {
+        /// The schema element the unknown field appeared in.
+        context: &'static str,
+        /// The unrecognized identifier.
+        id: u32,
+    },
+    /// A value had the right marker but an unusable width or contents.
+    #[error("invalid {0}")]
+    Conversion(&'static str),
+    /// The payload carried bytes beyond the decoded tracer payload.
+    #[error("decoded {read} of {total} bytes")]
+    Incomplete {
+        /// Bytes consumed by the decode.
+        read: usize,
+        /// Total bytes offered to the decode.
+        total: usize,
+    },
 }
 
 impl<'a> Decoder<'a> {
@@ -93,16 +136,13 @@ impl<'a> Decoder<'a> {
         self.total - self.data.len()
     }
 
-    fn peek(&self) -> Result<u8, String> {
-        self.data
-            .first()
-            .copied()
-            .ok_or_else(|| "unexpected end of payload".to_string())
+    fn peek(&self) -> Result<u8, DecodeError> {
+        self.data.first().copied().ok_or(DecodeError::UnexpectedEnd)
     }
 
-    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         if self.data.len() < n {
-            return Err("unexpected end of payload".to_string());
+            return Err(DecodeError::UnexpectedEnd);
         }
         let (slice, rest) = self.data.split_at(n);
         self.data = rest;
@@ -112,33 +152,33 @@ impl<'a> Decoder<'a> {
     /// Reads an unsigned integer in any of its `MessagePack` encodings. The reference encoder
     /// routes some numeric fields through its signed path, so positive values may also carry
     /// signed markers.
-    fn uint(&mut self) -> Result<u64, String> {
-        rmp::decode::read_int(&mut self.data).map_err(read_error)
+    fn uint(&mut self) -> Result<u64, DecodeError> {
+        Ok(rmp::decode::read_int(&mut self.data)?)
     }
 
-    fn signed(&mut self) -> Result<i64, String> {
-        rmp::decode::read_int(&mut self.data).map_err(read_error)
+    fn signed(&mut self) -> Result<i64, DecodeError> {
+        Ok(rmp::decode::read_int(&mut self.data)?)
     }
 
-    fn boolean(&mut self) -> Result<bool, String> {
-        rmp::decode::read_bool(&mut self.data).map_err(read_error)
+    fn boolean(&mut self) -> Result<bool, DecodeError> {
+        Ok(rmp::decode::read_bool(&mut self.data)?)
     }
 
-    fn double(&mut self) -> Result<f64, String> {
-        rmp::decode::read_f64(&mut self.data).map_err(read_error)
+    fn double(&mut self) -> Result<f64, DecodeError> {
+        Ok(rmp::decode::read_f64(&mut self.data)?)
     }
 
-    fn inline_str(&mut self) -> Result<String, String> {
-        let len = rmp::decode::read_str_len(&mut self.data).map_err(read_error)?;
+    fn inline_str(&mut self) -> Result<String, DecodeError> {
+        let len = rmp::decode::read_str_len(&mut self.data)?;
         let bytes = self.take(len as usize)?;
-        String::from_utf8(bytes.to_vec()).map_err(|e| format!("invalid UTF-8: {e}"))
+        Ok(String::from_utf8(bytes.to_vec())?)
     }
 
     /// Reads a streaming string: inline on its first appearance, by table index thereafter.
     ///
     /// The discriminant is the raw marker byte, since a table index and an inline string occupy
     /// the same slot: fixstr, str8, str16 and str32 mean inline, anything else is an index.
-    fn string(&mut self) -> Result<String, String> {
+    fn string(&mut self) -> Result<String, DecodeError> {
         if matches!(self.peek(), Ok(0xA0..=0xBF | 0xD9 | 0xDA | 0xDB)) {
             let s = self.inline_str()?;
             let index = self.next_string_index;
@@ -150,43 +190,37 @@ impl<'a> Decoder<'a> {
             self.strings
                 .get(&index)
                 .cloned()
-                .ok_or_else(|| format!("reference to unassigned string index {index}"))
+                .ok_or(DecodeError::UnassignedStringIndex(index))
         }
     }
 
-    fn bin(&mut self) -> Result<Vec<u8>, String> {
-        let len = rmp::decode::read_bin_len(&mut self.data).map_err(read_error)?;
+    fn bin(&mut self) -> Result<Vec<u8>, DecodeError> {
+        let len = rmp::decode::read_bin_len(&mut self.data)?;
         Ok(self.take(len as usize)?.to_vec())
     }
 
-    fn arr_len(&mut self) -> Result<usize, String> {
-        rmp::decode::read_array_len(&mut self.data)
-            .map(|len| len as usize)
-            .map_err(read_error)
+    fn arr_len(&mut self) -> Result<usize, DecodeError> {
+        Ok(rmp::decode::read_array_len(&mut self.data)? as usize)
     }
 
-    fn map_len(&mut self) -> Result<usize, String> {
-        rmp::decode::read_map_len(&mut self.data)
-            .map(|len| len as usize)
-            .map_err(read_error)
+    fn map_len(&mut self) -> Result<usize, DecodeError> {
+        Ok(rmp::decode::read_map_len(&mut self.data)? as usize)
     }
 
     /// Reads a field identifier. All v1.0 field IDs are 1-16 and encode as one byte.
-    fn field_id(&mut self) -> Result<u32, String> {
+    fn field_id(&mut self) -> Result<u32, DecodeError> {
         let id = self.uint()?;
         u32::try_from(id)
             .ok()
             .filter(|id| (1..=16).contains(id))
-            .ok_or_else(|| format!("field identifier out of range: {id}"))
+            .ok_or(DecodeError::FieldOutOfRange(id))
     }
 
     /// Reads an attribute map: a flat `[key, type, value]` array, three slots per entry.
-    fn attributes(&mut self) -> Result<Vec<(String, AttributeValue)>, String> {
+    fn attributes(&mut self) -> Result<Vec<(String, AttributeValue)>, DecodeError> {
         let slots = self.arr_len()?;
         if slots % 3 != 0 {
-            return Err(format!(
-                "attribute array length {slots} is not a multiple of 3"
-            ));
+            return Err(DecodeError::AttributeSlots(slots));
         }
 
         let mut attributes = Vec::with_capacity(slots / 3);
@@ -197,14 +231,14 @@ impl<'a> Decoder<'a> {
                 2 => AttributeValue::Bool(self.boolean()?),
                 3 => AttributeValue::Double(self.double()?),
                 4 => AttributeValue::Int(self.signed()?),
-                other => return Err(format!("unsupported attribute value type {other}")),
+                other => return Err(DecodeError::AttributeValueType(other)),
             };
             attributes.push((key, value));
         }
         Ok(attributes)
     }
 
-    fn span_link(&mut self) -> Result<SpanLink, String> {
+    fn span_link(&mut self) -> Result<SpanLink, DecodeError> {
         let mut link = SpanLink::default();
         for _ in 0..self.map_len()? {
             match self.field_id()? {
@@ -212,32 +246,45 @@ impl<'a> Decoder<'a> {
                     link.trace_id = self
                         .bin()?
                         .try_into()
-                        .map_err(|_| "trace id length".to_string())?;
+                        .map_err(|_| DecodeError::Conversion("trace id length"))?;
                 }
                 2 => link.span_id = self.uint()?,
                 3 => link.attributes = self.attributes()?,
                 4 => link.tracestate = self.string()?,
-                5 => link.flags = u32::try_from(self.uint()?).map_err(|_| "flags".to_string())?,
-                other => return Err(format!("unknown span link field {other}")),
+                5 => {
+                    link.flags = u32::try_from(self.uint()?)
+                        .map_err(|_| DecodeError::Conversion("flags"))?;
+                }
+                other => {
+                    return Err(DecodeError::UnknownField {
+                        context: "span link",
+                        id: other,
+                    });
+                }
             }
         }
         Ok(link)
     }
 
-    fn span_event(&mut self) -> Result<SpanEvent, String> {
+    fn span_event(&mut self) -> Result<SpanEvent, DecodeError> {
         let mut event = SpanEvent::default();
         for _ in 0..self.map_len()? {
             match self.field_id()? {
                 1 => event.time = self.uint()?,
                 2 => event.name = self.string()?,
                 3 => event.attributes = self.attributes()?,
-                other => return Err(format!("unknown span event field {other}")),
+                other => {
+                    return Err(DecodeError::UnknownField {
+                        context: "span event",
+                        id: other,
+                    });
+                }
             }
         }
         Ok(event)
     }
 
-    fn span(&mut self) -> Result<Span, String> {
+    fn span(&mut self) -> Result<Span, DecodeError> {
         let mut span = Span::default();
         for _ in 0..self.map_len()? {
             match self.field_id()? {
@@ -249,7 +296,7 @@ impl<'a> Decoder<'a> {
                 6 => span.start = self.uint()?,
                 7 => span.duration = self.uint()?,
                 8 => span.error = self.boolean()?,
-                9 => span.attributes = Arc::from(self.attributes()?),
+                9 => span.attributes = Rc::from(self.attributes()?),
                 10 => span.span_type = self.string()?.into(),
                 11 => {
                     let links = self.arr_len()?;
@@ -267,21 +314,29 @@ impl<'a> Decoder<'a> {
                 14 => span.version = self.string()?.into(),
                 15 => span.component = self.string()?.into(),
                 16 => {
-                    span.kind = u32::try_from(self.uint()?).map_err(|_| "span kind".to_string())?;
+                    span.kind = u32::try_from(self.uint()?)
+                        .map_err(|_| DecodeError::Conversion("span kind"))?;
                 }
-                other => return Err(format!("unknown span field {other}")),
+                other => {
+                    return Err(DecodeError::UnknownField {
+                        context: "span",
+                        id: other,
+                    });
+                }
             }
         }
         Ok(span)
     }
 
-    fn chunk(&mut self) -> Result<TraceChunk, String> {
+    fn chunk(&mut self) -> Result<TraceChunk, DecodeError> {
         let mut chunk = TraceChunk::default();
         for _ in 0..self.map_len()? {
             match self.field_id()? {
                 1 => {
-                    chunk.priority =
-                        Some(i32::try_from(self.signed()?).map_err(|_| "priority".to_string())?);
+                    chunk.priority = Some(
+                        i32::try_from(self.signed()?)
+                            .map_err(|_| DecodeError::Conversion("priority"))?,
+                    );
                 }
                 2 => chunk.origin = self.string()?,
                 3 => chunk.attributes = self.attributes()?,
@@ -296,19 +351,24 @@ impl<'a> Decoder<'a> {
                     chunk.trace_id = self
                         .bin()?
                         .try_into()
-                        .map_err(|_| "trace id length".to_string())?;
+                        .map_err(|_| DecodeError::Conversion("trace id length"))?;
                 }
                 7 => {
                     chunk.sampling_mechanism = u32::try_from(self.uint()?)
-                        .map_err(|_| "sampling mechanism".to_string())?;
+                        .map_err(|_| DecodeError::Conversion("sampling mechanism"))?;
                 }
-                other => return Err(format!("unknown trace chunk field {other}")),
+                other => {
+                    return Err(DecodeError::UnknownField {
+                        context: "trace chunk",
+                        id: other,
+                    });
+                }
             }
         }
         Ok(chunk)
     }
 
-    fn tracer_payload(&mut self) -> Result<TracerPayload, String> {
+    fn tracer_payload(&mut self) -> Result<TracerPayload, DecodeError> {
         let mut payload = TracerPayload::default();
         for _ in 0..self.map_len()? {
             match self.field_id()? {
@@ -327,7 +387,12 @@ impl<'a> Decoder<'a> {
                         .map(|_| self.chunk())
                         .collect::<Result<Vec<_>, _>>()?;
                 }
-                other => return Err(format!("unknown tracer payload field {other}")),
+                other => {
+                    return Err(DecodeError::UnknownField {
+                        context: "tracer payload",
+                        id: other,
+                    });
+                }
             }
         }
         Ok(payload)
@@ -335,11 +400,14 @@ impl<'a> Decoder<'a> {
 }
 
 /// Decodes a v1.0 payload through the independent reference path.
-pub(super) fn decode(data: &[u8]) -> Result<TracerPayload, String> {
+pub(super) fn decode(data: &[u8]) -> Result<TracerPayload, DecodeError> {
     let mut decoder = Decoder::new(data);
     let payload = decoder.tracer_payload()?;
     if decoder.pos() != data.len() {
-        return Err(format!("decoded {} of {} bytes", decoder.pos(), data.len()));
+        return Err(DecodeError::Incomplete {
+            read: decoder.pos(),
+            total: data.len(),
+        });
     }
     Ok(payload)
 }
@@ -357,7 +425,7 @@ fn normalize(payload: &mut TracerPayload) {
         for span in &mut chunk.spans {
             let mut attributes = span.attributes.to_vec();
             attributes.sort_by(|(left, _), (right, _)| left.cmp(right));
-            span.attributes = Arc::from(attributes);
+            span.attributes = Rc::from(attributes);
             span.links.iter_mut().for_each(|link| {
                 link.attributes
                     .sort_by(|(left, _), (right, _)| left.cmp(right));
