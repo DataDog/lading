@@ -75,6 +75,9 @@ pub enum Error {
     /// See [`unit::Error`]
     #[error(transparent)]
     Unit(#[from] opentelemetry::metric::unit::Error),
+    /// See [`trace_agent::v1::encoder::Error`]
+    #[error(transparent)]
+    TraceAgentV1Encoder(#[from] trace_agent::v1::encoder::Error),
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),

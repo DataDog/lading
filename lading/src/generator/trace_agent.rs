@@ -284,7 +284,7 @@ impl TraceAgent {
         let maximum_prebuild_cache_size_bytes =
             validate_cache_size(config.maximum_prebuild_cache_size_bytes)?;
         let maximum_block_size = config.maximum_block_size.as_u128();
-        let block_config = lading_payload::Config::TraceAgent(config.variant);
+        let block_config = lading_payload::Config::TraceAgent(config.variant.clone());
         let block_cache = Arc::new(match config.block_cache_method {
             block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
                 &mut rng,
