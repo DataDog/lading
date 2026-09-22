@@ -89,11 +89,12 @@ impl TemplatedJson {
     /// # Errors
     ///
     /// Returns an error if the underlying generator fails.
-    fn generate_line(&mut self, rng: &mut impl Rng) -> Result<(), Error> {
+    pub fn generate_line(&mut self, rng: &mut impl Rng) -> Result<&str, Error> {
         self.ctx.fill(None);
         self.line_buf.clear();
         self.generator
-            .generate(rng, &mut self.ctx, &self.definitions, &mut self.line_buf)
+            .generate(rng, &mut self.ctx, &self.definitions, &mut self.line_buf)?;
+        Ok(self.line_buf.as_str())
     }
 }
 
@@ -106,12 +107,12 @@ impl crate::Serialize for TemplatedJson {
         let mut bytes_remaining = max_bytes;
         loop {
             self.generate_line(&mut rng)?;
-            let line_length = self.line_buf.as_str().len() + 1; // +1 for the trailing newline
-            let Some(remainder) = bytes_remaining.checked_sub(line_length) else {
+            self.line_buf.push_char('\n');
+            let line = self.line_buf.as_str();
+            let Some(remainder) = bytes_remaining.checked_sub(line.len()) else {
                 break;
             };
-            self.line_buf.push_char('\n');
-            writer.write_all(self.line_buf.as_str().as_bytes())?;
+            writer.write_all(line.as_bytes())?;
             bytes_remaining = remainder;
         }
         Ok(())
