@@ -1,0 +1,90 @@
+name: lading
+services:
+  lading:
+    build:
+      context: /home/ssm-user/src/lading
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: lading
+    container_name: lading
+    depends_on:
+      sink:
+        condition: service_healthy
+        required: true
+    environment:
+      CONFIG_DIR: /shared
+      NO_COLOR: "1"
+      RUST_LOG: info
+    hostname: lading
+    image: lading:82f962dc-dirty
+    init: true
+    networks:
+      default: null
+    platform: linux/amd64
+    volumes:
+      - type: volume
+        source: shared
+        target: /shared
+        read_only: true
+        volume: {}
+      - type: volume
+        source: capture
+        target: /capture
+        volume: {}
+  sink:
+    build:
+      context: /home/ssm-user/src/lading
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: sink
+    container_name: sink
+    environment:
+      NO_COLOR: "1"
+    hostname: sink
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'exec 3<>/dev/tcp/localhost/9000'
+      timeout: 2s
+      interval: 2s
+      retries: 30
+    image: sink:82f962dc-dirty
+    init: true
+    networks:
+      default: null
+    platform: linux/amd64
+  workload:
+    build:
+      context: /home/ssm-user/src/lading
+      dockerfile: test/antithesis/scenarios/general/Dockerfile
+      target: workload
+    container_name: workload
+    depends_on:
+      sink:
+        condition: service_healthy
+        required: true
+    environment:
+      CONFIG_DIR: /shared
+      NO_COLOR: "1"
+    hostname: workload
+    image: workload:82f962dc-dirty
+    init: true
+    networks:
+      default: null
+    platform: linux/amd64
+    volumes:
+      - type: volume
+        source: shared
+        target: /shared
+        volume: {}
+      - type: volume
+        source: capture
+        target: /capture
+        read_only: true
+        volume: {}
+networks:
+  default:
+    name: lading_default
+volumes:
+  capture:
+    name: lading_capture
+  shared:
+    name: lading_shared
