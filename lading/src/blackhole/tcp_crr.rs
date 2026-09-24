@@ -1,9 +1,10 @@
-//! TCP request/response (`tcp_rr`) blackhole - the server side.
+//! TCP connect/request/response (`tcp_crr`) blackhole - the server side.
 //! Based on <https://github.com/google/neper>
 //!
 //! Listens for incoming connections and, for each flow, reads a fixed-size
-//! request then writes a fixed-size response, repeating until the flow closes
-//! or lading shuts down.
+//! request then writes a fixed-size response. The CRR client closes the
+//! connection after each response; the server side is identical to `tcp_rr`
+//! and delegates to the same shared machinery.
 //!
 //! The event-loop machinery lives in [`crate::neper::rr`]; this module is a
 //! thin wrapper that supplies configuration.
@@ -15,6 +16,7 @@
 //! `responses_sent`: Completed response writes
 //! `bytes_received`: Request bytes read
 //! `bytes_written`: Response bytes sent
+//! `connections_closed`: Flow removals (client close + I/O errors)
 
 use std::net::{IpAddr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroUsize};
@@ -50,7 +52,7 @@ const fn default_true() -> bool {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-/// Configuration for the `tcp_rr` blackhole.
+/// Configuration for the `tcp_crr` blackhole.
 pub struct Config {
     /// IP address to bind on.
     pub addr: IpAddr,
@@ -64,7 +66,7 @@ pub struct Config {
     /// with an eBPF program for load balancing.
     #[serde(default = "default_nonzero_u16")]
     pub threads: NonZeroU16,
-    /// Total number of TCP flows the generator should open.
+    /// Total number of TCP flows the generator should open (neper `-F`).
     /// Default 1. Sent to the generator over the control connection at
     /// startup; the generator does not configure this independently.
     #[serde(default = "default_nonzero_u16")]
@@ -79,13 +81,14 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub no_delay: bool,
     /// Listener backlog (pending-connection queue length) passed to `listen(2)`.
-    /// Default 1024.
+    /// Default 1024. CRR workloads benefit from a larger backlog to absorb
+    /// connect bursts.
     #[serde(default = "default_backlog")]
     pub backlog: i32,
 }
 
 #[derive(thiserror::Error, Debug)]
-/// Errors produced by [`TcpRr`].
+/// Errors produced by [`TcpCrr`].
 pub enum Error {
     /// Shared neper-style request/response error.
     #[error(transparent)]
@@ -93,20 +96,20 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-/// The `tcp_rr` blackhole (server side).
-pub struct TcpRr {
+/// The `tcp_crr` blackhole (server side).
+pub struct TcpCrr {
     config: Config,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
 
-impl TcpRr {
-    /// Create a new [`TcpRr`] blackhole instance.
+impl TcpCrr {
+    /// Create a new [`TcpCrr`] blackhole instance.
     #[must_use]
     pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
-            ("component_name".to_string(), "tcp_rr".to_string()),
+            ("component_name".to_string(), "tcp_crr".to_string()),
         ];
         if let Some(id) = general.id {
             metric_labels.push(("id".to_string(), id));
@@ -133,9 +136,9 @@ impl TcpRr {
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,
             backlog: self.config.backlog,
-            mode: Mode::Rr,
+            mode: Mode::Crr,
         };
-        rr::run_server(params, self.metric_labels, self.shutdown, "tcp_rr").await?;
+        rr::run_server(params, self.metric_labels, self.shutdown, "tcp_crr").await?;
         Ok(())
     }
 }

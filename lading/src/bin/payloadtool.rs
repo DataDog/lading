@@ -486,6 +486,12 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             }
             unimplemented!("Kubernetes not supported")
         }
+        generator::Inner::TcpCrr(_) => {
+            if args.fingerprint {
+                return Ok(None);
+            }
+            unimplemented!("TcpCrr not supported")
+        }
         generator::Inner::TcpRr(_) => {
             if args.fingerprint {
                 return Ok(None);
