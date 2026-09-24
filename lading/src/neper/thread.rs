@@ -3,6 +3,7 @@
 //! Provides shutdown flag management, flow distribution, and thread
 //! spawning/joining utilities.
 
+use std::io;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread::{self, JoinHandle};
@@ -45,15 +46,17 @@ pub(crate) fn join_all<T>(handles: Vec<JoinHandle<T>>) -> Result<Vec<T>, ()> {
 }
 
 /// Spawn a named OS thread running `f`.
-pub(crate) fn spawn_named<F, T>(name: &str, f: F) -> JoinHandle<T>
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if the OS refuses to create the thread,
+/// for instance when the process thread limit is reached.
+pub(crate) fn spawn_named<F, T>(name: &str, f: F) -> io::Result<JoinHandle<T>>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    thread::Builder::new()
-        .name(name.to_string())
-        .spawn(f)
-        .expect("failed to spawn thread")
+    thread::Builder::new().name(name.to_string()).spawn(f)
 }
 
 #[cfg(test)]

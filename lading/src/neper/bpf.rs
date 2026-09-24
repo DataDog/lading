@@ -5,7 +5,7 @@
 //!
 //! The program is loaded via the `bpf()` syscall and attached to a listener
 //! socket with `SO_ATTACH_REUSEPORT_EBPF`. Only the first socket in the
-//! reuseport group needs the program attached — the kernel applies it to the
+//! reuseport group needs the program attached - the kernel applies it to the
 //! entire group.
 
 #![allow(
@@ -64,7 +64,7 @@ const BPF_FUNC_GET_PRANDOM_U32: i32 = 7;
 const BPF_PROG_LOAD: libc::c_int = 5;
 const BPF_PROG_TYPE_SOCKET_FILTER: u32 = 1;
 
-// bpf_attr union for BPF_PROG_LOAD — only the fields we need.
+// bpf_attr union for BPF_PROG_LOAD - only the fields we need.
 #[repr(C)]
 struct BpfAttrProgLoad {
     prog_type: u32,

@@ -11,12 +11,13 @@ use std::net::{self, SocketAddr};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::neper::bpf;
 use crate::neper::flow::{self, Action, Flow, FlowMap};
@@ -38,12 +39,42 @@ pub enum Error {
         #[source]
         source: Box<std::io::Error>,
     },
+    /// A socket setup step failed. Names the operation, since a bare OS
+    /// message cannot say which of the setup calls went wrong.
+    #[error("Failed to {operation} for {addr}: {source}")]
+    Socket {
+        /// The operation that failed, for instance "set `SO_REUSEADDR` on
+        /// listener socket".
+        operation: &'static str,
+        /// Address the socket serves.
+        addr: SocketAddr,
+        /// Underlying IO error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// An event loop setup step failed. Named for the same reason as
+    /// [`Error::Socket`]: the OS message alone cannot say which call failed.
+    #[error("Failed to {operation} for {addr}: {source}")]
+    Poll {
+        /// The operation that failed, for instance "register a flow with the
+        /// poll registry".
+        operation: &'static str,
+        /// Address the event loop serves.
+        addr: SocketAddr,
+        /// Underlying IO error.
+        #[source]
+        source: Box<std::io::Error>,
+    },
     /// A worker thread panicked.
     #[error("Worker thread panicked")]
     ThreadPanicked,
     /// Invalid configuration.
     #[error("invalid config: {0}")]
     Config(String),
+    /// The shutdown signal arrived before startup finished. Both halves report
+    /// this the same way so a stopped run fails identically on either side.
+    #[error("Shutdown before {0}")]
+    ShutdownDuringStartup(String),
 }
 
 /// Which neper-style protocol the client is driving.
@@ -133,6 +164,62 @@ const LISTENER_TOKEN: Token = Token(0);
 /// 2 bytes after connecting. Internal protocol - no magic / version byte.
 const HANDSHAKE_LEN: usize = 2;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the generator waits for the blackhole's control port to appear.
+const CONTROL_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Handle to a worker or metrics OS thread. Threads report fatal errors by
+/// returning them; [`join_workers`] surfaces the first one.
+type WorkerHandle = JoinHandle<Result<(), Error>>;
+
+/// Join every handle, then report the first failure.
+///
+/// All handles are joined before returning, so no thread is left detached
+/// even when an earlier one failed. A panic takes precedence over a returned
+/// error because it means the thread's state is unknown.
+fn join_workers(handles: Vec<WorkerHandle>) -> Result<(), Error> {
+    let results = thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+    for result in results {
+        result?;
+    }
+    Ok(())
+}
+
+/// Signal shutdown, join every handle, and return `err`.
+///
+/// Used on error paths so a failure in the async task never leaves worker
+/// threads detached. `err` is the root cause and is what gets returned; any
+/// error surfaced while unwinding is logged instead, since it is almost
+/// always a consequence of the first.
+fn shutdown_and_join(err: Error, shutdown_flag: &AtomicBool, handles: Vec<WorkerHandle>) -> Error {
+    shutdown_flag.store(true, Relaxed);
+    if let Err(join_err) = join_workers(handles) {
+        warn!("worker error while shutting down after \"{err}\": {join_err}");
+    }
+    err
+}
+
+/// Wait for either the shutdown signal or the first worker failure.
+///
+/// Without the failure arm a worker that dies mid-run goes unnoticed until the
+/// join after `shutdown` fires, so an experiment that generates no load still
+/// burns its full duration before reporting the error. The channel only wakes
+/// this task; the error itself still travels back through the `JoinHandle`, so
+/// [`join_workers`] remains the single source of truth for what went wrong.
+async fn wait_for_shutdown_or_failure(
+    shutdown: lading_signal::Watcher,
+    fail_rx: &mut mpsc::UnboundedReceiver<()>,
+) {
+    tokio::select! {
+        () = shutdown.recv() => info!("shutdown signal received"),
+        msg = fail_rx.recv() => {
+            if msg.is_some() {
+                error!("worker thread reported a fatal error, aborting run");
+            } else {
+                error!("all worker threads exited early, aborting run");
+            }
+        },
+    }
+}
 
 /// Run the neper-style client (generator side).
 ///
@@ -144,9 +231,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// # Errors
 ///
-/// Returns an error if configuration is invalid, the blackhole control port
-/// is never reachable, or a worker thread panics.
-#[allow(clippy::too_many_lines)]
+/// Returns an error if configuration is invalid, the blackhole control port is
+/// never reachable, shutdown arrives before startup finishes, or a worker
+/// thread reports a fatal error or panics.
 pub(crate) async fn run_client(
     params: ClientParams,
     metric_labels: Vec<(String, String)>,
@@ -154,14 +241,6 @@ pub(crate) async fn run_client(
     thread_prefix: &'static str,
 ) -> Result<(), Error> {
     let shutdown_flag = thread::new_shutdown_flag();
-
-    // Wait for the blackhole to be ready by connecting to its control port,
-    // then read the flow count over that connection.
-    info!(
-        "waiting for blackhole control port at {}",
-        params.control_addr
-    );
-    let deadline = Instant::now() + Duration::from_secs(300);
     {
         let flag = Arc::clone(&shutdown_flag);
         let shutdown = shutdown.clone();
@@ -170,40 +249,8 @@ pub(crate) async fn run_client(
             flag.store(true, Relaxed);
         });
     }
-    let flows: u16 = loop {
-        if shutdown_flag.load(Relaxed) {
-            return Err(Error::Io(io::Error::new(
-                ErrorKind::ConnectionRefused,
-                format!(
-                    "shutdown before blackhole control port {} became reachable",
-                    params.control_addr
-                ),
-            )));
-        }
-        match generator_connect_blocking(params.control_addr) {
-            Ok(mut conn) => {
-                conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
-                    .expect("set_read_timeout on connected TcpStream must succeed");
-                let mut buf = [0u8; HANDSHAKE_LEN];
-                conn.read_exact(&mut buf)?;
-                let received = u16::from_be_bytes(buf);
-                info!("blackhole ready, {received} flows to open");
-                break received;
-            }
-            Err(e) => {
-                if Instant::now() >= deadline {
-                    return Err(Error::Io(io::Error::new(
-                        ErrorKind::TimedOut,
-                        format!(
-                            "blackhole control port {} not reachable after 5 minutes: {e}",
-                            params.control_addr
-                        ),
-                    )));
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    };
+
+    let flows = wait_for_blackhole(params.control_addr, &shutdown_flag)?;
 
     if params.threads > flows {
         return Err(Error::Config(format!(
@@ -214,33 +261,38 @@ pub(crate) async fn run_client(
 
     let flow_dist = thread::distribute_flows(flows, params.threads);
 
-    let thread_metrics = Arc::new(
-        (0..params.threads)
-            .map(|_| ThreadMetrics::new())
-            .collect::<Vec<_>>(),
-    );
+    let thread_metrics: Arc<[ThreadMetrics]> =
+        (0..params.threads).map(|_| ThreadMetrics::new()).collect();
 
-    let metrics_handle = {
+    // The metrics handle goes in first so every later error path joins it
+    // along with the workers.
+    let mut worker_handles: Vec<WorkerHandle> = Vec::with_capacity(params.threads as usize + 1);
+    worker_handles.push({
         let tm = Arc::clone(&thread_metrics);
         let labels = metric_labels.clone();
         let flag = Arc::clone(&shutdown_flag);
         thread::spawn_named(&format!("{thread_prefix}-metrics"), move || {
             metrics::run_metrics_thread(&tm, &labels, &flag);
-        })
-    };
+            Ok(())
+        })?
+    });
+
+    // Workers announce a fatal error here so the run can be aborted promptly
+    // rather than at the join below.
+    let (fail_tx, mut fail_rx) = mpsc::unbounded_channel::<()>();
 
     let data_addr = params.data_addr;
     let request_size = params.request_size;
     let response_size = params.response_size;
     let no_delay = params.no_delay;
     let mode = params.mode;
-    let mut worker_handles = Vec::with_capacity(params.threads as usize);
     for i in 0..params.threads {
         let thread_flows = flow_dist[i as usize];
         let flag = Arc::clone(&shutdown_flag);
         let tm = Arc::clone(&thread_metrics);
-        let handle = thread::spawn_named(&format!("{thread_prefix}-client-{i}"), move || {
-            client_thread_main(
+        let fail = fail_tx.clone();
+        let spawned = thread::spawn_named(&format!("{thread_prefix}-client-{i}"), move || {
+            let result = client_thread_main(
                 data_addr,
                 thread_flows,
                 request_size,
@@ -250,18 +302,98 @@ pub(crate) async fn run_client(
                 &flag,
                 &tm[i as usize],
             );
+            if let Err(ref e) = result {
+                error!("client thread {i} failed: {e}");
+                // Best effort: a closed receiver means the async side is
+                // already joining, which surfaces this error anyway.
+                let _ = fail.send(());
+            }
+            result
         });
-        worker_handles.push(handle);
+        match spawned {
+            Ok(handle) => worker_handles.push(handle),
+            Err(e) => {
+                return Err(shutdown_and_join(
+                    Error::Io(e),
+                    &shutdown_flag,
+                    worker_handles,
+                ));
+            }
+        }
     }
 
-    shutdown.recv().await;
-    info!("shutdown signal received");
+    // Drop our own copy so fail_rx reports None once every worker is gone.
+    drop(fail_tx);
+
+    wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
     shutdown_flag.store(true, Relaxed);
 
-    worker_handles.push(metrics_handle);
-    thread::join_all(worker_handles).map_err(|()| Error::ThreadPanicked)?;
+    join_workers(worker_handles)?;
 
     Ok(())
+}
+
+/// Wait for the blackhole to be ready by connecting to its control port, then
+/// read the flow count over that connection.
+///
+/// Retries the whole handshake, not the connect alone, until the blackhole
+/// appears. Gives up after five minutes or as soon as shutdown fires.
+///
+/// # Errors
+///
+/// Returns [`Error::ShutdownDuringStartup`] if shutdown fires first, or
+/// [`Error::Io`] if the handshake does not complete before the deadline.
+fn wait_for_blackhole(control_addr: SocketAddr, shutdown_flag: &AtomicBool) -> Result<u16, Error> {
+    info!("waiting for blackhole control port at {control_addr}");
+    let deadline = Instant::now() + CONTROL_CONNECT_TIMEOUT;
+    loop {
+        if shutdown_flag.load(Relaxed) {
+            return Err(Error::ShutdownDuringStartup(format!(
+                "blackhole control port {control_addr} became reachable"
+            )));
+        }
+        match try_control_handshake(control_addr) {
+            Ok(flows) => {
+                info!("blackhole ready, {flows} flows to open");
+                return Ok(flows);
+            }
+            Err(e) => {
+                if Instant::now() >= deadline {
+                    return Err(Error::Io(io::Error::new(
+                        ErrorKind::TimedOut,
+                        format!(
+                            "control handshake with blackhole at {control_addr} did not complete within {}s: {e}",
+                            CONTROL_CONNECT_TIMEOUT.as_secs()
+                        ),
+                    )));
+                }
+                trace!("control handshake attempt failed: {e}");
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+/// Make one attempt at the control handshake: connect to the blackhole, then
+/// read the flow count it writes.
+///
+/// Connect, timeout and read failures are all transient during startup, so
+/// they share one return type and the caller retries every one of them until
+/// its deadline. A peer that accepts and then resets before writing the two
+/// bytes is the case that matters: the blackhole drops its control listener
+/// once any peer completes the handshake, which resets connections still
+/// queued behind it.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from `connect`, `set_read_timeout` or
+/// `read_exact`.
+fn try_control_handshake(control_addr: SocketAddr) -> io::Result<u16> {
+    let mut conn = net::TcpStream::connect(control_addr)?;
+    conn.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let mut buf = [0u8; HANDSHAKE_LEN];
+    conn.read_exact(&mut buf)?;
+    Ok(u16::from_be_bytes(buf))
 }
 
 /// `IP_LOCAL_PORT_RANGE` socket option (Linux >= 6.3). Not yet exposed by the
@@ -287,6 +419,11 @@ static PORT_RANGE_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
 /// Since port ranges are specific to network namespaces, this should not cause issues
 /// for other daemons coming online on lower port ranges when lading is launched in its own
 /// namespace.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if `setsockopt` fails for a reason other
+/// than the option being unsupported by the running kernel.
 fn set_local_port_range(socket: &socket2::Socket) -> io::Result<()> {
     let value: u32 = (u32::from(LOCAL_PORT_HIGH) << 16) | u32::from(LOCAL_PORT_LOW);
     // SAFETY: `socket` owns a valid fd for the duration of the borrow, and we
@@ -327,6 +464,11 @@ fn set_local_port_range(socket: &socket2::Socket) -> io::Result<()> {
 
 /// Create a TCP socket for the generator with its local port range constrained
 /// to `[LOCAL_PORT_LOW, LOCAL_PORT_HIGH]`.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if the socket cannot be created or the
+/// port range cannot be set.
 fn new_generator_socket(addr: SocketAddr) -> io::Result<socket2::Socket> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
@@ -341,6 +483,10 @@ fn new_generator_socket(addr: SocketAddr) -> io::Result<socket2::Socket> {
 ///
 /// The kernel picks the source port from the constrained ephemeral range (see
 /// [`set_local_port_range`]); the generator does not manage source ports itself.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from socket creation or `connect`.
 fn generator_connect_blocking(addr: SocketAddr) -> io::Result<net::TcpStream> {
     let socket = new_generator_socket(addr)?;
     socket.connect(&addr.into())?;
@@ -353,6 +499,11 @@ fn generator_connect_blocking(addr: SocketAddr) -> io::Result<net::TcpStream> {
 ///
 /// The kernel picks the source port from the constrained ephemeral range (see
 /// [`set_local_port_range`]); the generator does not manage source ports itself.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from socket creation or `connect`. An
+/// in-progress connect is not an error.
 fn generator_connect_nonblocking(addr: SocketAddr) -> io::Result<TcpStream> {
     let socket = new_generator_socket(addr)?;
     socket.set_nonblocking(true)?;
@@ -377,8 +528,8 @@ fn client_thread_main(
     mode: Mode,
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
-) {
-    let mut poll = Poll::new().expect("failed to create mio::Poll");
+) -> Result<(), Error> {
+    let mut poll = Poll::new().map_err(poll_err("create the mio Poll", addr))?;
     let mut events = Events::with_capacity(num_flows as usize);
     let request_buf = vec![0u8; request_size];
     let mut response_buf = vec![0u8; response_size];
@@ -392,12 +543,12 @@ fn client_thread_main(
                 let _ = std_stream.set_nodelay(no_delay);
                 std_stream
                     .set_nonblocking(true)
-                    .expect("failed to set nonblocking");
+                    .map_err(socket_err("set O_NONBLOCK on flow socket", addr))?;
                 let mut stream = TcpStream::from_std(std_stream);
                 next_token += 1;
                 poll.registry()
                     .register(&mut stream, token, Interest::WRITABLE)
-                    .expect("failed to register flow");
+                    .map_err(poll_err("register a flow with the poll registry", addr))?;
                 flows
                     .insert(Flow {
                         stream,
@@ -409,7 +560,7 @@ fn client_thread_main(
                 metrics.connections_initiated.add(1);
             }
             Err(e) => {
-                warn!("connection to {addr} failed: {e}");
+                trace!("connection to {addr} failed: {e}");
                 metrics.connections_failed.add(1);
             }
         }
@@ -426,14 +577,25 @@ fn client_thread_main(
                 continue;
             };
             let action = handle_client_event(fl, mode, &request_buf, &mut response_buf, metrics);
-            apply_client_action(action, token, &mut flows, &poll, addr, no_delay, metrics);
+            apply_client_action(action, token, &mut flows, &poll, addr, no_delay, metrics)?;
         }
     }
+
+    Ok(())
 }
 
 /// Apply a [`ClientAction`] to the flow map. Handles the CRR
 /// reconnect transition (deregister old stream, open a new
 /// non-blocking connect, reregister with the same token).
+///
+/// # Errors
+///
+/// Returns [`Error::Poll`] if the registry rejects a reregister or deregister
+/// of a live, owned flow, which means this thread's event loop can no longer
+/// be driven correctly. A reconnect that fails to connect is a workload event
+/// rather than a fatal one: it is counted in `connections_failed` and the flow
+/// is dropped.
+#[allow(clippy::too_many_arguments)]
 fn apply_client_action(
     action: ClientAction,
     token: Token,
@@ -442,22 +604,26 @@ fn apply_client_action(
     addr: SocketAddr,
     no_delay: bool,
     metrics: &ThreadMetrics,
-) {
+) -> Result<(), Error> {
     let registry = poll.registry();
     match action {
         ClientAction::Continue => {}
         ClientAction::Reregister(interest) => {
             if let Some(flow) = flows.get_mut(token) {
-                let _ = registry.reregister(&mut flow.stream, flow.token, interest);
+                registry
+                    .reregister(&mut flow.stream, flow.token, interest)
+                    .map_err(poll_err("reregister a flow with the poll registry", addr))?;
             }
         }
         ClientAction::Reconnect => {
             // Take the flow out of the map so the old socket is fully closed
             // before the new connection is opened.
             let Some(mut flow) = flows.remove(token) else {
-                return;
+                return Ok(());
             };
-            let _ = registry.deregister(&mut flow.stream);
+            registry
+                .deregister(&mut flow.stream)
+                .map_err(poll_err("deregister a flow from the poll registry", addr))?;
             {
                 // Abortive close: SO_LINGER with a zero timeout makes the drop
                 // below emit a RST instead of a FIN, so the socket skips
@@ -478,10 +644,10 @@ fn apply_client_action(
                             warn!("failed to set TCP_NODELAY on reconnect: {e}");
                         }
                     }
-                    if let Err(e) = registry.register(&mut new_stream, token, Interest::WRITABLE) {
-                        warn!("reconnect register failed: {e}");
-                        metrics.connections_failed.add(1);
-                    } else if let Err(err) = flows.insert(Flow {
+                    registry
+                        .register(&mut new_stream, token, Interest::WRITABLE)
+                        .map_err(poll_err("register a flow with the poll registry", addr))?;
+                    if let Err(err) = flows.insert(Flow {
                         stream: new_stream,
                         token,
                         state: ClientState::Connecting,
@@ -492,7 +658,7 @@ fn apply_client_action(
                     }
                 }
                 Err(e) => {
-                    warn!("reconnect to {addr} failed: {e}");
+                    trace!("reconnect to {addr} failed: {e}");
                     metrics.connections_failed.add(1);
                 }
             }
@@ -500,7 +666,9 @@ fn apply_client_action(
         ClientAction::Remove => {
             metrics.connections_closed.add(1);
             if let Some(mut flow) = flows.remove(token) {
-                let _ = registry.deregister(&mut flow.stream);
+                registry
+                    .deregister(&mut flow.stream)
+                    .map_err(poll_err("deregister a flow from the poll registry", addr))?;
                 // Abortive close (RST) so the source port skips TIME_WAIT and
                 // is reclaimed immediately rather than lingering 2*MSL.
                 let sock = socket2::SockRef::from(&flow.stream);
@@ -511,6 +679,7 @@ fn apply_client_action(
             }
         }
     }
+    Ok(())
 }
 
 fn handle_client_event(
@@ -533,12 +702,12 @@ fn handle_client_event(
                 // fall through
             }
             Ok(Some(e)) => {
-                warn!("connect failed: {e}");
+                trace!("connect failed: {e}");
                 metrics.connections_failed.add(1);
                 return ClientAction::Reconnect;
             }
             Err(e) => {
-                warn!("take_error failed: {e}");
+                trace!("take_error failed: {e}");
                 metrics.connections_failed.add(1);
                 return ClientAction::Reconnect;
             }
@@ -564,7 +733,7 @@ fn handle_client_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
-                    warn!("write error: {e}");
+                    trace!("write error: {e}");
                     ClientAction::Remove
                 }
             }
@@ -576,8 +745,6 @@ fn handle_client_event(
                 Ok(n) => {
                     flow.xfer -= n;
                     if flow.xfer == 0 {
-                        flow.xfer = request_buf.len();
-                        flow.state = ClientState::SendRequest;
                         metrics.responses_received.add(1);
                         metrics.bytes_read.add(response_buf.len() as u64);
                         match mode {
@@ -594,7 +761,7 @@ fn handle_client_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
-                    warn!("read error: {e}");
+                    trace!("read error: {e}");
                     ClientAction::Remove
                 }
             }
@@ -613,12 +780,9 @@ fn handle_client_event(
 ///
 /// # Errors
 ///
-/// Returns an error if binding fails or a worker thread panics.
-///
-/// # Panics
-///
-/// Panics if the ready-barrier tokio task is cancelled.
-#[allow(clippy::too_many_lines)]
+/// Returns an error if binding fails, if shutdown arrives before the generator
+/// connects, if a worker thread reports a fatal error, or if a worker thread
+/// panics.
 pub(crate) async fn run_server(
     params: ServerParams,
     metric_labels: Vec<(String, String)>,
@@ -628,33 +792,117 @@ pub(crate) async fn run_server(
     let shutdown_flag = thread::new_shutdown_flag();
     let num_threads = params.threads;
 
-    let thread_metrics = Arc::new(
-        (0..num_threads)
-            .map(|_| ThreadMetrics::new())
-            .collect::<Vec<_>>(),
-    );
+    let thread_metrics: Arc<[ThreadMetrics]> =
+        (0..num_threads).map(|_| ThreadMetrics::new()).collect();
 
-    let metrics_handle = {
+    // Workers announce a fatal error here so the run can be aborted promptly
+    // rather than at the join below.
+    let (fail_tx, mut fail_rx) = mpsc::unbounded_channel::<()>();
+
+    // Listeners first: until they are up there is nothing to report on, and
+    // nothing to unwind if binding fails.
+    let mut handles = prepare_data_listeners(
+        &params,
+        &shutdown_flag,
+        &thread_metrics,
+        &fail_tx,
+        thread_prefix,
+    )
+    .await?;
+    // Drop our own copy so fail_rx reports None once every worker is gone.
+    drop(fail_tx);
+
+    let metrics_spawn = {
         let tm = Arc::clone(&thread_metrics);
         let labels = metric_labels.clone();
         let flag = Arc::clone(&shutdown_flag);
         thread::spawn_named(&format!("{thread_prefix}-bh-metrics"), move || {
             metrics::run_metrics_thread(&tm, &labels, &flag);
+            Ok(())
         })
     };
+    match metrics_spawn {
+        Ok(handle) => handles.push(handle),
+        Err(e) => return Err(shutdown_and_join(Error::Io(e), &shutdown_flag, handles)),
+    }
 
-    // Pre-build thread 0's listener here so the BPF program is attached to the
-    // reuseport group before any other thread calls bind(). This removes the
-    // need for a cross-thread BPF barrier - if bind fails or panics, it
-    // propagates as an error directly from this task.
+    // All data listeners are up. Open control port so the generator can
+    // connect and know we're ready. From here on the workers are running, so
+    // every error path has to signal and join them before returning.
+    let control_addr = params.control_addr;
+    let control_listener = match net::TcpListener::bind(control_addr) {
+        Ok(listener) => listener,
+        Err(source) => {
+            let err = Error::Bind {
+                addr: control_addr,
+                source: Box::new(source),
+            };
+            return Err(shutdown_and_join(err, &shutdown_flag, handles));
+        }
+    };
+    if let Err(e) = control_listener.set_nonblocking(true) {
+        return Err(shutdown_and_join(Error::Io(e), &shutdown_flag, handles));
+    }
+    info!("control port listening on {control_addr}, waiting for generator");
+
+    let flag = Arc::clone(&shutdown_flag);
+    let shutdown_clone = shutdown.clone();
+    tokio::spawn(async move {
+        shutdown_clone.recv().await;
+        flag.store(true, Relaxed);
+    });
+
+    if let Err(e) = wait_for_generator(
+        &control_listener,
+        control_addr,
+        params.flows,
+        &shutdown_flag,
+    )
+    .await
+    {
+        return Err(shutdown_and_join(e, &shutdown_flag, handles));
+    }
+    drop(control_listener);
+
+    wait_for_shutdown_or_failure(shutdown, &mut fail_rx).await;
+    shutdown_flag.store(true, Relaxed);
+
+    join_workers(handles)?;
+
+    Ok(())
+}
+
+/// Spawn the data-listener worker threads and wait until every one has bound
+/// its listener.
+///
+/// Thread 0's listener is built here, before any worker starts, so the
+/// reuseport eBPF program is attached to the group before any other thread
+/// calls `bind()`. That removes the need for a cross-thread BPF barrier - if
+/// bind fails or panics it propagates as an error directly from this task.
+///
+/// # Errors
+///
+/// Returns [`Error::ThreadPanicked`] if a worker dies before signalling
+/// ready. The remaining workers are signalled and joined before returning.
+async fn prepare_data_listeners(
+    params: &ServerParams,
+    shutdown_flag: &thread::ShutdownFlag,
+    thread_metrics: &Arc<[ThreadMetrics]>,
+    fail_tx: &mpsc::UnboundedSender<()>,
+    thread_prefix: &'static str,
+) -> Result<Vec<WorkerHandle>, Error> {
+    let num_threads = params.threads;
     let binding_addr = params.data_addr;
-    let thread0_listener = if num_threads > 1 {
+    let flows = params.flows;
+    let mode = params.mode;
+
+    let mut thread0_listener = if num_threads > 1 {
         Some(create_listener(
             0,
             num_threads,
             binding_addr,
             params.backlog,
-        ))
+        )?)
     } else {
         None
     };
@@ -666,23 +914,22 @@ pub(crate) async fn run_server(
     let (ready_tx, mut ready_rx) = mpsc::unbounded_channel::<()>();
 
     let mut handles = Vec::with_capacity(num_threads as usize);
-    let mut thread0_listener = thread0_listener;
-    let flows = params.flows;
     for i in 0..num_threads {
         let request_size = params.request_size;
         let response_size = params.response_size;
         let no_delay = params.no_delay;
         let backlog = params.backlog;
-        let flag = Arc::clone(&shutdown_flag);
-        let tm = Arc::clone(&thread_metrics);
+        let flag = Arc::clone(shutdown_flag);
+        let tm = Arc::clone(thread_metrics);
         let prebuilt = if i == 0 {
             thread0_listener.take()
         } else {
             None
         };
         let tx = ready_tx.clone();
-        let handle = thread::spawn_named(&format!("{thread_prefix}-server-{i}"), move || {
-            server_thread_main(
+        let fail = fail_tx.clone();
+        let spawned = thread::spawn_named(&format!("{thread_prefix}-server-{i}"), move || {
+            let result = server_thread_main(
                 i,
                 num_threads,
                 binding_addr,
@@ -695,65 +942,72 @@ pub(crate) async fn run_server(
                 &flag,
                 &tm[i as usize],
                 tx,
-                params.mode,
+                mode,
             );
+            if let Err(ref e) = result {
+                error!("server thread {i} failed: {e}");
+                // Best effort: a closed receiver means the async side is
+                // already joining, which surfaces this error anyway.
+                let _ = fail.send(());
+            }
+            result
         });
-        handles.push(handle);
+        match spawned {
+            Ok(handle) => handles.push(handle),
+            Err(e) => {
+                drop(ready_tx);
+                return Err(shutdown_and_join(Error::Io(e), shutdown_flag, handles));
+            }
+        }
     }
     // Drop our own copy so the channel closes when all worker threads exit.
     drop(ready_tx);
 
-    // Wait for each thread to signal ready. If a sender drops without
-    // signaling (thread panicked), recv() eventually returns None.
+    // Wait for each thread to signal ready. A sender that drops without
+    // signaling means its thread exited early, so recv() returns None instead
+    // of hanging. Joining then recovers why it exited.
     for _ in 0..num_threads {
         if ready_rx.recv().await.is_none() {
             shutdown_flag.store(true, Relaxed);
-            thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
+            join_workers(handles)?;
             return Err(Error::ThreadPanicked);
         }
     }
 
-    // All data listeners are up. Open control port so the generator can
-    // connect and know we're ready.
-    let control_addr = params.control_addr;
-    let control_listener = net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
-        addr: control_addr,
-        source: Box::new(source),
-    })?;
-    control_listener
-        .set_nonblocking(true)
-        .expect("failed to set control listener nonblocking");
-    info!("control port listening on {control_addr}, waiting for generator");
+    Ok(handles)
+}
 
-    handles.push(metrics_handle);
-
-    let flag = Arc::clone(&shutdown_flag);
-    let shutdown_clone = shutdown.clone();
-    tokio::spawn(async move {
-        shutdown_clone.recv().await;
-        flag.store(true, Relaxed);
-    });
-    let mut generator_connected = false;
-    let flows_bytes = params.flows.to_be_bytes();
+/// Wait for the generator to connect to the control port, then hand it the
+/// flow count over that connection.
+///
+/// # Errors
+///
+/// Returns [`Error::ShutdownDuringStartup`] if shutdown fires before any
+/// generator connects, matching how the client reports the same event. Also
+/// returns an error if the handshake write fails or `accept` fails for a
+/// reason other than `WouldBlock`.
+async fn wait_for_generator(
+    control_listener: &net::TcpListener,
+    control_addr: SocketAddr,
+    flows: u16,
+    shutdown_flag: &AtomicBool,
+) -> Result<(), Error> {
+    let flows_bytes = flows.to_be_bytes();
     loop {
         if shutdown_flag.load(Relaxed) {
-            info!("shutdown before generator connected");
-            break;
+            return Err(Error::ShutdownDuringStartup(
+                "the generator connected to the control port".to_string(),
+            ));
         }
         match control_listener.accept() {
             Ok((mut conn, peer)) => {
                 // accept(2) on Linux returns a blocking socket regardless of
                 // the listener's O_NONBLOCK; a small write_timeout guards
                 // against a generator that connects but never reads.
-                conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
-                    .expect("set_write_timeout on accepted TcpStream must succeed");
+                conn.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
                 conn.write_all(&flows_bytes)?;
-                info!(
-                    "generator connected from {peer}, sent flows={}, data threads running",
-                    params.flows
-                );
-                generator_connected = true;
-                break;
+                info!("generator connected from {peer}, sent flows={flows}, data threads running");
+                return Ok(());
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -766,48 +1020,65 @@ pub(crate) async fn run_server(
             }
         }
     }
-    drop(control_listener);
+}
 
-    if generator_connected {
-        shutdown.recv().await;
-        info!("shutdown signal received");
+/// Build a `map_err` closure that names the failed socket operation.
+fn socket_err(operation: &'static str, addr: SocketAddr) -> impl Fn(io::Error) -> Error {
+    move |source| Error::Socket {
+        operation,
+        addr,
+        source: Box::new(source),
     }
-    shutdown_flag.store(true, Relaxed);
+}
 
-    thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
-
-    Ok(())
+/// Build a `map_err` closure that names the failed event loop operation.
+fn poll_err(operation: &'static str, addr: SocketAddr) -> impl Fn(io::Error) -> Error {
+    move |source| Error::Poll {
+        operation,
+        addr,
+        source: Box::new(source),
+    }
 }
 
 /// Create a listener socket. When `num_threads` > 1, sets `SO_REUSEPORT`
 /// and (for thread 0) attaches the reuseport eBPF program.
+///
+/// # Errors
+///
+/// Returns [`Error::Bind`] if `binding_addr` cannot be bound, or
+/// [`Error::Socket`] if socket creation, any socket option, or `listen`
+/// fails. The [`Error::Socket`] message names the operation.
 fn create_listener(
     thread_index: u16,
     num_threads: u16,
     binding_addr: SocketAddr,
     backlog: i32,
-) -> net::TcpListener {
+) -> Result<net::TcpListener, Error> {
     let domain = if binding_addr.is_ipv4() {
         socket2::Domain::IPV4
     } else {
         socket2::Domain::IPV6
     };
     let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
-        .expect("failed to create socket");
-    socket
-        .set_nonblocking(true)
-        .expect("failed to set nonblocking");
-    socket
-        .set_cloexec(true)
-        .expect("failed to set close-on-exec");
-    socket
-        .set_reuse_address(true)
-        .expect("failed to set SO_REUSEADDR");
+        .map_err(socket_err("create listener socket", binding_addr))?;
+    socket.set_nonblocking(true).map_err(socket_err(
+        "set O_NONBLOCK on listener socket",
+        binding_addr,
+    ))?;
+    socket.set_cloexec(true).map_err(socket_err(
+        "set FD_CLOEXEC on listener socket",
+        binding_addr,
+    ))?;
+    socket.set_reuse_address(true).map_err(socket_err(
+        "set SO_REUSEADDR on listener socket",
+        binding_addr,
+    ))?;
 
     if num_threads > 1 {
-        socket
-            .set_reuse_port(true)
-            .expect("failed to set SO_REUSEPORT");
+        socket.set_reuse_port(true).map_err(socket_err(
+            "set SO_REUSEPORT on listener socket",
+            binding_addr,
+        ))?;
 
         if thread_index == 0 {
             match bpf::load_reuseport_ebpf(u32::from(num_threads)) {
@@ -825,10 +1096,15 @@ fn create_listener(
 
     socket
         .bind(&binding_addr.into())
-        .unwrap_or_else(|e| panic!("failed to bind to {binding_addr}: {e}"));
-    socket.listen(backlog).expect("failed to listen");
+        .map_err(|source| Error::Bind {
+            addr: binding_addr,
+            source: Box::new(source),
+        })?;
+    socket
+        .listen(backlog)
+        .map_err(socket_err("listen on listener socket", binding_addr))?;
 
-    socket.into()
+    Ok(socket.into())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -846,26 +1122,31 @@ fn server_thread_main(
     metrics: &ThreadMetrics,
     ready_tx: mpsc::UnboundedSender<()>,
     mode: Mode,
-) {
+) -> Result<(), Error> {
     // Thread 0 uses the pre-built listener (with BPF already attached); others
     // bind their own sockets that join the existing reuseport group.
-    let std_listener = prebuilt_listener
-        .unwrap_or_else(|| create_listener(thread_index, num_threads, binding_addr, backlog));
-
-    // Signal that this thread's listener is bound and ready. If this send
-    // fails the receiver has gone away (blackhole is shutting down).
-    let _ = ready_tx.send(());
-    drop(ready_tx);
+    let std_listener = match prebuilt_listener {
+        Some(listener) => listener,
+        None => create_listener(thread_index, num_threads, binding_addr, backlog)?,
+    };
 
     let mut listener = TcpListener::from_std(std_listener);
-    let mut poll = Poll::new().expect("failed to create mio::Poll");
+    let mut poll = Poll::new().map_err(poll_err("create the mio Poll", binding_addr))?;
     // Worst case under SO_REUSEPORT: every flow lands on this thread, so size
     // for the total flow count plus the listener token.
     let mut events = Events::with_capacity(num_flows as usize + 1);
 
     poll.registry()
         .register(&mut listener, LISTENER_TOKEN, Interest::READABLE)
-        .expect("failed to register listener");
+        .map_err(poll_err(
+            "register the listener with the poll registry",
+            binding_addr,
+        ))?;
+
+    // Signal that this thread's listener is bound and ready. If this send
+    // fails the receiver has gone away (blackhole is shutting down).
+    let _ = ready_tx.send(());
+    drop(ready_tx);
 
     let mut request_buf = vec![0u8; request_size];
     let response_buf = vec![0u8; response_size];
@@ -905,7 +1186,10 @@ fn server_thread_main(
                             let flow = flows.get_mut(token).expect("flow was just inserted");
                             poll.registry()
                                 .register(&mut flow.stream, token, Interest::READABLE)
-                                .expect("failed to register flow");
+                                .map_err(poll_err(
+                                    "register a flow with the poll registry",
+                                    binding_addr,
+                                ))?;
                             metrics.connections_accepted.add(1);
                         }
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
@@ -926,17 +1210,19 @@ fn server_thread_main(
                 };
                 let action =
                     handle_server_event(fl, &mut request_buf, &response_buf, metrics, mode);
-                flow::apply_action(action, token, &mut flows, poll.registry());
+                flow::apply_action(action, token, &mut flows, poll.registry())?;
             }
         }
     }
+
+    Ok(())
 }
 
 /// Set `TCP_NODELAY` on a mio [`TcpStream`] via a borrowed `socket2::SockRef`.
 fn set_nodelay_mio(stream: &TcpStream, no_delay: bool) {
     let sock = socket2::SockRef::from(stream);
     if let Err(e) = sock.set_tcp_nodelay(no_delay) {
-        warn!("failed to set TCP_NODELAY: {e}");
+        trace!("failed to set TCP_NODELAY: {e}");
     }
 }
 
@@ -969,7 +1255,7 @@ fn handle_server_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
-                    warn!("read error: {e}");
+                    trace!("read error: {e}");
                     metrics.connections_closed.add(1);
                     Action::Remove
                 }
@@ -995,7 +1281,7 @@ fn handle_server_event(
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
-                    warn!("write error: {e}");
+                    trace!("write error: {e}");
                     metrics.connections_closed.add(1);
                     Action::Remove
                 }

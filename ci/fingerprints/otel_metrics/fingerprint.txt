@@ -1,1 +1,1 @@
-otel_metrics_grpc: 1a99c0f4baf2470e547d0038dcaa6e7f134a1a31ae9dea50460e21f5e4e3a562 entropy=6.7343
+otel_metrics_grpc: 3cd72bf5b323d0482a620db2383d4f81e257a91eeb58090888bc5b2a27502b57 entropy=6.8202

@@ -22,6 +22,7 @@ pub use datadog_logs::DatadogLog;
 pub use dogstatsd::DogStatsD;
 pub use fluent::Fluent;
 pub use json::Json;
+pub use openmetrics::OpenMetrics;
 pub use opentelemetry::log::OpentelemetryLogs;
 pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
@@ -39,6 +40,7 @@ pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
 pub mod json;
+pub mod openmetrics;
 pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
@@ -73,6 +75,9 @@ pub enum Error {
     /// See [`unit::Error`]
     #[error(transparent)]
     Unit(#[from] opentelemetry::metric::unit::Error),
+    /// See [`trace_agent::v1::encoder::Error`]
+    #[error(transparent)]
+    TraceAgentV1Encoder(#[from] trace_agent::v1::encoder::Error),
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),

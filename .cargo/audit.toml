@@ -1,7 +1,8 @@
 [advisories]
 ignore = [
     "RUSTSEC-2020-0159",
-    "RUSTSEC-2026-0001",  # rkyv 0.7.46 UB in Arc/Rc - transitive via rust_decimal <- byte-unit
+    "RUSTSEC-2026-0001",  # rkyv 0.7.46 UB in Arc/Rc - optional dep of rust_decimal <- byte-unit, never compiled
+    "RUSTSEC-2026-0235",  # rkyv 0.7.46 OOB read - optional dep of rust_decimal <- byte-unit, never compiled
     "RUSTSEC-2024-0436",  # paste unmaintained - transitive via parquet
 ]
 

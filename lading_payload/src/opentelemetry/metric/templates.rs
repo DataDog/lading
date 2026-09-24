@@ -1,11 +1,16 @@
-use std::{cmp, rc::Rc};
+use std::{
+    cmp::{self, Ordering},
+    rc::Rc,
+};
 
 use opentelemetry_proto::tonic::{
-    common::v1::InstrumentationScope,
+    common::v1::{InstrumentationScope, KeyValue},
     metrics::{
         self,
         v1::{
-            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data, number_data_point,
+            ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint,
+            ResourceMetrics, ScopeMetrics, SummaryDataPoint, exponential_histogram_data_point,
+            metric::Data, number_data_point, summary_data_point,
         },
     },
     resource,
@@ -13,7 +18,7 @@ use opentelemetry_proto::tonic::{
 use prost::Message;
 use rand::{
     Rng, RngExt,
-    distr::{Distribution, StandardUniform, weighted::WeightedIndex},
+    distr::{Distribution, weighted::WeightedIndex},
 };
 use tracing::debug;
 
@@ -51,33 +56,23 @@ fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) 
     max
 }
 
-struct Ndp(NumberDataPoint);
-impl Distribution<Ndp> for StandardUniform {
-    fn sample<R>(&self, rng: &mut R) -> Ndp
-    where
-        R: Rng + ?Sized,
-    {
-        let value = match rng.random_range(0..=1) {
-            0 => number_data_point::Value::AsDouble(0.0),
-            1 => number_data_point::Value::AsInt(0),
-            _ => unreachable!(),
-        };
+fn random_number_data_point<R>(rng: &mut R, attributes: &[KeyValue]) -> NumberDataPoint
+where
+    R: Rng + ?Sized,
+{
+    let value = match rng.random_range(0..=1) {
+        0 => number_data_point::Value::AsDouble(0.0),
+        1 => number_data_point::Value::AsInt(0),
+        _ => unreachable!(),
+    };
 
-        Ndp(NumberDataPoint {
-            // NOTE absent a reason to set attributes to not-empty, it's unclear
-            // that we should.
-            attributes: Vec::new(),
-            start_time_unix_nano: 0, // epoch instant
-            time_unix_nano: rng.random(),
-            // Unclear that this needs to be set.
-            exemplars: Vec::new(),
-            // Equivalent to DoNotUse, the flag is ignored. This is discussed in
-            // the upstream OTLP protobuf definition, which we inherit from the
-            // SDK. If we ever set `value` to None this must be set to
-            // DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK
-            flags: 0,
-            value: Some(value),
-        })
+    NumberDataPoint {
+        attributes: attributes.to_vec(),
+        start_time_unix_nano: 0,
+        time_unix_nano: rng.random(),
+        exemplars: Vec::new(),
+        flags: 0,
+        value: Some(value),
     }
 }
 
@@ -112,6 +107,11 @@ impl MetricTemplateGenerator {
                 u16::from(config.metric_weights.gauge),
                 u16::from(config.metric_weights.sum_delta),
                 u16::from(config.metric_weights.sum_cumulative),
+                u16::from(config.metric_weights.histogram_delta),
+                u16::from(config.metric_weights.histogram_cumulative),
+                u16::from(config.metric_weights.exp_histogram_delta),
+                u16::from(config.metric_weights.exp_histogram_cumulative),
+                u16::from(config.metric_weights.summary),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -120,6 +120,7 @@ impl MetricTemplateGenerator {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     type Output = Metric;
     type Error = GeneratorError;
@@ -146,7 +147,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             Err(e) => Err(e)?,
         };
 
-        let name = self
+        let name_suffix = self
             .str_pool
             .of_size_range(rng, 1_u8..16)
             .ok_or(Self::Error::StringGenerate)?
@@ -175,24 +176,81 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality: 2,
                 is_monotonic: rng.random_bool(0.5),
             },
+            3 => Kind::Histogram {
+                aggregation_temporality: 1,
+            },
+            4 => Kind::Histogram {
+                aggregation_temporality: 2,
+            },
+            5 => Kind::ExponentialHistogram {
+                aggregation_temporality: 1,
+            },
+            6 => Kind::ExponentialHistogram {
+                aggregation_temporality: 2,
+            },
+            7 => Kind::Summary,
             _ => unreachable!(),
         };
+        let prefix = kind.name_prefix();
+        let name = format!("{prefix}_{name_suffix}");
 
-        // Use weighted distribution: heavily favors small numbers (1-2) but can go up to 60
-        let total_data_points = exponential_weighted_range(rng, 1, 60);
-        let data_points = (0..total_data_points)
-            .map(|_| rng.random::<Ndp>().0)
-            .collect();
+        // Cumulative histograms keep one state per metric identity. Other
+        // metric kinds use a weighted distribution, heavily favoring one or
+        // two points while allowing up to 60 for payload variety.
+        let total_data_points = match kind {
+            Kind::Histogram {
+                aggregation_temporality: 2,
+            } => 1,
+            _ => exponential_weighted_range(rng, 1, 60),
+        };
         let data = match kind {
-            Kind::Gauge => Data::Gauge(metrics::v1::Gauge { data_points }),
+            Kind::Gauge => {
+                let data_points = (0..total_data_points)
+                    .map(|_| random_number_data_point(rng, &metadata))
+                    .collect();
+                Data::Gauge(metrics::v1::Gauge { data_points })
+            }
             Kind::Sum {
                 aggregation_temporality,
                 is_monotonic,
-            } => Data::Sum(metrics::v1::Sum {
-                data_points,
+            } => {
+                let data_points = (0..total_data_points)
+                    .map(|_| random_number_data_point(rng, &metadata))
+                    .collect();
+                Data::Sum(metrics::v1::Sum {
+                    data_points,
+                    aggregation_temporality,
+                    is_monotonic,
+                })
+            }
+            Kind::Histogram {
                 aggregation_temporality,
-                is_monotonic,
-            }),
+            } => {
+                let data_points = (0..total_data_points)
+                    .map(|_| random_histogram_data_point(rng, &metadata))
+                    .collect();
+                Data::Histogram(metrics::v1::Histogram {
+                    data_points,
+                    aggregation_temporality,
+                })
+            }
+            Kind::ExponentialHistogram {
+                aggregation_temporality,
+            } => {
+                let data_points = (0..total_data_points)
+                    .map(|_| random_exp_histogram_data_point(rng, &metadata))
+                    .collect();
+                Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+                    data_points,
+                    aggregation_temporality,
+                })
+            }
+            Kind::Summary => {
+                let data_points = (0..total_data_points)
+                    .map(|_| random_summary_data_point(rng, &metadata))
+                    .collect();
+                Data::Summary(metrics::v1::Summary { data_points })
+            }
         };
         let mut metric = Metric {
             name,
@@ -224,14 +282,17 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
 }
 
 fn data_points_total(metric: &Metric) -> usize {
-    let data = &metric.data;
-    match data {
+    match &metric.data {
         Some(
             Data::Gauge(metrics::v1::Gauge { data_points })
             | Data::Sum(metrics::v1::Sum { data_points, .. }),
         ) => data_points.len(),
+        Some(Data::Histogram(metrics::v1::Histogram { data_points, .. })) => data_points.len(),
+        Some(Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+            data_points, ..
+        })) => data_points.len(),
+        Some(Data::Summary(metrics::v1::Summary { data_points })) => data_points.len(),
         None => 0,
-        _ => unimplemented!("only gauge/sum metrics supported"),
     }
 }
 
@@ -261,8 +322,36 @@ fn cut_data_points(metric: Metric) -> Metric {
                 is_monotonic,
             }))
         }
+        Some(Data::Histogram(metrics::v1::Histogram {
+            mut data_points,
+            aggregation_temporality,
+        })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Histogram(metrics::v1::Histogram {
+                data_points,
+                aggregation_temporality,
+            }))
+        }
+        Some(Data::ExponentialHistogram(metrics::v1::ExponentialHistogram {
+            mut data_points,
+            aggregation_temporality,
+        })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::ExponentialHistogram(
+                metrics::v1::ExponentialHistogram {
+                    data_points,
+                    aggregation_temporality,
+                },
+            ))
+        }
+        Some(Data::Summary(metrics::v1::Summary { mut data_points })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Summary(metrics::v1::Summary { data_points }))
+        }
         None => None,
-        _ => unimplemented!("only gauge/sum metrics supported"),
     };
 
     Metric {
@@ -281,6 +370,150 @@ pub(crate) enum Kind {
         aggregation_temporality: i32,
         is_monotonic: bool,
     },
+    Histogram {
+        aggregation_temporality: i32,
+    },
+    ExponentialHistogram {
+        aggregation_temporality: i32,
+    },
+    Summary,
+}
+
+impl Kind {
+    fn name_prefix(self) -> &'static str {
+        match self {
+            Self::Gauge => "gauge",
+            Self::Sum {
+                aggregation_temporality: 1,
+                ..
+            } => "sum_delta",
+            Self::Sum {
+                aggregation_temporality: 2,
+                ..
+            } => "sum_cumulative",
+            Self::Sum { .. } => "sum",
+            Self::Histogram {
+                aggregation_temporality: 1,
+            } => "histogram_delta",
+            Self::Histogram {
+                aggregation_temporality: 2,
+            } => "histogram_cumulative",
+            Self::Histogram { .. } => "histogram",
+            Self::ExponentialHistogram {
+                aggregation_temporality: 1,
+            } => "exp_histogram_delta",
+            Self::ExponentialHistogram {
+                aggregation_temporality: 2,
+            } => "exp_histogram_cumulative",
+            Self::ExponentialHistogram { .. } => "exp_histogram",
+            Self::Summary => "summary",
+        }
+    }
+}
+
+/// Construct an explicit-bucket `HistogramDataPoint` scaffold.
+///
+/// The bucket count is fixed so generated payload size stays predictable, but
+/// the explicit bounds are randomized to avoid repeating the same histogram
+/// shape across templates. The live state is updated each tick in `generate()`.
+fn random_histogram_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> HistogramDataPoint {
+    let num_of_bounds = rng.random_range(3_usize..=8);
+    let mut explicit_bounds = Vec::with_capacity(num_of_bounds);
+    let mut bound = rng.random_range(1.0_f64..=1000.0);
+    for _ in 0..num_of_bounds {
+        explicit_bounds.push(bound);
+        bound += rng.random_range(1.0_f64..=1000.0);
+    }
+    let n_buckets = explicit_bounds.len() + 1;
+    HistogramDataPoint {
+        attributes: attributes.to_vec(),
+        start_time_unix_nano: 1,
+        time_unix_nano: 1,
+        count: n_buckets as u64,
+        sum: Some(0.0),
+        bucket_counts: vec![1; n_buckets],
+        explicit_bounds,
+        exemplars: Vec::new(),
+        flags: 0,
+        min: Some(0.0),
+        max: Some(0.0),
+    }
+}
+
+/// Construct an `ExponentialHistogramDataPoint` scaffold.
+///
+/// The template uses fixed bucket counts for positive and negative ranges so
+/// generated payload size stays predictable. `generate()` later adjusts the
+/// per-bucket counts while preserving the same bucket layout.
+fn random_exp_histogram_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> ExponentialHistogramDataPoint {
+    let scale: i32 = rng.random_range(-3_i32..=3);
+
+    let positive_bucket_count = rng.random_range(1_usize..=100);
+    let negative_bucket_count = rng.random_range(1_usize..=100);
+    let zero_data_count = rng.random_range(1_usize..=6);
+
+    let positive_offset = rng.random_range(0_i32..=10);
+    let negative_offset = rng.random_range(0_i32..=10);
+    let bucket_count = positive_bucket_count + negative_bucket_count + zero_data_count;
+    ExponentialHistogramDataPoint {
+        attributes: attributes.to_vec(),
+        start_time_unix_nano: 1,
+        time_unix_nano: 1,
+        count: bucket_count as u64,
+        sum: Some(0.0),
+        scale,
+        zero_count: zero_data_count as u64,
+        positive: Some(exponential_histogram_data_point::Buckets {
+            offset: positive_offset,
+            bucket_counts: vec![1; positive_bucket_count],
+        }),
+        negative: Some(exponential_histogram_data_point::Buckets {
+            offset: negative_offset,
+            bucket_counts: vec![1; negative_bucket_count],
+        }),
+        flags: 0,
+        exemplars: Vec::new(),
+        min: Some(0.0),
+        max: Some(0.0),
+        zero_threshold: 0.0,
+    }
+}
+
+/// Generate a random `SummaryDataPoint`.
+///
+/// Produces five standard quantiles (0.0, 0.5, 0.9, 0.99, 1.0).  Values are
+/// drawn randomly and sorted so they are monotonically non-decreasing, matching
+/// the convention that higher quantiles carry equal or greater values.
+fn random_summary_data_point<R: Rng + ?Sized>(
+    rng: &mut R,
+    attributes: &[KeyValue],
+) -> SummaryDataPoint {
+    let count: u64 = rng.random_range(1_u64..=1_000_000);
+    let sum: f64 = rng.random_range(0.0_f64..=1_000_000.0);
+    let mut raw: Vec<f64> = (0..5)
+        .map(|_| rng.random_range(0.0_f64..=1_000_000.0))
+        .collect();
+    raw.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    let quantile_values = [0.0_f64, 0.5, 0.9, 0.99, 1.0]
+        .iter()
+        .zip(raw.iter())
+        .map(|(&quantile, &value)| summary_data_point::ValueAtQuantile { quantile, value })
+        .collect();
+    SummaryDataPoint {
+        attributes: attributes.to_vec(),
+        start_time_unix_nano: 0,
+        time_unix_nano: rng.random(),
+        count,
+        sum,
+        quantile_values,
+        flags: 0,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -519,6 +752,7 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
 mod test {
     use super::*;
     use crate::SizedGenerator;
+    use crate::opentelemetry::metric::MetricWeights;
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
@@ -563,8 +797,103 @@ mod test {
                             _ => panic!("invalid aggregation temporality"),
                         }
                     }
-                    _ => panic!("invalid metric data"),
+                    Data::Histogram(_) => assert!(config.metric_weights.histogram_delta >= 1
+                        || config.metric_weights.histogram_cumulative >= 1),
+                    Data::ExponentialHistogram(_) => {
+                        assert!(config.metric_weights.exp_histogram_delta >= 1
+                            || config.metric_weights.exp_histogram_cumulative >= 1);
+                    }
+                    Data::Summary(_) => assert!(config.metric_weights.summary >= 1),
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn histogram_temporality_weights_map_to_otlp_values() {
+        let cases = [
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 1,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                1,
+                false,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 1,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                2,
+                false,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 1,
+                    exp_histogram_cumulative: 0,
+                    summary: 0,
+                },
+                1,
+                true,
+            ),
+            (
+                MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram_delta: 0,
+                    histogram_cumulative: 0,
+                    exp_histogram_delta: 0,
+                    exp_histogram_cumulative: 1,
+                    summary: 0,
+                },
+                2,
+                true,
+            ),
+        ];
+
+        for (metric_weights, expected_temporality, exponential) in cases {
+            let config = Config {
+                metric_weights,
+                ..Default::default()
+            };
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut generator = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::RandomStringPool::with_size(&mut rng, 1024)),
+                &mut rng,
+            )
+            .expect("metric template generator should be created");
+            let mut budget = 1_000_000;
+            let metric = generator
+                .generate(&mut rng, &mut budget)
+                .expect("metric should be generated");
+            match metric.data {
+                Some(Data::Histogram(histogram)) if !exponential => {
+                    assert_eq!(histogram.aggregation_temporality, expected_temporality);
+                }
+                Some(Data::ExponentialHistogram(histogram)) if exponential => {
+                    assert_eq!(histogram.aggregation_temporality, expected_temporality);
+                }
+                _ => panic!("unexpected metric kind"),
             }
         }
     }

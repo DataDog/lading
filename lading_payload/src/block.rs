@@ -232,11 +232,14 @@ impl Cache {
                 )?
             }
             crate::Config::TraceAgent(config) => {
-                use crate::trace_agent::{self, v04};
+                use crate::trace_agent::{self, Serializer, v1, v04};
 
                 let mut ta = match config {
                     trace_agent::Config::V04(v04_config) => {
-                        v04::V04::with_config(*v04_config, &mut rng)?
+                        Serializer::V04(v04::V04::with_config(*v04_config, &mut rng)?)
+                    }
+                    trace_agent::Config::V1(v1_config) => {
+                        Serializer::V1(v1::V1::with_config(v1_config.clone(), &mut rng)?)
                     }
                 };
 
@@ -566,6 +569,52 @@ impl Cache {
     }
 }
 
+/// Number of direct attempts at `max_block_size` before a configuration is
+/// declared invalid.
+const MAXIMUM_PROBE_ATTEMPTS: u32 = 1024;
+
+/// Probe the maximum block budget directly.
+///
+/// A rejection streak only shows that random sampling missed the viable sizes;
+/// it is not proof that no payload fits. If even the maximum budget cannot be
+/// constructed, no size in the allowed range can fit and the configuration is
+/// genuinely invalid.
+///
+/// For serializers whose payload size varies with the RNG draw (for example a
+/// v1.0 trace payload with optional suboperations), a single attempt at the
+/// maximum budget can still miss: one draw may select a payload whose size
+/// exceeds `max_block_size` even though the configuration is feasible. Each
+/// attempt is therefore repeated up to [`MAXIMUM_PROBE_ATTEMPTS`] times. For a
+/// feasible configuration with per-attempt success probability `p > 0`, the
+/// probability of false rejection is at most `(1 - p)^MAXIMUM_PROBE_ATTEMPTS`,
+/// which is negligible for any `p` above roughly 0.006.
+///
+/// # Errors
+///
+/// Returns [`SpinError::InvalidConfig`] if no block at `max_block_size` can be
+/// constructed after [`MAXIMUM_PROBE_ATTEMPTS`] attempts. Propagates any other
+/// construction error unchanged.
+fn probe_maximum_block_size<R, S>(
+    rng: &mut R,
+    serializer: &mut S,
+    max_block_size: u32,
+) -> Result<Block, SpinError>
+where
+    S: crate::Serialize,
+    R: Rng + ?Sized,
+{
+    for _ in 0..MAXIMUM_PROBE_ATTEMPTS {
+        match construct_block(rng, serializer, max_block_size) {
+            Ok(block) => return Ok(block),
+            Err(SpinError::EmptyBlock) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(SpinError::InvalidConfig(format!(
+        "No payload fit after 1024 consecutive attempts, including {MAXIMUM_PROBE_ATTEMPTS} direct attempts at maximum_block_size={max_block_size} bytes; increase maximum_block_size or reduce the payload size (for v1.0, chunks_per_payload or the service graph)."
+    )))
+}
+
 /// Construct a new block cache of form defined by `serializer`.
 ///
 /// A "block cache" is a pre-made vec of serialized arbitrary instances of the
@@ -602,6 +651,7 @@ where
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
+    let mut consecutive_rejections = 0;
 
     info!(
         ?max_block_size,
@@ -630,6 +680,7 @@ where
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
                 success_block_sizes += 1;
+                consecutive_rejections = 0;
 
                 let total_bytes = block.total_bytes.get();
                 max_actual_block_size = max_actual_block_size.max(total_bytes);
@@ -640,6 +691,24 @@ where
             Err(SpinError::EmptyBlock) => {
                 debug!(?block_size, "rejected block");
                 rejected_block_sizes += 1;
+                // A payload's minimum size can exceed every allowed block size. Bound the
+                // search so an impossible configuration fails instead of hanging startup.
+                consecutive_rejections += 1;
+                if consecutive_rejections >= 1024 {
+                    // A streak of misses is not proof that no payload fits. If only a
+                    // narrow tail of sizes just under `max_block_size` is viable, random
+                    // sampling can miss it many times in a row even though the
+                    // configuration is valid. Probe the maximum budget directly.
+                    let block = probe_maximum_block_size(&mut rng, serializer, max_block_size)?;
+                    consecutive_rejections = 0;
+                    success_block_sizes += 1;
+                    let total_bytes = block.total_bytes.get();
+                    max_actual_block_size = max_actual_block_size.max(total_bytes);
+                    min_actual_block_size = min_actual_block_size.min(total_bytes);
+                    bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
+                    block_cache.push(block);
+                    continue;
+                }
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
                 // break. We do know that there's some true minimum viable size
