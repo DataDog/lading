@@ -1,0 +1,19 @@
+generator:
+  - id: "dogstatsd_http"
+    http:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]
+      target_uri: "http://127.0.0.1:8125"
+      headers:
+        content-type: application/x-protobuf
+      method:
+        post:
+          variant:
+            dogstatsd_http: {}
+          maximum_prebuild_cache_size_bytes: "10 Mb"
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"
