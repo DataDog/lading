@@ -1,0 +1,84 @@
+apiVersion: datadoghq.com/v2alpha1
+kind: DatadogAgent
+metadata:
+  name: datadog
+  namespace: default
+spec:
+  global:
+    clusterName: lading-test
+    site: datadoghq.com
+    credentials:
+      apiSecret:
+        secretName: datadog-secret
+        keyName: api-key
+    endpoint:
+      url: http://lading-intake:8080
+
+  features:
+    apm:
+      enabled: true
+
+    logCollection:
+      enabled: true
+
+    dogstatsd:
+      unixDomainSocketConfig:
+        enabled: true
+        path: /var/run/datadog/dsd.socket
+
+    npm:
+      enabled: true
+
+    prometheusScrape:
+      enabled: true
+      enableServiceEndpoints: true
+
+  override:
+    clusterAgent:
+      containers:
+        cluster-agent:
+          livenessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+          readinessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+    nodeAgent:
+      image:
+        name: gcr.io/datadoghq/agent:7.72.1
+      containers:
+        agent:
+          env:
+            - name: DD_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: DD_TAGS
+              value: "{{ DD_TAGS }}"
+          resources:
+            limits:
+              memory: "{{ AGENT_MEMORY_MB }}Mi"
+          volumeMounts:
+            - name: dsdsocket
+              mountPath: /var/run/datadog
+        trace-agent:
+          resources:
+            limits:
+              memory: "{{ TRACE_MEMORY_MB }}Mi"
+        system-probe:
+          resources:
+            limits:
+              memory: "{{ SYSPROBE_MEMORY_MB }}Mi"
+        process-agent:
+          resources:
+            limits:
+              memory: "{{ PROCESS_MEMORY_MB }}Mi"
+      volumes:
+        - name: dsdsocket
+          hostPath:
+            path: /var/run/datadog
+            type: DirectoryOrCreate
