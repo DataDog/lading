@@ -12,6 +12,7 @@ use std::io;
 
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
+use tracing::info;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -110,6 +111,8 @@ impl Server {
         sample_period: std::time::Duration,
     ) -> Result<(), Error> {
         use crate::observer::linux::Sampler;
+
+        info!("observer running. enable_smaps {} enable_smaps_rollup {}", self.config.enable_smaps, self.config.enable_smaps_rollup);
 
         let target_pid = pid_snd
             .recv()
