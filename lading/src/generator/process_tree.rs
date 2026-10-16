@@ -220,7 +220,7 @@ pub struct Executable {
 /// Configuration of [`ProcessTree`]
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The number of process created per second
     pub max_tree_per_second: Option<NonZeroU32>,
     /// The maximum depth of the process tree

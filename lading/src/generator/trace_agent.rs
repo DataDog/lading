@@ -155,7 +155,7 @@ impl fmt::Display for Version {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The base URI for the trace-agent
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
@@ -273,7 +273,7 @@ impl TraceAgent {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
 
         let labels = MetricsBuilder::new("trace_agent")
             .with_id(general.id)

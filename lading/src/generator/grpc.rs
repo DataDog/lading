@@ -98,7 +98,7 @@ pub struct Config {
     /// The gRPC URI. Looks like `http://<host>/<service path>/<endpoint>`
     pub target_uri: String,
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The payload variant. This should be protobuf encoded for typical gRPC
     /// endpoints.
     pub variant: lading_payload::Config,
@@ -197,7 +197,7 @@ impl Grpc {
         config: Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
         let labels = MetricsBuilder::new("grpc").with_id(general.id).build();
 
         let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;

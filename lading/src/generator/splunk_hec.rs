@@ -70,7 +70,7 @@ pub struct AckSettings {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target
-    pub seed: [u8; 32],
+    pub seed: crate::common::Seed,
     /// The URI for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
@@ -197,7 +197,7 @@ impl SplunkHec {
         config: Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(config.seed);
+        let mut rng = StdRng::from_seed(config.seed.into());
         let labels = MetricsBuilder::new("splunk_hec")
             .with_id(general.id)
             .build();

@@ -508,7 +508,7 @@ mod tests {
                 id: id.map(String::from),
             },
             inner: generator::Inner::Tcp(generator::tcp::Config {
-                seed: [0; 32],
+                seed: Default::default(),
                 addr: format!("127.0.0.1:{port}").parse().unwrap(),
                 variant: lading_payload::Config::Ascii,
                 bytes_per_second: None,
