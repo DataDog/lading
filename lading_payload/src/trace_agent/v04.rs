@@ -49,6 +49,9 @@ const MAX_CONTEXTS: u32 = 1_000_000;
 /// Via datadog-agent/pkg/trace/agent/normalizer.go:39
 const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
+/// Span metric from which the trace-agent reads a trace's sampling priority.
+const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
+
 /// Configuration for v0.4 trace payload generation.
 ///
 /// Focuses on parameters that affect trace-agent scaling performance:
@@ -83,6 +86,8 @@ pub struct Config {
     pub tag_value_length: ConfRange<u8>,
     /// Length range for metric keys
     pub metric_key_length: ConfRange<u8>,
+    /// Sampling priority set on the root span of every trace as the `_sampling_priority_v1` metric of the root span.
+    pub priority: Option<i32>,
 }
 
 impl Default for Config {
@@ -105,6 +110,7 @@ impl Default for Config {
             tag_key_length: ConfRange::Inclusive { min: 0, max: 128 },
             tag_value_length: ConfRange::Inclusive { min: 0, max: 128 },
             metric_key_length: ConfRange::Inclusive { min: 0, max: 128 },
+            priority: None,
         }
     }
 }
@@ -349,7 +355,7 @@ impl<'a> Generator<'a> for V04 {
             .using_handle(template.span_type)
             .ok_or(Error::StringGenerate)?;
 
-        let root_span = self.create_span(
+        let mut root_span = self.create_span(
             rng,
             service,
             operation,
@@ -361,6 +367,13 @@ impl<'a> Generator<'a> for V04 {
             root_start_nanos,
             root_duration_nanos,
         );
+        // Set after the random metrics so that a generated key can never shadow
+        // the priority. No randomness is drawn, so output is otherwise unchanged.
+        if let Some(priority) = self.config.priority {
+            root_span
+                .metrics
+                .insert(SAMPLING_PRIORITY_KEY, f64::from(priority));
+        }
         spans.push(root_span);
 
         // Generate child spans with random timing, allowing for async patterns
@@ -542,7 +555,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
     use serde::Serialize;
 
-    use super::{ConfRange, Config, V04};
+    use super::{ConfRange, Config, SAMPLING_PRIORITY_KEY, V04};
     use crate::Generator;
 
     proptest! {
@@ -646,6 +659,54 @@ mod test {
             for span in &trace.spans {
                 prop_assert!(span_ids.insert(span.span_id), "Each span must have a unique span_id within the trace");
             }
+        }
+
+        /// Property: for all priority p, when `priority = Some(p)` every trace's
+        /// root span has metrics[`_sampling_priority_v1`] = p, and no non-root
+        /// span carries that metric.
+        #[test]
+        fn priority_is_set_on_root_span_only(seed: u64, priority: i32) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let config = Config {
+                priority: Some(priority),
+                ..Default::default()
+            };
+            let generator = V04::with_config(config, &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            for span in &trace.spans {
+                let metric = span.metrics.get(SAMPLING_PRIORITY_KEY).copied();
+                if span.parent_id == 0 {
+                    prop_assert_eq!(metric, Some(f64::from(priority)));
+                } else {
+                    prop_assert_eq!(metric, None);
+                }
+            }
+        }
+
+        /// Property: Setting a priority draws no randomness, so it never shifts the rest
+        /// of the output.
+        #[test]
+        fn priority_does_not_change_other_output(seed: u64, priority: i32) {
+            let mut unset_rng = SmallRng::seed_from_u64(seed);
+            let unset = V04::with_config(Config::default(), &mut unset_rng)?;
+            let mut set_rng = SmallRng::seed_from_u64(seed);
+            let set = V04::with_config(
+                Config {
+                    priority: Some(priority),
+                    ..Default::default()
+                },
+                &mut set_rng,
+            )?;
+
+            let unset_trace = unset.generate(&mut unset_rng)?;
+            let mut set_trace = set.generate(&mut set_rng)?;
+            for span in &mut set_trace.spans {
+                if span.parent_id == 0 {
+                    span.metrics.remove(SAMPLING_PRIORITY_KEY);
+                }
+            }
+            prop_assert_eq!(format!("{unset_trace:?}"), format!("{set_trace:?}"));
         }
 
         /// Property: Context are bounded.
