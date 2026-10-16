@@ -122,6 +122,10 @@ doctest = false
 [[bin]]
 name = "lading"
 
+[[bin]]
+name = "decode_lbhc"
+path = "src/bin/decode_lbhc.rs"
+
 [package.metadata.cargo-machete]
 # False positive: used via `#[serde(with = "humantime_serde")]` field attributes.
 ignored = ["humantime-serde"]
