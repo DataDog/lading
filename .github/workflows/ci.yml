@@ -12,7 +12,7 @@ permissions:
   id-token: write  # Required for OIDC authentication with AWS
 
 env:
-  MISE_VERSION: "2026.3.15"
+  MISE_VERSION: "2026.10.15"
 
 jobs:
   shellcheck:
@@ -117,10 +117,7 @@ jobs:
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
       - name: Install nextest
-        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
-        with:
-          version: ${{ env.MISE_VERSION }}
-          install_args: "aqua:nextest-rs/nextest/cargo-nextest"
+        run: ci/install-nextest
       - run: ci/test
 
   benchmark-check:

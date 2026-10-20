@@ -18,9 +18,6 @@ on:
       - '.github/workflows/config-validation.yml'
       - 'ci/config-validation'
 
-env:
-  MISE_VERSION: "2026.3.15"
-
 jobs:
   validate-configs:
     name: Validate Example Configs
@@ -30,11 +27,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1.15.4
         with:
           cache: true
-      - name: Install nextest
-        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
-        with:
-          version: ${{ env.MISE_VERSION }}
-          install_args: "aqua:nextest-rs/nextest/cargo-nextest"
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE

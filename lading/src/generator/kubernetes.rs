@@ -20,7 +20,7 @@ use k8s_openapi::api::{
 use kube::api::{DeleteParams, PostParams};
 use lading_throttle::{self, Throttle};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::generator::General;
 

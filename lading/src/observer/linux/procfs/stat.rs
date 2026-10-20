@@ -79,7 +79,7 @@ impl Sampler {
         // Read `/proc/<PID>/stat`
         let stat_contents = fs::read_to_string(format!("/proc/{pid}/stat")).await?;
         let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
-        assert!(cur_pid == pid);
+        assert_eq!(cur_pid, pid);
 
         // Get or initialize the previous stats. Note that the first time this is
         // initialized we intentionally set last_instance to now to avoid scheduling

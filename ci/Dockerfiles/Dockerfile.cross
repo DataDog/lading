@@ -1,0 +1,10 @@
+ARG CROSS_BASE_IMAGE
+FROM ${CROSS_BASE_IMAGE}
+
+ARG CROSS_DEB_ARCH
+COPY ci/update-ca-certificates /usr/local/bin/lading-update-ca-certificates
+RUN dpkg --add-architecture "${CROSS_DEB_ARCH}" \
+    && apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends ca-certificates protobuf-compiler \
+    && lading-update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*

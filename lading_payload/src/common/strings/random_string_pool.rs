@@ -222,7 +222,7 @@ mod test {
 
             let pool = RandomStringPool::with_size_and_alphabet(&mut rng, max_bytes, ALPHANUM);
             if let Some(s) = pool.of_size(&mut rng, of_size_bytes) {
-                assert!(s.len() == of_size_bytes);
+                assert_eq!(s.len(), of_size_bytes);
             }
         }
     }

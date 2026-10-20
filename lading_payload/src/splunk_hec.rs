@@ -112,7 +112,7 @@ impl Distribution<Member> for StandardUniform {
 }
 
 /// Encoding to be used
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -121,13 +121,8 @@ pub enum Encoding {
     /// Use text-encoded log messages
     Text,
     /// Use JSON-encoded log messages
+    #[default]
     Json,
-}
-
-impl Default for Encoding {
-    fn default() -> Self {
-        Self::Json
-    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]

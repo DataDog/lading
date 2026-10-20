@@ -63,6 +63,8 @@ jobs:
           file: Dockerfile
           tags: ${{ steps.meta.outputs.tags }}
           push: true
+          pull: true
+          no-cache-filters: base,runtime
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache-${{ matrix.arch }}
           cache-to: type=registry,ref=ghcr.io/datadog/lading:cache-${{ matrix.arch }},mode=max

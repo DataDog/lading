@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
-use tracing::{error, info, trace, warn};
+use tracing::{info, trace, warn};
 
 // Regex to match Prometheus label pairs: label_name="label_value"
 // The value can be empty (e.g., label="")

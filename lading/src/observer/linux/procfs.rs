@@ -12,7 +12,7 @@ use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashMap;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 

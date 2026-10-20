@@ -9,15 +9,12 @@ set -o pipefail
 : "${PROPTEST_MAX_SHRINK_ITERS:=2048}"
 export PROPTEST_CASES PROPTEST_MAX_SHRINK_ITERS
 
-# Check if cargo-nextest is installed
-if ! command -v cargo-nextest &> /dev/null; then
-    echo "cargo-nextest is not installed. Installing it now..."
-    cargo install cargo-nextest
-fi
+CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NEXTEST_DIR="$("$CI_DIR/install-nextest")"
 
 echo "Running cargo nextest..."
 echo "  PROPTEST_CASES=${PROPTEST_CASES}"
 echo "  PROPTEST_MAX_SHRINK_ITERS=${PROPTEST_MAX_SHRINK_ITERS}"
-cargo nextest run --workspace --all-features --exclude sheepdog "$@"
+PATH="$NEXTEST_DIR/bin:$PATH" cargo nextest run --workspace --all-features --exclude sheepdog "$@"
 
 echo "Tests passed!"
