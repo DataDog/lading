@@ -5,7 +5,7 @@
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{collections::BTreeMap, io::Write, rc::Rc};
 
-use rand::{Rng, RngExt, seq::IndexedRandom};
+use rand::{Rng, RngExt, distr::weighted::WeightedIndex, seq::IndexedRandom};
 use rmp_serde::Serializer;
 use serde::Serialize;
 
@@ -57,7 +57,7 @@ const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 /// Focuses on parameters that affect trace-agent scaling performance:
 /// cardinality (service variety), payload structure (spans per trace), and
 /// string variety (tags/metrics per span).
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -86,8 +86,15 @@ pub struct Config {
     pub tag_value_length: ConfRange<u8>,
     /// Length range for metric keys
     pub metric_key_length: ConfRange<u8>,
-    /// Sampling priority set on the root span of every trace as the `_sampling_priority_v1` metric of the root span.
-    pub priority: Option<i32>,
+    /// Relative weights of the sampling priorities to set on root spans.
+    ///
+    /// Maps each sampling priority to its relative weight. For every trace,
+    /// one priority is drawn according to these weights and set as the
+    /// `_sampling_priority_v1` metric of the root span. When `None`, no
+    /// priority is set and no randomness is drawn. The map must be non-empty,
+    /// have at least one non-zero weight, and its weights must sum to at most
+    /// `u32::MAX`.
+    pub priority_weights: Option<BTreeMap<i32, u32>>,
 }
 
 impl Default for Config {
@@ -110,7 +117,7 @@ impl Default for Config {
             tag_key_length: ConfRange::Inclusive { min: 0, max: 128 },
             tag_value_length: ConfRange::Inclusive { min: 0, max: 128 },
             metric_key_length: ConfRange::Inclusive { min: 0, max: 128 },
-            priority: None,
+            priority_weights: None,
         }
     }
 }
@@ -255,6 +262,7 @@ pub struct V04 {
     str_pool: Rc<strings::RandomStringPool>,
     /// Pre-generated templates indexed by context ID
     templates: Vec<TraceTemplate>,
+    priority_weights: Option<(Vec<i32>, WeightedIndex<u32>)>,
 }
 
 impl V04 {
@@ -299,10 +307,21 @@ impl V04 {
             });
         }
 
+        let priority_weights = config
+            .priority_weights
+            .as_ref()
+            .map(|priority_weights| priority_weights.iter().unzip())
+            .map(|(values, weights): (Vec<i32>, Vec<u32>)| {
+                Ok((values, WeightedIndex::new(weights)?))
+            })
+            .transpose()
+            .map_err(Error::Weights)?;
+
         Ok(Self {
             config,
             str_pool,
             templates,
+            priority_weights,
         })
     }
 }
@@ -355,7 +374,7 @@ impl<'a> Generator<'a> for V04 {
             .using_handle(template.span_type)
             .ok_or(Error::StringGenerate)?;
 
-        let mut root_span = self.create_span(
+        let root_span = self.create_span(
             rng,
             service,
             operation,
@@ -367,13 +386,7 @@ impl<'a> Generator<'a> for V04 {
             root_start_nanos,
             root_duration_nanos,
         );
-        // Set after the random metrics so that a generated key can never shadow
-        // the priority. No randomness is drawn, so output is otherwise unchanged.
-        if let Some(priority) = self.config.priority {
-            root_span
-                .metrics
-                .insert(SAMPLING_PRIORITY_KEY, f64::from(priority));
-        }
+
         spans.push(root_span);
 
         // Generate child spans with random timing, allowing for async patterns
@@ -468,6 +481,13 @@ impl V04 {
             let key_len = self.config.metric_key_length.sample(rng);
             let key = self.str_pool.of_size(rng, key_len.into()).unwrap_or("");
             metrics.insert(key, rng.random::<f64>());
+        }
+        if parent_id == 0
+            && let Some((priority_values, priority_weights)) = &self.priority_weights
+        {
+            let priority_index = rng.sample(priority_weights);
+            let priority_value = priority_values[priority_index];
+            metrics.insert(SAMPLING_PRIORITY_KEY, f64::from(priority_value));
         }
 
         let error = i32::from(rng.random::<f32>() < self.config.error_rate);
@@ -661,14 +681,13 @@ mod test {
             }
         }
 
-        /// Property: for all priority p, when `priority = Some(p)` every trace's
-        /// root span has metrics[`_sampling_priority_v1`] = p, and no non-root
-        /// span carries that metric.
+        /// Property: when priority_weights is set, every root spans
+        /// has the `_sampling_priority_v1` metric, and no non-root span carries that metric.
         #[test]
-        fn priority_is_set_on_root_span_only(seed: u64, priority: i32) {
+        fn priority_is_set_on_root_span_only(seed: u64, priority_weights in prop::collection::vec((-1i32..=2, 1u32..=1_000), 1..8)) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let config = Config {
-                priority: Some(priority),
+                priority_weights: Some(priority_weights.into_iter().collect()),
                 ..Default::default()
             };
             let generator = V04::with_config(config, &mut rng)?;
@@ -677,36 +696,11 @@ mod test {
             for span in &trace.spans {
                 let metric = span.metrics.get(SAMPLING_PRIORITY_KEY).copied();
                 if span.parent_id == 0 {
-                    prop_assert_eq!(metric, Some(f64::from(priority)));
+                    prop_assert!(metric.is_some());
                 } else {
-                    prop_assert_eq!(metric, None);
+                    prop_assert!(metric.is_none());
                 }
             }
-        }
-
-        /// Property: Setting a priority draws no randomness, so it never shifts the rest
-        /// of the output.
-        #[test]
-        fn priority_does_not_change_other_output(seed: u64, priority: i32) {
-            let mut unset_rng = SmallRng::seed_from_u64(seed);
-            let unset = V04::with_config(Config::default(), &mut unset_rng)?;
-            let mut set_rng = SmallRng::seed_from_u64(seed);
-            let set = V04::with_config(
-                Config {
-                    priority: Some(priority),
-                    ..Default::default()
-                },
-                &mut set_rng,
-            )?;
-
-            let unset_trace = unset.generate(&mut unset_rng)?;
-            let mut set_trace = set.generate(&mut set_rng)?;
-            for span in &mut set_trace.spans {
-                if span.parent_id == 0 {
-                    span.metrics.remove(SAMPLING_PRIORITY_KEY);
-                }
-            }
-            prop_assert_eq!(format!("{unset_trace:?}"), format!("{set_trace:?}"));
         }
 
         /// Property: Context are bounded.
