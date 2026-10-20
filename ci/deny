@@ -10,6 +10,6 @@ if ! command -v cargo-deny &> /dev/null; then
 fi
 
 echo "Running cargo deny..."
-cargo deny check
+cargo deny --all-features --locked check
 
 echo "Cargo deny passed!"
