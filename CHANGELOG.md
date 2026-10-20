@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and an exact `chunks_per_payload` batch size.
 
 ### Fixed
+- cgroup v2 observer: `cgroup.v2.cgroup.procs` and `cgroup.v2.cgroup.threads`
+  are now the number of processes and threads in the cgroup. They were parsed
+  as a single number, so the metric held a PID while the cgroup had one
+  process and disappeared once it had more.
 - Block-cache construction now fails with an actionable error after 1024
   consecutive rejected blocks instead of retrying indefinitely.
 

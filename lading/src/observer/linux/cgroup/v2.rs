@@ -140,6 +140,15 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                 Some("io.stat") => {
                                                     io::stat(content, &metric_prefix, labels);
                                                 }
+                                                Some("cgroup.procs" | "cgroup.threads") => {
+                                                    // One PID or TID per line. The
+                                                    // heuristic below read a lone
+                                                    // PID as the value and dropped
+                                                    // the metric once a second
+                                                    // process joined the cgroup.
+                                                    gauge!(metric_prefix, labels)
+                                                        .set(f64::from(line_count(content)));
+                                                }
                                                 Some(unknown) => {
                                                     debug!(
                                                         "Heuristicly parsing of unknown cgroup v2 file: {unknown}"
@@ -211,6 +220,18 @@ pub(crate) fn single_value_gauge(
     } else {
         warn!("[{metric_prefix}] Failed to parse: {content}");
     }
+}
+
+/// Count the non-blank lines of a cgroup list file such as `cgroup.procs`.
+///
+/// Saturates at `u32::MAX`, far above any cgroup's process count.
+#[inline]
+fn line_count(content: &str) -> u32 {
+    let count = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 #[inline]
@@ -292,7 +313,40 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pressure_line;
+    use super::{line_count, parse_pressure_line};
+    use proptest::prelude::*;
+
+    proptest! {
+        /// For all lists of IDs ids: line_count(join(ids, "\n")) == len(ids)
+        ///
+        /// The count is the number of entries, whatever the ID values, so a
+        /// cgroup with one process reads 1, not its PID.
+        #[test]
+        fn line_count_is_number_of_ids(
+            ids in prop::collection::vec(1u32..=4_194_304, 0..1024),
+            trailing_newline in any::<bool>(),
+        ) {
+            let mut content = ids.iter().map(u32::to_string).collect::<Vec<_>>().join("\n");
+            if trailing_newline {
+                content.push('\n');
+            }
+            prop_assert_eq!(line_count(&content), u32::try_from(ids.len()).unwrap_or(u32::MAX));
+        }
+
+        /// For all ids, blank: inserting blank lines does not change line_count
+        #[test]
+        fn line_count_ignores_blank_lines(
+            ids in prop::collection::vec(1u32..=4_194_304, 0..256),
+            blank in "[ \t]{0,4}",
+        ) {
+            let content = ids
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(&format!("\n{blank}\n"));
+            prop_assert_eq!(line_count(&content), u32::try_from(ids.len()).unwrap_or(u32::MAX));
+        }
+    }
 
     #[test]
     fn parse_pressure_line_multiple_fields() {
