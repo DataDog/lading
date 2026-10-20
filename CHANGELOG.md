@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Block-cache construction now fails with an actionable error after 1024
   consecutive rejected blocks instead of retrying indefinitely.
+- Update `rustls-webpki` to 0.103.16 to reject certificate chains containing
+  distrusted intermediate CA public keys.
 
 ## [0.33.0]
 ### Changed
