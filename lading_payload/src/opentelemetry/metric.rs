@@ -275,7 +275,13 @@ pub struct MetricWeights {
 }
 
 impl MetricWeights {
-    fn has_zero_weight(self) -> bool {
+    /// True when every weight is zero, leaving no metric type to select.
+    ///
+    /// Individual zero weights are permitted: `WeightedIndex` simply never
+    /// selects a zero-weighted variant. Only an all-zero set is unusable, and
+    /// `WeightedIndex::new` would reject it anyway -- we check here so the
+    /// failure surfaces as a config error rather than a generator error.
+    fn all_weights_zero(self) -> bool {
         [
             self.gauge,
             self.sum_delta,
@@ -286,7 +292,8 @@ impl MetricWeights {
             self.exp_histogram_cumulative,
             self.summary,
         ]
-        .contains(&0)
+        .iter()
+        .all(|w| *w == 0)
     }
 }
 
@@ -395,11 +402,16 @@ impl Config {
     /// Function will error if the configuration is invalid
     #[expect(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
-        // Validate metric weights: every supported metric type must have
-        // non-zero probability so generated payloads cover the full OTLP metric
-        // surface area.
-        if self.metric_weights.has_zero_weight() {
-            return Err("Metric weights cannot be 0".to_string());
+        // Validate metric weights: at least one metric type must be selectable.
+        //
+        // A zero weight on an individual type is allowed and means "never
+        // generate this type". That is deliberate: suppressing a type is the
+        // only way to isolate its cost when profiling a consumer of these
+        // payloads, and it cannot be expressed by a small weight, which merely
+        // makes the type rare. Only an all-zero set is rejected, because then
+        // no type can be chosen at all.
+        if self.metric_weights.all_weights_zero() {
+            return Err("At least one metric weight must be non-zero".to_string());
         }
 
         self.histogram_count_limits.valid()?;
@@ -2247,37 +2259,16 @@ mod test {
         assert!(impossible_max.valid().is_err());
 
         // Invalid: Zero metric weights
+        // A zero weight on an individual type is now VALID and means "never
+        // generate this type". WeightedIndex simply never selects it.
         let zero_gauge_weight = Config {
             metric_weights: super::MetricWeights {
                 gauge: 0,
-                sum_delta: 25,
-                sum_cumulative: 25,
                 ..Default::default()
             },
             ..valid_config
         };
-        assert!(zero_gauge_weight.valid().is_err());
-
-        let zero_sum_weight = Config {
-            metric_weights: super::MetricWeights {
-                gauge: 50,
-                sum_delta: 0,
-                sum_cumulative: 0,
-                ..Default::default()
-            },
-            ..valid_config
-        };
-        assert!(zero_sum_weight.valid().is_err());
-
-        let zero_histogram_weight = Config {
-            metric_weights: super::MetricWeights {
-                histogram_delta: 0,
-                histogram_cumulative: 0,
-                ..Default::default()
-            },
-            ..valid_config
-        };
-        assert!(zero_histogram_weight.valid().is_err());
+        assert!(zero_gauge_weight.valid().is_ok());
 
         let zero_exp_histogram_weight = Config {
             metric_weights: super::MetricWeights {
@@ -2287,26 +2278,38 @@ mod test {
             },
             ..valid_config
         };
-        assert!(zero_exp_histogram_weight.valid().is_err());
+        assert!(zero_exp_histogram_weight.valid().is_ok());
 
-        let zero_summary_weight = Config {
+        // Only one non-zero weight is enough: every payload is that one type.
+        let only_gauge = Config {
             metric_weights: super::MetricWeights {
+                gauge: 1,
+                sum_delta: 0,
+                sum_cumulative: 0,
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
                 summary: 0,
-                ..Default::default()
             },
             ..valid_config
         };
-        assert!(zero_summary_weight.valid().is_err());
+        assert!(only_gauge.valid().is_ok());
 
-        let zero_weights = Config {
+        // All-zero is the one rejected case: nothing can be selected.
+        let all_zero_weights = Config {
             metric_weights: super::MetricWeights {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
-                ..Default::default()
+                histogram_delta: 0,
+                histogram_cumulative: 0,
+                exp_histogram_delta: 0,
+                exp_histogram_cumulative: 0,
+                summary: 0,
             },
             ..valid_config
         };
-        assert!(zero_weights.valid().is_err());
+        assert!(all_zero_weights.valid().is_err());
     }
 }
