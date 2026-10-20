@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,
   and an exact `chunks_per_payload` batch size.
-- Trace-agent `/v0.4/traces` payloads accept an optional `priority`, set as the
-  `_sampling_priority_v1` metric on the root span of every trace.
+- Trace-agent `/v0.4/traces` payloads accept an optional `priority_weights` mapping,
+  sampled into the `_sampling_priority_v1` metric on the root span of every trace.
 
 ### Fixed
 - Block-cache construction now fails with an actionable error after 1024

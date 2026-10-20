@@ -97,9 +97,13 @@ pub struct Config {
     /// Maps each sampling priority to its relative weight. For every trace,
     /// one priority is drawn according to these weights and set as the
     /// `_sampling_priority_v1` metric of the root span. When `None`, no
-    /// priority is set and no randomness is drawn. The map must be non-empty,
-    /// have at least one non-zero weight, and its weights must sum to at most
-    /// `u32::MAX`.
+    /// priority is set and no randomness is drawn.
+    ///
+    /// Example:
+    /// `priority_weights` = { 0: 1, 1: 2, 2: 1}
+    ///   - 25% chance of getting priority 0
+    ///   - 50% chance of getting priority 1
+    ///   - 25% chance of getting priority 2
     pub priority_weights: Option<BTreeMap<i32, u32>>,
 }
 
