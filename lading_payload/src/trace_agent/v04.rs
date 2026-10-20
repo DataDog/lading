@@ -5,7 +5,11 @@
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{collections::BTreeMap, io::Write, rc::Rc};
 
-use rand::{Rng, RngExt, distr::weighted::WeightedIndex, seq::IndexedRandom};
+use rand::{
+    Rng, RngExt,
+    distr::weighted::{self, WeightedIndex},
+    seq::IndexedRandom,
+};
 use rmp_serde::Serializer;
 use serde::Serialize;
 
@@ -37,6 +41,8 @@ pub enum ConfigError {
     InvalidErrorRate,
     /// Context count exceeds maximum allowed value
     TooManyContexts,
+    /// See [`weighted::Error`]
+    Weights(weighted::Error),
 }
 
 const STRING_POOL_SIZE: usize = 1_000_000;
@@ -172,6 +178,10 @@ impl Config {
             if !range.valid().0 {
                 return Err(ConfigError::InvalidRange);
             }
+        }
+
+        if let Some(weights) = &self.priority_weights {
+            let _ = WeightedIndex::new(weights.values()).map_err(ConfigError::Weights)?;
         }
 
         Ok(())
