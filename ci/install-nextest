@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+NEXTEST_VERSION=0.9.148
+NEXTEST_SHA256=7023461ee82c0c2864df74ee340fb7777c13fc556f99e913646ab6ddccd05dd4
+RUSTLS_VERSION=0.23.46
+WEBPKI_VERSION=0.103.16
+ROOTS_VERSION=1.0.10
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALL_DIR="$REPO_DIR/target/ci-tools/nextest-$NEXTEST_VERSION-$RUSTLS_VERSION-$WEBPKI_VERSION-$ROOTS_VERSION-no-update"
+
+if [[ ! -x "$INSTALL_DIR/bin/cargo-nextest" ]]; then
+    BUILD_DIR="$(mktemp -d)"
+    trap 'rm -rf "$BUILD_DIR"' EXIT
+    curl -fsSL "https://static.crates.io/crates/cargo-nextest/cargo-nextest-$NEXTEST_VERSION.crate" \
+        -o "$BUILD_DIR/nextest.crate"
+    if command -v sha256sum &> /dev/null; then
+        echo "$NEXTEST_SHA256  $BUILD_DIR/nextest.crate" | sha256sum -c - >&2
+    else
+        echo "$NEXTEST_SHA256  $BUILD_DIR/nextest.crate" | shasum -a 256 -c - >&2
+    fi
+    tar -xzf "$BUILD_DIR/nextest.crate" -C "$BUILD_DIR"
+    MANIFEST="$BUILD_DIR/cargo-nextest-$NEXTEST_VERSION/Cargo.toml"
+
+    # The release binary and lockfile predate the CA compromise. Keep the
+    # upstream dependency lock and update only its TLS security dependencies.
+    # Disable self-update: this pinned install does not need its vulnerable XML
+    # parser (RUSTSEC-2026-0194 and RUSTSEC-2026-0195).
+    cargo update --manifest-path "$MANIFEST" -p rustls --precise "$RUSTLS_VERSION" >&2
+    cargo update --manifest-path "$MANIFEST" -p rustls-webpki --precise "$WEBPKI_VERSION" >&2
+    cargo update --manifest-path "$MANIFEST" -p webpki-roots --precise "$ROOTS_VERSION" >&2
+    cargo install --path "$BUILD_DIR/cargo-nextest-$NEXTEST_VERSION" --locked \
+        --no-default-features --features default-no-update --root "$INSTALL_DIR" >&2
+fi
+
+echo "$INSTALL_DIR"

@@ -593,10 +593,6 @@ impl Accumulator {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    reason = "stored values must round-trip exactly; any deviation is a bug"
-)]
 mod tests {
     use super::*;
     use crate::metric::{Counter, CounterValue, Gauge, GaugeValue, Histogram};

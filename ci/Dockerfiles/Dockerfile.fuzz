@@ -1,20 +1,33 @@
 # Update the rust version in-sync with the version in rust-toolchain.toml
-FROM registry.ddbuild.io/images/rust:ubuntu-22.04
+FROM docker.io/rust:1.99.1-slim-bookworm AS base
 
-RUN apt-get update && apt-get install -y \
-    protobuf-compiler fuse3 libfuse3-dev python3 python3-pip python3-venv curl unzip \
+COPY ci/update-ca-certificates /usr/local/bin/lading-update-ca-certificates
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
+    ca-certificates build-essential clang pkg-config libssl-dev \
+    protobuf-compiler fuse3 libfuse3-dev python3 python3-venv curl unzip \
+    && lading-update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+FROM base AS fuzz
+
 # Install vault directly from HashiCorp releases
-RUN VAULT_VERSION=1.15.4 && \
-    curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip" -o vault.zip && \
+RUN VAULT_VERSION=2.2.0 && \
+    case "$(dpkg --print-architecture)" in \
+        amd64) VAULT_ARCH=amd64; VAULT_SHA256=05d78b0ac842ca7c522fc297df91527cd43c15420c4c5c0a969d48a7b0ff7b6d ;; \
+        arm64) VAULT_ARCH=arm64; VAULT_SHA256=9d9ae0ce520744fb095bdf150a6924f5583528fd385a2e92782f7a6d00cad53c ;; \
+        *) echo "Unsupported architecture" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_${VAULT_ARCH}.zip" -o vault.zip && \
+    echo "${VAULT_SHA256}  vault.zip" | sha256sum -c - && \
     unzip vault.zip && \
     mv vault /usr/local/bin/vault && \
     rm vault.zip && \
     chmod +x /usr/local/bin/vault
 
 # Create and activate virtual environment
-RUN python3 -m venv /opt/venv
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/python -m pip install --upgrade pip setuptools \
+    && apt-get purge -y python3-pip-whl python3-setuptools-whl
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
@@ -23,4 +36,4 @@ COPY . /app
 # Install Python dependencies in virtual environment
 RUN pip install -r ci/requirements.txt
 RUN cargo install cargo-fuzz
-RUN rustup toolchain install nightly-x86_64-unknown-linux-gnu
+RUN rustup toolchain install nightly --profile minimal

@@ -182,12 +182,11 @@ echo "Building for platform(s): ${PLATFORMS}"
 echo "Tag: ${TAG}"
 
 docker buildx build \
+    --pull \
+    --no-cache-filter base,runtime \
     --platform "$PLATFORMS" \
     --build-arg SCCACHE_BUCKET="" \
     --build-arg SCCACHE_REGION="" \
-    --build-arg AWS_ACCESS_KEY_ID="" \
-    --build-arg AWS_SECRET_ACCESS_KEY="" \
-    --build-arg AWS_SESSION_TOKEN="" \
     --secret "id=aws_access_key_id,src=/dev/null" \
     --secret "id=aws_secret_access_key,src=/dev/null" \
     --secret "id=aws_session_token,src=/dev/null" \

@@ -98,7 +98,7 @@ pub enum Variant {
 
 /// Controls which received series this blackhole records as lading capture
 /// metrics.
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum RecordPolicy {
@@ -107,16 +107,11 @@ pub enum RecordPolicy {
     /// Record no series at all. Aggregate `bytes_received` / `requests_received`
     /// counters are still emitted and payloads are still decoded for
     /// accounting.
+    #[default]
     Disabled,
     /// Record only series whose metric name is listed. An empty list behaves
     /// like `Disabled`.
     SeriesToKeep(BTreeSet<String>),
-}
-
-impl Default for RecordPolicy {
-    fn default() -> Self {
-        Self::Disabled
-    }
 }
 
 impl RecordPolicy {

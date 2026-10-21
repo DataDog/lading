@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Older distro bundles include the emSign root removed by webpki-roots 1.0.10.
+# AAA Certificate Services can also cross-sign the distrusted intermediates;
+# Mozilla removed its TLS trust in April 2025 (webpki-roots 0.26.10).
+# https://github.com/rustls/webpki-roots/pull/133
+sed -i \
+    -e 's|^mozilla/emSign_ECC_Root_CA_-_G3.crt$|!&|' \
+    -e 's|^mozilla/Comodo_AAA_Services_root.crt$|!&|' \
+    /etc/ca-certificates.conf
+update-ca-certificates --fresh

@@ -227,7 +227,14 @@ impl Distribution<IpV4> for StandardUniform {
 
 impl fmt::Display for IpV4 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{}.{}", self.zero, self.one, self.two, self.three,)
+        write!(
+            f,
+            "{zero}.{one}.{two}.{three}",
+            zero = self.zero,
+            one = self.one,
+            two = self.two,
+            three = self.three
+        )
     }
 }
 

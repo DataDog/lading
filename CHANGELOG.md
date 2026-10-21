@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consecutive rejected blocks instead of retrying indefinitely.
 - Update `rustls-webpki` to 0.103.16 to reject certificate chains containing
   distrusted intermediate CA public keys.
+- Refresh container CA bundles and security packages, disable distrusted CA
+  roots, and update Rust, Vault, sccache, cargo-chef, and pinned CI tools.
+- Build the fuzzing image before each fuzzing run so package updates replace
+  the previously fixed image from August 2025.
 
 ## [0.33.0]
 ### Changed
