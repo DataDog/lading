@@ -19,7 +19,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
     libssl-dev=3.0.20-1~deb12u2 \
-    protobuf-compiler=3.21.12-3 \
+    protobuf-compiler=3.21.12-3+deb12u1 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
     curl \
@@ -57,7 +57,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
     libssl-dev=3.0.20-1~deb12u2 \
-    protobuf-compiler=3.21.12-3 \
+    protobuf-compiler=3.21.12-3+deb12u1 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
     && rm -rf /var/lib/apt/lists/*
