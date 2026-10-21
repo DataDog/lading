@@ -77,6 +77,15 @@ pub enum Error {
     ShutdownDuringStartup(String),
 }
 
+/// Which neper-style protocol the client is driving.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Mode {
+    /// `tcp_rr`: persistent connection, request/response loop forever.
+    Rr,
+    /// `tcp_crr`: connect, request/response, close, reconnect, repeat.
+    Crr,
+}
+
 /// Parameters for [`run_client`].
 ///
 /// Flow count is *not* a client parameter - it is owned by the server and
@@ -94,6 +103,8 @@ pub(crate) struct ClientParams {
     pub(crate) response_size: usize,
     /// Whether to set `TCP_NODELAY`.
     pub(crate) no_delay: bool,
+    /// RR or CRR.
+    pub(crate) mode: Mode,
 }
 
 /// Parameters for [`run_server`].
@@ -115,16 +126,35 @@ pub(crate) struct ServerParams {
     pub(crate) no_delay: bool,
     /// Listener backlog.
     pub(crate) backlog: i32,
+    /// RR or CRR.
+    pub(crate) mode: Mode,
 }
 
 enum ClientState {
+    /// CRR only: waiting for a non-blocking `connect(2)` to complete. The
+    /// `WRITABLE` readiness event signals connect completion; `take_error()`
+    /// then tells us if it succeeded.
+    Connecting,
     SendRequest,
     RecvResponse,
+}
+
+/// Actions returned by [`handle_client_event`]. Supersets [`flow::Action`]
+/// with [`ClientAction::Reconnect`] for CRR's per-transaction reconnect.
+#[derive(Clone, Copy)]
+enum ClientAction {
+    Continue,
+    Reregister(Interest),
+    /// CRR: response complete - close this socket and open a new one with the
+    /// same `Token`. Handled by [`apply_client_action`].
+    Reconnect,
+    Remove,
 }
 
 enum ServerState {
     RecvRequest,
     SendResponse,
+    CloseStream,
 }
 
 const LISTENER_TOKEN: Token = Token(0);
@@ -255,6 +285,7 @@ pub(crate) async fn run_client(
     let request_size = params.request_size;
     let response_size = params.response_size;
     let no_delay = params.no_delay;
+    let mode = params.mode;
     for i in 0..params.threads {
         let thread_flows = flow_dist[i as usize];
         let flag = Arc::clone(&shutdown_flag);
@@ -267,6 +298,7 @@ pub(crate) async fn run_client(
                 request_size,
                 response_size,
                 no_delay,
+                mode,
                 &flag,
                 &tm[i as usize],
             );
@@ -364,12 +396,136 @@ fn try_control_handshake(control_addr: SocketAddr) -> io::Result<u16> {
     Ok(u16::from_be_bytes(buf))
 }
 
+/// `IP_LOCAL_PORT_RANGE` socket option (Linux >= 6.3). Not yet exposed by the
+/// `libc` crate, so it is defined here from `<linux/in.h>`.
+const IP_LOCAL_PORT_RANGE: libc::c_int = 51;
+/// Lowest ephemeral local port the generator may use for its sockets.
+const LOCAL_PORT_LOW: u16 = 1024;
+/// Highest ephemeral local port the generator may use for its sockets.
+const LOCAL_PORT_HIGH: u16 = 60999;
+
+/// Set once the kernel is found not to support `IP_LOCAL_PORT_RANGE`, so the
+/// "unsupported, falling back" warning is logged a single time rather than on
+/// every socket the generator opens.
+static PORT_RANGE_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
+
+/// Increase `socket`'s automatic source-port selection to
+/// `[LOCAL_PORT_LOW, LOCAL_PORT_HIGH]` via `IP_LOCAL_PORT_RANGE`. The option
+/// value packs the high port in the upper 16 bits and the low port in the
+/// lower 16 bits.
+///
+/// This is done to reduce `EADDRNOTAVAIL` errors when a large number of flows are
+/// created especially for `tcp_crr` workload.
+/// Since port ranges are specific to network namespaces, this should not cause issues
+/// for other daemons coming online on lower port ranges when lading is launched in its own
+/// namespace.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if `setsockopt` fails for a reason other
+/// than the option being unsupported by the running kernel.
+fn set_local_port_range(socket: &socket2::Socket) -> io::Result<()> {
+    let value: u32 = (u32::from(LOCAL_PORT_HIGH) << 16) | u32::from(LOCAL_PORT_LOW);
+    // SAFETY: `socket` owns a valid fd for the duration of the borrow, and we
+    // pass a pointer to a correctly sized `u32` as the option value, exactly as
+    // `IP_LOCAL_PORT_RANGE` expects.
+    let ret = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            IP_LOCAL_PORT_RANGE,
+            std::ptr::addr_of!(value).cast::<libc::c_void>(),
+            std::mem::size_of::<u32>()
+                .try_into()
+                .expect("u32 size fits in socklen_t"),
+        )
+    };
+    if ret != 0 {
+        let err = io::Error::last_os_error();
+        // ENOPROTOOPT / EOPNOTSUPP means the running kernel predates
+        // IP_LOCAL_PORT_RANGE (< 6.3). Degrade gracefully: fall back to the
+        // system-wide ephemeral range rather than failing the connection.
+        if matches!(
+            err.raw_os_error(),
+            Some(libc::ENOPROTOOPT | libc::EOPNOTSUPP)
+        ) {
+            if !PORT_RANGE_UNSUPPORTED.swap(true, Relaxed) {
+                warn!(
+                    "IP_LOCAL_PORT_RANGE not supported by this kernel; \
+                     falling back to the system ephemeral port range"
+                );
+            }
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// Create a TCP socket for the generator with its local port range constrained
+/// to `[LOCAL_PORT_LOW, LOCAL_PORT_HIGH]`.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` if the socket cannot be created or the
+/// port range cannot be set.
+fn new_generator_socket(addr: SocketAddr) -> io::Result<socket2::Socket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    set_local_port_range(&socket)?;
+    Ok(socket)
+}
+
+/// Blocking connect to `addr` using a port-range-constrained generator socket.
+///
+/// The kernel picks the source port from the constrained ephemeral range (see
+/// [`set_local_port_range`]); the generator does not manage source ports itself.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from socket creation or `connect`.
+fn generator_connect_blocking(addr: SocketAddr) -> io::Result<net::TcpStream> {
+    let socket = new_generator_socket(addr)?;
+    socket.connect(&addr.into())?;
+    Ok(net::TcpStream::from(socket))
+}
+
+/// Non-blocking connect to `addr` using a port-range-constrained generator
+/// socket, returning a mio stream whose connect is in progress (completion is
+/// signalled by a `WRITABLE` readiness event).
+///
+/// The kernel picks the source port from the constrained ephemeral range (see
+/// [`set_local_port_range`]); the generator does not manage source ports itself.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from socket creation or `connect`. An
+/// in-progress connect is not an error.
+fn generator_connect_nonblocking(addr: SocketAddr) -> io::Result<TcpStream> {
+    let socket = new_generator_socket(addr)?;
+    socket.set_nonblocking(true)?;
+    // A non-blocking connect reports in-progress as EINPROGRESS / WouldBlock;
+    // that is expected and not an error.
+    match socket.connect(&addr.into()) {
+        Ok(()) => {}
+        Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+        Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+        Err(e) => return Err(e),
+    }
+    Ok(TcpStream::from_std(net::TcpStream::from(socket)))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn client_thread_main(
     addr: SocketAddr,
     num_flows: u16,
     request_size: usize,
     response_size: usize,
     no_delay: bool,
+    mode: Mode,
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
 ) -> Result<(), Error> {
@@ -377,28 +533,31 @@ fn client_thread_main(
     let mut events = Events::with_capacity(num_flows as usize);
     let request_buf = vec![0u8; request_size];
     let mut response_buf = vec![0u8; response_size];
-    let mut flows: FlowMap<ClientState> = FlowMap::new();
+    let mut flows: FlowMap<ClientState> = FlowMap::new(num_flows as usize);
     let mut next_token: usize = 0;
 
     for _ in 0..num_flows {
-        match net::TcpStream::connect(addr) {
+        let token = Token(next_token);
+        match generator_connect_blocking(addr) {
             Ok(std_stream) => {
                 let _ = std_stream.set_nodelay(no_delay);
                 std_stream
                     .set_nonblocking(true)
                     .map_err(socket_err("set O_NONBLOCK on flow socket", addr))?;
                 let mut stream = TcpStream::from_std(std_stream);
-                let token = Token(next_token);
                 next_token += 1;
                 poll.registry()
                     .register(&mut stream, token, Interest::WRITABLE)
                     .map_err(poll_err("register a flow with the poll registry", addr))?;
-                flows.insert(Flow {
-                    stream,
-                    token,
-                    state: ClientState::SendRequest,
-                    xfer: request_size,
-                });
+                flows
+                    .insert(Flow {
+                        stream,
+                        token,
+                        state: ClientState::SendRequest,
+                        xfer: request_size,
+                    })
+                    .expect("client should never be able to exceed FlowMap capacity");
+                metrics.connections_initiated.add(1);
             }
             Err(e) => {
                 trace!("connection to {addr} failed: {e}");
@@ -417,21 +576,146 @@ fn client_thread_main(
             let Some(fl) = flows.get_mut(token) else {
                 continue;
             };
-            let action = handle_client_event(fl, &request_buf, &mut response_buf, metrics);
-            flow::apply_action(action, token, &mut flows, poll.registry())?;
+            let action = handle_client_event(fl, mode, &request_buf, &mut response_buf, metrics);
+            apply_client_action(action, token, &mut flows, &poll, addr, no_delay, metrics)?;
         }
     }
 
     Ok(())
 }
 
+/// Apply a [`ClientAction`] to the flow map. Handles the CRR
+/// reconnect transition (deregister old stream, open a new
+/// non-blocking connect, reregister with the same token).
+///
+/// # Errors
+///
+/// Returns [`Error::Poll`] if the registry rejects a reregister or deregister
+/// of a live, owned flow, which means this thread's event loop can no longer
+/// be driven correctly. A reconnect that fails to connect is a workload event
+/// rather than a fatal one: it is counted in `connections_failed` and the flow
+/// is dropped.
+#[allow(clippy::too_many_arguments)]
+fn apply_client_action(
+    action: ClientAction,
+    token: Token,
+    flows: &mut FlowMap<ClientState>,
+    poll: &Poll,
+    addr: SocketAddr,
+    no_delay: bool,
+    metrics: &ThreadMetrics,
+) -> Result<(), Error> {
+    let registry = poll.registry();
+    match action {
+        ClientAction::Continue => {}
+        ClientAction::Reregister(interest) => {
+            if let Some(flow) = flows.get_mut(token) {
+                registry
+                    .reregister(&mut flow.stream, flow.token, interest)
+                    .map_err(poll_err("reregister a flow with the poll registry", addr))?;
+            }
+        }
+        ClientAction::Reconnect => {
+            // Take the flow out of the map so the old socket is fully closed
+            // before the new connection is opened.
+            let Some(mut flow) = flows.remove(token) else {
+                return Ok(());
+            };
+            registry
+                .deregister(&mut flow.stream)
+                .map_err(poll_err("deregister a flow from the poll registry", addr))?;
+            {
+                // Abortive close: SO_LINGER with a zero timeout makes the drop
+                // below emit a RST instead of a FIN, so the socket skips
+                // TIME_WAIT and its source port returns to the constrained
+                // ephemeral range immediately rather than lingering 2*MSL.
+                let sock = socket2::SockRef::from(&flow.stream);
+                if let Err(e) = sock.set_linger(Some(Duration::from_secs(0))) {
+                    warn!("failed to set SO_LINGER for abortive close on reconnect: {e}");
+                }
+            }
+            // Drop the old stream now (sends RST) before the new connect.
+            drop(flow);
+            match generator_connect_nonblocking(addr) {
+                Ok(mut new_stream) => {
+                    {
+                        let sock = socket2::SockRef::from(&new_stream);
+                        if let Err(e) = sock.set_tcp_nodelay(no_delay) {
+                            warn!("failed to set TCP_NODELAY on reconnect: {e}");
+                        }
+                    }
+                    registry
+                        .register(&mut new_stream, token, Interest::WRITABLE)
+                        .map_err(poll_err("register a flow with the poll registry", addr))?;
+                    if let Err(err) = flows.insert(Flow {
+                        stream: new_stream,
+                        token,
+                        state: ClientState::Connecting,
+                        xfer: 0,
+                    }) {
+                        warn!("failed to reinsert reconnected flow: {err}");
+                        metrics.connections_failed.add(1);
+                    }
+                }
+                Err(e) => {
+                    trace!("reconnect to {addr} failed: {e}");
+                    metrics.connections_failed.add(1);
+                }
+            }
+        }
+        ClientAction::Remove => {
+            metrics.connections_closed.add(1);
+            if let Some(mut flow) = flows.remove(token) {
+                registry
+                    .deregister(&mut flow.stream)
+                    .map_err(poll_err("deregister a flow from the poll registry", addr))?;
+                // Abortive close (RST) so the source port skips TIME_WAIT and
+                // is reclaimed immediately rather than lingering 2*MSL.
+                let sock = socket2::SockRef::from(&flow.stream);
+                if let Err(e) = sock.set_linger(Some(Duration::from_secs(0))) {
+                    warn!("failed to set SO_LINGER for abortive close: {e}");
+                }
+                // `flow` (and its stream fd) dropped here -> RST sent.
+            }
+        }
+    }
+    Ok(())
+}
+
 fn handle_client_event(
     flow: &mut Flow<ClientState>,
+    mode: Mode,
     request_buf: &[u8],
     response_buf: &mut [u8],
     metrics: &ThreadMetrics,
-) -> Action {
+) -> ClientAction {
+    // Connecting -> SendRequest transition: mio is edge-triggered, so the
+    // single WRITABLE event that signaled connect completion is also the
+    // event that must drive the first write. Transition state and fall
+    // through to SendRequest in the same call.
+    if matches!(flow.state, ClientState::Connecting) {
+        match flow.stream.take_error() {
+            Ok(None) => {
+                flow.state = ClientState::SendRequest;
+                flow.xfer = request_buf.len();
+                metrics.connections_initiated.add(1);
+                // fall through
+            }
+            Ok(Some(e)) => {
+                trace!("connect failed: {e}");
+                metrics.connections_failed.add(1);
+                return ClientAction::Reconnect;
+            }
+            Err(e) => {
+                trace!("take_error failed: {e}");
+                metrics.connections_failed.add(1);
+                return ClientAction::Reconnect;
+            }
+        }
+    }
+
     match flow.state {
+        ClientState::Connecting => unreachable!("transitioned out of Connecting above"),
         ClientState::SendRequest => {
             let offset = request_buf.len() - flow.xfer;
             match flow.stream.write(&request_buf[offset..]) {
@@ -442,38 +726,43 @@ fn handle_client_event(
                         flow.state = ClientState::RecvResponse;
                         metrics.requests_sent.add(1);
                         metrics.bytes_written.add(request_buf.len() as u64);
-                        Action::Reregister(Interest::READABLE)
+                        ClientAction::Reregister(Interest::READABLE)
                     } else {
-                        Action::Continue
+                        ClientAction::Continue
                     }
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
-                    Action::Remove
+                    ClientAction::Remove
                 }
             }
         }
         ClientState::RecvResponse => {
             let offset = response_buf.len() - flow.xfer;
             match flow.stream.read(&mut response_buf[offset..]) {
-                Ok(0) => Action::Remove,
+                Ok(0) => ClientAction::Remove,
                 Ok(n) => {
                     flow.xfer -= n;
                     if flow.xfer == 0 {
-                        flow.xfer = request_buf.len();
-                        flow.state = ClientState::SendRequest;
                         metrics.responses_received.add(1);
                         metrics.bytes_read.add(response_buf.len() as u64);
-                        Action::Reregister(Interest::WRITABLE)
+                        match mode {
+                            Mode::Rr => {
+                                flow.xfer = request_buf.len();
+                                flow.state = ClientState::SendRequest;
+                                ClientAction::Reregister(Interest::WRITABLE)
+                            }
+                            Mode::Crr => ClientAction::Reconnect,
+                        }
                     } else {
-                        Action::Continue
+                        ClientAction::Continue
                     }
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => ClientAction::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
-                    Action::Remove
+                    ClientAction::Remove
                 }
             }
         }
@@ -605,6 +894,7 @@ async fn prepare_data_listeners(
     let num_threads = params.threads;
     let binding_addr = params.data_addr;
     let flows = params.flows;
+    let mode = params.mode;
 
     let mut thread0_listener = if num_threads > 1 {
         Some(create_listener(
@@ -652,6 +942,7 @@ async fn prepare_data_listeners(
                 &flag,
                 &tm[i as usize],
                 tx,
+                mode,
             );
             if let Err(ref e) = result {
                 error!("server thread {i} failed: {e}");
@@ -830,6 +1121,7 @@ fn server_thread_main(
     shutdown_flag: &AtomicBool,
     metrics: &ThreadMetrics,
     ready_tx: mpsc::UnboundedSender<()>,
+    mode: Mode,
 ) -> Result<(), Error> {
     // Thread 0 uses the pre-built listener (with BPF already attached); others
     // bind their own sockets that join the existing reuseport group.
@@ -858,7 +1150,7 @@ fn server_thread_main(
 
     let mut request_buf = vec![0u8; request_size];
     let response_buf = vec![0u8; response_size];
-    let mut flows: FlowMap<ServerState> = FlowMap::new();
+    let mut flows: FlowMap<ServerState> = FlowMap::new(num_flows as usize);
     let mut next_token: usize = 1;
 
     loop {
@@ -876,19 +1168,28 @@ fn server_thread_main(
                             set_nodelay_mio(&stream, no_delay);
                             let token = Token(next_token);
                             next_token += 1;
-                            let mut mio_stream = stream;
+                            // Insert first: `insert` takes the flow by value and
+                            // drops it (closing the fd) on failure, so there is
+                            // nothing registered to clean up on the error path.
+                            if let Err(err) = flows.insert(Flow {
+                                stream,
+                                token,
+                                state: ServerState::RecvRequest,
+                                xfer: request_size,
+                            }) {
+                                warn!(
+                                    "failed to insert flow in server FlowMap: {err} {0}",
+                                    token.0
+                                );
+                                break;
+                            }
+                            let flow = flows.get_mut(token).expect("flow was just inserted");
                             poll.registry()
-                                .register(&mut mio_stream, token, Interest::READABLE)
+                                .register(&mut flow.stream, token, Interest::READABLE)
                                 .map_err(poll_err(
                                     "register a flow with the poll registry",
                                     binding_addr,
                                 ))?;
-                            flows.insert(Flow {
-                                stream: mio_stream,
-                                token,
-                                state: ServerState::RecvRequest,
-                                xfer: request_size,
-                            });
                             metrics.connections_accepted.add(1);
                         }
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
@@ -907,7 +1208,8 @@ fn server_thread_main(
                 let Some(fl) = flows.get_mut(token) else {
                     continue;
                 };
-                let action = handle_server_event(fl, &mut request_buf, &response_buf, metrics);
+                let action =
+                    handle_server_event(fl, &mut request_buf, &response_buf, metrics, mode);
                 flow::apply_action(action, token, &mut flows, poll.registry())?;
             }
         }
@@ -929,12 +1231,16 @@ fn handle_server_event(
     request_buf: &mut [u8],
     response_buf: &[u8],
     metrics: &ThreadMetrics,
+    mode: Mode,
 ) -> Action {
     match flow.state {
         ServerState::RecvRequest => {
             let offset = request_buf.len() - flow.xfer;
             match flow.stream.read(&mut request_buf[offset..]) {
-                Ok(0) => Action::Remove,
+                Ok(0) => {
+                    metrics.connections_closed.add(1);
+                    Action::Remove
+                }
                 Ok(n) => {
                     flow.xfer -= n;
                     if flow.xfer == 0 {
@@ -950,6 +1256,7 @@ fn handle_server_event(
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("read error: {e}");
+                    metrics.connections_closed.add(1);
                     Action::Remove
                 }
             }
@@ -961,7 +1268,10 @@ fn handle_server_event(
                     flow.xfer -= n;
                     if flow.xfer == 0 {
                         flow.xfer = request_buf.len();
-                        flow.state = ServerState::RecvRequest;
+                        match mode {
+                            Mode::Rr => flow.state = ServerState::RecvRequest,
+                            Mode::Crr => flow.state = ServerState::CloseStream,
+                        }
                         metrics.responses_sent.add(1);
                         metrics.bytes_written.add(response_buf.len() as u64);
                         Action::Reregister(Interest::READABLE)
@@ -972,9 +1282,11 @@ fn handle_server_event(
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Action::Continue,
                 Err(e) => {
                     trace!("write error: {e}");
+                    metrics.connections_closed.add(1);
                     Action::Remove
                 }
             }
         }
+        ServerState::CloseStream => Action::Remove,
     }
 }

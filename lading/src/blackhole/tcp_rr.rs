@@ -22,7 +22,7 @@ use std::num::{NonZeroU16, NonZeroUsize};
 use serde::{Deserialize, Serialize};
 
 use super::General;
-use crate::neper::rr::{self, ServerParams};
+use crate::neper::rr::{self, Mode, ServerParams};
 
 fn default_nonzero_u16() -> NonZeroU16 {
     NonZeroU16::new(1).expect("1 is nonzero")
@@ -133,6 +133,7 @@ impl TcpRr {
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,
             backlog: self.config.backlog,
+            mode: Mode::Rr,
         };
         rr::run_server(params, self.metric_labels, self.shutdown, "tcp_rr").await?;
         Ok(())
