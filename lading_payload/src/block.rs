@@ -236,7 +236,7 @@ impl Cache {
 
                 let mut ta = match config {
                     trace_agent::Config::V04(v04_config) => {
-                        Serializer::V04(v04::V04::with_config(*v04_config, &mut rng)?)
+                        Serializer::V04(v04::V04::with_config(v04_config.clone(), &mut rng)?)
                     }
                     trace_agent::Config::V1(v1_config) => {
                         Serializer::V1(v1::V1::with_config(v1_config.clone(), &mut rng)?)

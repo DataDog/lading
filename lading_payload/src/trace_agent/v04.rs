@@ -5,7 +5,11 @@
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{collections::BTreeMap, io::Write, rc::Rc};
 
-use rand::{Rng, RngExt, seq::IndexedRandom};
+use rand::{
+    Rng, RngExt,
+    distr::weighted::{self, WeightedIndex},
+    seq::IndexedRandom,
+};
 use rmp_serde::Serializer;
 use serde::Serialize;
 
@@ -37,6 +41,8 @@ pub enum ConfigError {
     InvalidErrorRate,
     /// Context count exceeds maximum allowed value
     TooManyContexts,
+    /// See [`weighted::Error`]
+    Weights(weighted::Error),
 }
 
 const STRING_POOL_SIZE: usize = 1_000_000;
@@ -49,12 +55,15 @@ const MAX_CONTEXTS: u32 = 1_000_000;
 /// Via datadog-agent/pkg/trace/agent/normalizer.go:39
 const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
+/// Span metric from which the trace-agent reads a trace's sampling priority.
+const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
+
 /// Configuration for v0.4 trace payload generation.
 ///
 /// Focuses on parameters that affect trace-agent scaling performance:
 /// cardinality (service variety), payload structure (spans per trace), and
 /// string variety (tags/metrics per span).
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -83,6 +92,19 @@ pub struct Config {
     pub tag_value_length: ConfRange<u8>,
     /// Length range for metric keys
     pub metric_key_length: ConfRange<u8>,
+    /// Relative weights of the sampling priorities to set on root spans.
+    ///
+    /// Maps each sampling priority to its relative weight. For every trace,
+    /// one priority is drawn according to these weights and set as the
+    /// `_sampling_priority_v1` metric of the root span. When `None`, no
+    /// priority is set and no randomness is drawn.
+    ///
+    /// Example:
+    /// `priority_weights` = { 0: 1, 1: 2, 2: 1}
+    ///   - 25% chance of getting priority 0
+    ///   - 50% chance of getting priority 1
+    ///   - 25% chance of getting priority 2
+    pub priority_weights: Option<BTreeMap<i32, u32>>,
 }
 
 impl Default for Config {
@@ -105,6 +127,7 @@ impl Default for Config {
             tag_key_length: ConfRange::Inclusive { min: 0, max: 128 },
             tag_value_length: ConfRange::Inclusive { min: 0, max: 128 },
             metric_key_length: ConfRange::Inclusive { min: 0, max: 128 },
+            priority_weights: None,
         }
     }
 }
@@ -159,6 +182,10 @@ impl Config {
             if !range.valid().0 {
                 return Err(ConfigError::InvalidRange);
             }
+        }
+
+        if let Some(weights) = &self.priority_weights {
+            let _ = WeightedIndex::new(weights.values()).map_err(ConfigError::Weights)?;
         }
 
         Ok(())
@@ -249,6 +276,7 @@ pub struct V04 {
     str_pool: Rc<strings::RandomStringPool>,
     /// Pre-generated templates indexed by context ID
     templates: Vec<TraceTemplate>,
+    priority_weights: Option<(Vec<i32>, WeightedIndex<u32>)>,
 }
 
 impl V04 {
@@ -293,10 +321,21 @@ impl V04 {
             });
         }
 
+        let priority_weights = config
+            .priority_weights
+            .as_ref()
+            .map(|priority_weights| priority_weights.iter().unzip())
+            .map(|(values, weights): (Vec<i32>, Vec<u32>)| {
+                Ok((values, WeightedIndex::new(weights)?))
+            })
+            .transpose()
+            .map_err(Error::Weights)?;
+
         Ok(Self {
             config,
             str_pool,
             templates,
+            priority_weights,
         })
     }
 }
@@ -361,6 +400,7 @@ impl<'a> Generator<'a> for V04 {
             root_start_nanos,
             root_duration_nanos,
         );
+
         spans.push(root_span);
 
         // Generate child spans with random timing, allowing for async patterns
@@ -456,6 +496,13 @@ impl V04 {
             let key = self.str_pool.of_size(rng, key_len.into()).unwrap_or("");
             metrics.insert(key, rng.random::<f64>());
         }
+        if parent_id == 0
+            && let Some((priority_values, priority_weights)) = &self.priority_weights
+        {
+            let priority_index = rng.sample(priority_weights);
+            let priority_value = priority_values[priority_index];
+            metrics.insert(SAMPLING_PRIORITY_KEY, f64::from(priority_value));
+        }
 
         let error = i32::from(rng.random::<f32>() < self.config.error_rate);
 
@@ -542,7 +589,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
     use serde::Serialize;
 
-    use super::{ConfRange, Config, V04};
+    use super::{ConfRange, Config, SAMPLING_PRIORITY_KEY, V04};
     use crate::Generator;
 
     proptest! {
@@ -645,6 +692,28 @@ mod test {
             let mut span_ids = std::collections::HashSet::new();
             for span in &trace.spans {
                 prop_assert!(span_ids.insert(span.span_id), "Each span must have a unique span_id within the trace");
+            }
+        }
+
+        /// Property: when priority_weights is set, every root spans
+        /// has the `_sampling_priority_v1` metric, and no non-root span carries that metric.
+        #[test]
+        fn priority_is_set_on_root_span_only(seed: u64, priority_weights in prop::collection::vec((-1i32..=2, 1u32..=1_000), 1..8)) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let config = Config {
+                priority_weights: Some(priority_weights.into_iter().collect()),
+                ..Default::default()
+            };
+            let generator = V04::with_config(config, &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            for span in &trace.spans {
+                let metric = span.metrics.get(SAMPLING_PRIORITY_KEY).copied();
+                if span.parent_id == 0 {
+                    prop_assert!(metric.is_some());
+                } else {
+                    prop_assert!(metric.is_none());
+                }
             }
         }
 
