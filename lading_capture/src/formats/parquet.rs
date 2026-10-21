@@ -15,7 +15,7 @@ use arrow_array::{
     builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
-use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
+use arrow_schema::{ArrowError, Field, Schema};
 use lading_capture_schema::{capture_schema, columns, label_dictionary_type};
 use parquet::{
     arrow::ArrowWriter,
@@ -26,17 +26,11 @@ use parquet::{
 
 use crate::line;
 
-/// Resolve a label map column typed as [`label_dictionary_type`] to a typed
-/// dictionary view of its `Utf8` values.
-///
-/// The single decode path for both the `key` and `value` columns, shared across
-/// crates (e.g. `captool`) so a schema change surfaces everywhere at once.
-/// `column_name` prefixes the error so callers can tell the two columns apart.
+/// Read label strings through a typed dictionary view without copying them.
 ///
 /// # Errors
 ///
-/// Errors if `column` is not a `Dictionary(Int32, _)` or its values are not
-/// `Utf8`.
+/// Return an error if `column` does not use `Dictionary(Int32, Utf8)`.
 pub fn resolve_label_dictionary<'a>(
     column: &'a dyn Array,
     column_name: &str,
@@ -44,9 +38,9 @@ pub fn resolve_label_dictionary<'a>(
     column
         .as_any()
         .downcast_ref::<DictionaryArray<Int32Type>>()
-        .ok_or_else(|| format!("{column_name} are not Dictionary(Int32,Utf8)"))?
+        .ok_or_else(|| format!("{column_name} must use Dictionary(Int32, Utf8)"))?
         .downcast_dict::<StringArray>()
-        .ok_or_else(|| format!("{column_name} dictionary values are not Utf8"))
+        .ok_or_else(|| format!("{column_name} dictionary values must use Utf8"))
 }
 
 /// Parquet format errors
@@ -234,16 +228,14 @@ impl<W: Write + Seek + Send> Format<W> {
         label_offsets.push(0i32);
         label_offsets.extend_from_slice(&self.buffers.label_offsets);
 
-        // Keys and values are dictionary-encoded (Int32,Utf8) so readers
-        // materialize each distinct string once; labels dominate capture memory.
         let mut keys_builder = StringDictionaryBuilder::<Int32Type>::new();
         for key in &self.buffers.label_keys {
-            keys_builder.append_value(key);
+            keys_builder.append(key)?;
         }
         let keys_array = Arc::new(keys_builder.finish());
         let mut values_builder = StringDictionaryBuilder::<Int32Type>::new();
         for value in &self.buffers.label_values {
-            values_builder.append_value(value);
+            values_builder.append(value)?;
         }
         let values_array = Arc::new(values_builder.finish());
         let struct_array = StructArray::from(vec![
@@ -267,10 +259,7 @@ impl<W: Write + Seek + Send> Format<W> {
 
         let field = Arc::new(Field::new(
             columns::LABEL_ENTRIES,
-            DataType::Struct(Fields::from(vec![
-                Field::new(columns::LABEL_KEY, label_dictionary_type(), false),
-                Field::new(columns::LABEL_VALUE, label_dictionary_type(), false),
-            ])),
+            struct_array.data_type().clone(),
             false,
         ));
 

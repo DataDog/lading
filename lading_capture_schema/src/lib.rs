@@ -75,12 +75,9 @@ fn labels_entry_field() -> Arc<Field> {
     ))
 }
 
-/// Arrow logical type for label keys and values.
+/// Return the Arrow logical type for label keys and values.
 ///
-/// Label strings repeat heavily across rows and dominate capture memory.
-/// `Dictionary(Int32, Utf8)` lets readers hold each distinct string once,
-/// cutting resident memory (not just on-disk size, which parquet already
-/// dictionary-encoded).
+/// Dictionary arrays let readers share repeated label strings instead of storing a string for each row.
 #[must_use]
 pub fn label_dictionary_type() -> DataType {
     DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))

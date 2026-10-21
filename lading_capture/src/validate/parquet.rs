@@ -182,9 +182,9 @@ pub fn validate_parquet<P: AsRef<Path>>(
             }
 
             let labels_slice: StructArray = labels_array.value(row);
-            let key_array = resolve_label_dictionary(labels_slice.column(0), "Labels keys")
+            let key_array = resolve_label_dictionary(labels_slice.column(0), "Label keys")
                 .map_err(Error::InvalidColumnType)?;
-            let value_array = resolve_label_dictionary(labels_slice.column(1), "Labels values")
+            let value_array = resolve_label_dictionary(labels_slice.column(1), "Label values")
                 .map_err(Error::InvalidColumnType)?;
 
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
