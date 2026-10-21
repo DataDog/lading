@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenTelemetry metric weights may now be zero, which disables that metric type.
   Only an all-zero set is rejected.
 
+### Fixed
+- Container build no longer fails on stale apt version pins for `libssl-dev` and
+  `protobuf-compiler`.
+
 ## [0.33.0]
 ### Changed
 - **Breaking Change**: Datadog blackhole now records received series under the
