@@ -68,10 +68,11 @@ pub trait OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::jsonl;
+    use crate::formats::parquet::resolve_label_dictionary;
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
+        Array, ArrayAccessor, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
         TimestampMillisecondArray, UInt64Array,
     };
     use bytes::Bytes;
@@ -390,7 +391,7 @@ mod tests {
             }
             let bytes = buffer.into_inner();
 
-            let deserialized_lines = read_parquet_lines(&bytes).expect("read parquet");
+            let (deserialized_lines, _) = read_parquet_lines(&bytes, 1024).expect("read parquet");
 
             prop_assert_eq!(input_lines.len(), deserialized_lines.len());
             for (input, output) in input_lines.iter().zip(deserialized_lines.iter()) {
@@ -399,13 +400,70 @@ mod tests {
         }
     }
 
+    proptest! {
+        /// For all generated labels L and batch sizes B: decode(encode(L), B) = L.
+        ///
+        /// A small label pool forces repetition. Small read batches test label decoding across batch boundaries.
+        #[test]
+        fn parquet_round_trip_repeated_labels_across_batches(
+            environments in prop::collection::vec(
+                prop::sample::select(vec!["prod", "staging", ""]), 1..5
+            ),
+            row_count in 8u64..64,
+            flush_interval in 1usize..8,
+            batch_size in 1usize..8,
+        ) {
+            let input_lines: Vec<Line> = (0..row_count)
+                .zip(environments.iter().cycle())
+                .map(|(fetch_index, env)| Line {
+                    run_id: Uuid::nil(),
+                    time: 1_000 + u128::from(fetch_index),
+                    fetch_index,
+                    metric_name: "requests".to_string(),
+                    metric_kind: MetricKind::Counter,
+                    value: LineValue::Int(fetch_index),
+                    labels: [
+                        ("env".to_string(), (*env).to_string()),
+                        ("service".to_string(), "api".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    value_histogram: Vec::new(),
+                })
+                .collect();
+
+            let mut buffer = Cursor::new(Vec::new());
+            let mut writer = super::parquet::Format::new(&mut buffer, 3)?;
+            for chunk in input_lines.chunks(flush_interval) {
+                for line in chunk {
+                    writer.write_metric(line)?;
+                }
+                writer.flush()?;
+            }
+            writer.close()?;
+
+            let (output_lines, batch_count) = read_parquet_lines(buffer.get_ref(), batch_size)
+                .map_err(|error| TestCaseError::fail(error.to_string()))?;
+            prop_assert!(batch_count > 1, "expected multiple read batches, got {batch_count}");
+            prop_assert_eq!(input_lines.len(), output_lines.len());
+            for (input, output) in input_lines.iter().zip(&output_lines) {
+                assert_lines_equal(input, output)?;
+            }
+        }
+    }
+
     #[expect(clippy::too_many_lines)]
-    fn read_parquet_lines(bytes: &[u8]) -> Result<Vec<Line>, Box<dyn std::error::Error>> {
+    fn read_parquet_lines(
+        bytes: &[u8],
+        batch_size: usize,
+    ) -> Result<(Vec<Line>, usize), Box<dyn std::error::Error>> {
         let bytes_buf = Bytes::copy_from_slice(bytes);
-        let reader_builder = ParquetRecordBatchReaderBuilder::try_new(bytes_buf)?;
-        let reader = reader_builder.build()?;
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes_buf)?
+            .with_batch_size(batch_size)
+            .build()?;
 
         let mut lines = Vec::new();
+        let mut batch_count = 0;
 
         for batch_result in reader {
             let batch = batch_result?;
@@ -414,6 +472,7 @@ mod tests {
             if batch_len == 0 {
                 continue;
             }
+            batch_count += 1;
 
             let run_id_array = batch
                 .column_by_name("run_id")
@@ -502,16 +561,8 @@ mod tests {
                 };
 
                 let labels_slice: StructArray = labels_array.value(row_idx);
-                let keys = labels_slice
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label keys are strings");
-                let values = labels_slice
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label values are strings");
+                let keys = resolve_label_dictionary(labels_slice.column(0), "Label keys")?;
+                let values = resolve_label_dictionary(labels_slice.column(1), "Label values")?;
 
                 let mut labels = FxHashMap::default();
                 for i in 0..keys.len() {
@@ -537,6 +588,6 @@ mod tests {
             }
         }
 
-        Ok(lines)
+        Ok((lines, batch_count))
     }
 }

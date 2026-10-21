@@ -68,9 +68,17 @@ fn labels_entry_field() -> Arc<Field> {
     Arc::new(Field::new(
         columns::LABEL_ENTRIES,
         DataType::Struct(Fields::from(vec![
-            Field::new(columns::LABEL_KEY, DataType::Utf8, false),
-            Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
+            Field::new(columns::LABEL_KEY, label_dictionary_type(), false),
+            Field::new(columns::LABEL_VALUE, label_dictionary_type(), false),
         ])),
         false,
     ))
+}
+
+/// Return the Arrow logical type for label keys and values.
+///
+/// Dictionary arrays let readers share repeated label strings instead of storing a string for each row.
+#[must_use]
+pub fn label_dictionary_type() -> DataType {
+    DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
 }

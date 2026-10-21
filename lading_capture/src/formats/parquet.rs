@@ -10,12 +10,13 @@ use std::{
 };
 
 use arrow_array::{
-    ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array,
+    Array, ArrayRef, BinaryArray, DictionaryArray, Float64Array, MapArray, RecordBatch,
+    StringArray, StructArray, TimestampMillisecondArray, TypedDictionaryArray, UInt64Array,
+    builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
-use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
-use lading_capture_schema::{capture_schema, columns};
+use arrow_schema::{ArrowError, Field, Schema};
+use lading_capture_schema::{capture_schema, columns, label_dictionary_type};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
@@ -24,6 +25,23 @@ use parquet::{
 };
 
 use crate::line;
+
+/// Read label strings through a typed dictionary view without copying them.
+///
+/// # Errors
+///
+/// Return an error if `column` does not use `Dictionary(Int32, Utf8)`.
+pub fn resolve_label_dictionary<'a>(
+    column: &'a dyn Array,
+    column_name: &str,
+) -> Result<TypedDictionaryArray<'a, Int32Type, StringArray>, String> {
+    column
+        .as_any()
+        .downcast_ref::<DictionaryArray<Int32Type>>()
+        .ok_or_else(|| format!("{column_name} must use Dictionary(Int32, Utf8)"))?
+        .downcast_dict::<StringArray>()
+        .ok_or_else(|| format!("{column_name} dictionary values must use Utf8"))
+}
 
 /// Parquet format errors
 #[derive(thiserror::Error, Debug)]
@@ -210,26 +228,38 @@ impl<W: Write + Seek + Send> Format<W> {
         label_offsets.push(0i32);
         label_offsets.extend_from_slice(&self.buffers.label_offsets);
 
-        // Build the labels map array using pre-allocated buffers
-        let keys_array = Arc::new(StringArray::from(self.buffers.label_keys.clone()));
-        let values_array = Arc::new(StringArray::from(self.buffers.label_values.clone()));
+        let mut keys_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for key in &self.buffers.label_keys {
+            keys_builder.append(key)?;
+        }
+        let keys_array = Arc::new(keys_builder.finish());
+        let mut values_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for value in &self.buffers.label_values {
+            values_builder.append(value)?;
+        }
+        let values_array = Arc::new(values_builder.finish());
         let struct_array = StructArray::from(vec![
             (
-                Arc::new(Field::new(columns::LABEL_KEY, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_KEY,
+                    label_dictionary_type(),
+                    false,
+                )),
                 keys_array as ArrayRef,
             ),
             (
-                Arc::new(Field::new(columns::LABEL_VALUE, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_VALUE,
+                    label_dictionary_type(),
+                    false,
+                )),
                 values_array as ArrayRef,
             ),
         ]);
 
         let field = Arc::new(Field::new(
             columns::LABEL_ENTRIES,
-            DataType::Struct(Fields::from(vec![
-                Field::new(columns::LABEL_KEY, DataType::Utf8, false),
-                Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
-            ])),
+            struct_array.data_type().clone(),
             false,
         ));
 

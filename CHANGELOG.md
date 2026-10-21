@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- **Breaking Change**: Capture Parquet files now use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Consumers must read these columns as dictionary arrays. Update downstream readers with the writer because the schemas differ.
+
 ### Added
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,

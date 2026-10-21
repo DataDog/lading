@@ -251,9 +251,10 @@ mod tests {
         assert!(!result.is_valid());
     }
 
+    /// For equal metric names and kinds, distinct label values define distinct series.
     #[test]
-    fn parquet_validation_allows_time_reordering_across_different_series() {
-        let run_id = Uuid::new_v4();
+    fn parquet_validation_distinguishes_label_values() -> Result<(), Box<dyn std::error::Error>> {
+        let run_id = Uuid::nil();
         let lines = vec![
             Line {
                 run_id,
@@ -262,39 +263,42 @@ mod tests {
                 metric_name: "test.counter".to_string(),
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
-                labels: FxHashMap::default(),
+                labels: [("env".to_string(), "prod".to_string())]
+                    .into_iter()
+                    .collect(),
                 value_histogram: Vec::new(),
             },
             Line {
                 run_id,
-                time: 1000, // Time goes backward but different series - OK
+                time: 1000,
                 fetch_index: 1,
-                metric_name: "test.gauge".to_string(),
-                metric_kind: MetricKind::Gauge,
-                value: LineValue::Float(42.0),
-                labels: FxHashMap::default(),
+                metric_name: "test.counter".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(2),
+                labels: [("env".to_string(), "staging".to_string())]
+                    .into_iter()
+                    .collect(),
                 value_histogram: Vec::new(),
             },
         ];
 
-        // Write to parquet
-        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        let parquet_file = NamedTempFile::new()?;
         {
-            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
-                .expect("create parquet writer");
+            let mut writer = parquet::Format::new(parquet_file.reopen()?, 3)?;
             for line in &lines {
-                writer.write_metric(line).expect("write to parquet");
+                writer.write_metric(line)?;
             }
-            writer.flush().expect("flush parquet");
-            writer.close().expect("close parquet");
+            writer.flush()?;
+            writer.close()?;
         }
 
-        let result = validate_parquet(parquet_file.path(), None).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), None)?;
 
-        // Different series can have overlapping timestamps
+        assert_eq!(result.unique_series, 2);
         assert_eq!(result.per_series_errors, 0);
         assert_eq!(result.fetch_index_errors, 0);
         assert!(result.is_valid());
+        Ok(())
     }
 
     #[test]
