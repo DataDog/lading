@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Capture Parquet files now include a `capture.version` footer entry, starting at `1.0.0`.
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,
   and an exact `chunks_per_payload` batch size.

@@ -15,15 +15,85 @@ use arrow_array::{
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
-use lading_capture_schema::{capture_schema, columns};
+use lading_capture_schema::{
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, MetadataError, SchemaError, Version,
+    capture_schema, columns, parse_capture_version, validate_schema,
+};
 use parquet::{
-    arrow::ArrowWriter,
+    arrow::{
+        ArrowWriter,
+        arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder},
+    },
     basic::{Compression, ZstdLevel},
-    file::properties::{WriterProperties, WriterVersion},
+    file::{
+        metadata::{KeyValue, ParquetMetaDataReader},
+        properties::{WriterProperties, WriterVersion},
+        reader::ChunkReader,
+    },
     schema::types::ColumnPath,
 };
 
 use crate::line;
+
+/// Errors in Lading's metadata-aware capture reader.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    /// The file footer or Arrow schema cannot be read.
+    #[error("Parquet error: {0}")]
+    Parquet(#[from] parquet::errors::ParquetError),
+    /// A present capture version is malformed, not an unversioned file.
+    #[error(transparent)]
+    Metadata(#[from] MetadataError),
+    /// Lading's current reader does not implement this declared major.
+    #[error("unsupported capture version {version} (supported major: {supported_major})")]
+    UnsupportedVersion {
+        /// Valid declared version.
+        version: Version,
+        /// Major implemented by this reader.
+        supported_major: u64,
+    },
+    /// A versioned file disagrees with its known field contract.
+    #[error(transparent)]
+    Schema(#[from] SchemaError),
+}
+
+/// Load metadata once and construct Lading's capture batch-reader builder.
+///
+/// Lading rejects unknown majors here. Other consumers can use the shared
+/// metadata parser with their own policy. Unversioned files retain the existing
+/// reading path without stricter schema checks.
+///
+/// # Errors
+///
+/// Return an error for unreadable metadata, invalid versions, unsupported majors, or a mismatched declared schema.
+pub fn reader_builder<T: ChunkReader + 'static>(
+    reader: T,
+) -> Result<ParquetRecordBatchReaderBuilder<T>, ReadError> {
+    let metadata = ParquetMetaDataReader::new().parse_and_finish(&reader)?;
+    let version = parse_capture_version(
+        metadata
+            .file_metadata()
+            .key_value_metadata()
+            .into_iter()
+            .flatten()
+            .map(|entry| (entry.key.as_str(), entry.value.as_deref())),
+    )?;
+    if let Some(version) = &version
+        && version.major != CURRENT_CAPTURE_VERSION.major
+    {
+        return Err(ReadError::UnsupportedVersion {
+            version: version.clone(),
+            supported_major: CURRENT_CAPTURE_VERSION.major,
+        });
+    }
+    let metadata = ArrowReaderMetadata::try_new(Arc::new(metadata), ArrowReaderOptions::default())?;
+    if version.is_some() {
+        validate_schema(metadata.schema().as_ref(), &capture_schema())?;
+    }
+    Ok(ParquetRecordBatchReaderBuilder::new_with_metadata(
+        reader, metadata,
+    ))
+}
 
 /// Parquet format errors
 #[derive(thiserror::Error, Debug)]
@@ -181,6 +251,10 @@ impl<W: Write + Seek + Send> Format<W> {
         // - run_id: one UUID per run
         let props = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
+            .set_key_value_metadata(Some(vec![KeyValue::new(
+                CAPTURE_VERSION_KEY.to_string(),
+                Some(CURRENT_CAPTURE_VERSION.to_string()),
+            )]))
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression_level)?))
             .set_column_dictionary_enabled(ColumnPath::from(columns::METRIC_KIND), true)
             .set_column_dictionary_enabled(ColumnPath::from(columns::RUN_ID), true)

@@ -153,12 +153,9 @@ pub struct Line {
     /// An id that is mostly unique to this run, allowing us to distinguish
     /// duplications of the same observational setup.
     pub run_id: Uuid,
-    /// The time in milliseconds that this line was written.
+    /// The observation's logical timestamp in milliseconds since the Unix epoch.
     pub time: u128,
-    /// The "fetch index". Previous versions of lading scraped prometheus
-    /// metrics from their targets and kept an increment index of polls. Now
-    /// this records the number of times the internal metrics cache has been
-    /// flushed.
+    /// The logical one-second tick within the capture run, independent of file flushes.
     pub fetch_index: u64,
     /// The name of the metric recorded by this line.
     pub metric_name: String,
