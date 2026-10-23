@@ -142,6 +142,8 @@ docker build -f amd64.Dockerfile . --tag [TAG NAME] --platform linux/amd64
 
 ## Documentation
 
+- [Loading Parquet captures](lading_capture_schema/README.md) - Rust helpers and consumer choices
+- [Capture format](docs/capture-format.md) - Version metadata, schema, and interpretation rules
 - [Architecture Decision Records](docs/adr/README.md) - Design decisions and rationale
 - [AGENTS.md](AGENTS.md) - Guidelines for AI agents and contributors
 
