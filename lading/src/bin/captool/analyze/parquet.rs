@@ -8,8 +8,8 @@ use std::fs::File;
 use std::path::Path;
 
 use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
+use lading_capture::formats::parquet::{ReadError, reader_builder};
 use lading_capture_schema::columns;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use rustc_hash::FxHashMap;
 
 use super::{MetricInfo, SeriesStats};
@@ -20,6 +20,9 @@ pub(crate) enum Error {
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// Capture metadata or declared schema error.
+    #[error(transparent)]
+    Capture(#[from] ReadError),
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -43,8 +46,7 @@ pub(crate) enum Error {
 /// Returns an error if the file cannot be read or has invalid schema.
 pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, Error> {
     let file = File::open(path)?;
-    let reader_builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let reader = reader_builder.build()?;
+    let reader = reader_builder(file)?.build()?;
 
     let mut metrics: BTreeSet<MetricInfo> = BTreeSet::new();
 
@@ -96,8 +98,7 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
     metric_name: &str,
 ) -> Result<FxHashMap<BTreeSet<String>, SeriesStats>, Error> {
     let file = File::open(path)?;
-    let reader_builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let reader = reader_builder.build()?;
+    let reader = reader_builder(file)?.build()?;
 
     let mut series_map: FxHashMap<BTreeSet<String>, Vec<(u64, f64)>> = FxHashMap::default();
 

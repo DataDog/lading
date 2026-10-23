@@ -2031,6 +2031,9 @@ name = "lading-capture-schema"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "proptest",
+ "semver",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

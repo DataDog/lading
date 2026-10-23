@@ -2,6 +2,8 @@
 
 A crate containing Lading's capture structures and serialization code.
 
+For reading Parquet captures, see the [consumer guide](../lading_capture_schema/README.md).
+
 ## Fuzzing
 
 This crate includes an AFL++ fuzzing harness that asserts capture file
