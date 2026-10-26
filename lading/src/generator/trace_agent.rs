@@ -1,11 +1,10 @@
 //! The Datadog trace-agent generator.
 //!
-//! Unlike most generators in the lading project this generator is specific to a
-//! single target, the Datadog Agent trace-agent. The reason for this is that
-//! the trace-agent has non-trivial semantic demands on the client, meaning our
-//! generic HTTP generator is not sufficient. This generator, also uniquely,
-//! does not allow for generic payloads: only the trace-agent payload is
-//! configurable.
+//! This generator is specific to Datadog tracing protocols, which impose
+//! semantic requirements beyond those of the generic HTTP generator. It sends
+//! tracer-to-agent payloads to the Datadog Agent trace-agent, or agent-to-intake
+//! protobuf payloads to a compatible intake receiver, depending on the variant.
+//! Only trace payloads are configurable; generic HTTP payloads are not supported.
 //!
 //! ## Metrics
 //!
@@ -39,6 +38,9 @@ use std::{
 };
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
+
+#[cfg(test)]
+mod tests;
 
 const MAX_RETRY_MILLIS: u16 = 6_400;
 
@@ -247,6 +249,7 @@ pub enum Error {
 #[derive(Debug)]
 pub struct TraceAgent {
     trace_endpoint: Uri,
+    content_type: &'static str,
     backoff_behavior: BackoffBehavior,
     concurrency: ConcurrencyStrategy,
     throttle: BlockThrottle,
@@ -322,6 +325,7 @@ impl TraceAgent {
 
         Ok(Self {
             trace_endpoint,
+            content_type: config.variant.content_type(),
             backoff_behavior: config.backoff_behavior,
             concurrency,
             throttle,
@@ -351,6 +355,7 @@ impl TraceAgent {
 
         let labels = self.metric_labels;
         let backoff_behavior = self.backoff_behavior;
+        let content_type = self.content_type;
 
         let mut handle = self.block_cache.handle();
         let shutdown_wait = self.shutdown.recv();
@@ -375,7 +380,7 @@ impl TraceAgent {
                                     error!("Connection semaphore closed");
                                     return;
                                 };
-                                handle_request(client, &trace_endpoint, bytes, backoff_behavior, &labels, data_points).await;
+                                handle_request(client, &trace_endpoint, content_type, bytes, backoff_behavior, &labels, data_points).await;
                                 drop(permit);
                             });
                         }
@@ -399,15 +404,11 @@ impl TraceAgent {
     }
 }
 
-/// Handle a single request with backoff behavior
-///
-/// Implicitly this is confusing a generic request with a v0.4 request. Given
-/// that we only handle v0.4 load currently we consider this acceptable for the
-/// time being. Once `lading_payload` supports more than v0.4 this will need to
-/// be addressed.
+/// Handle a single request using the selected payload's encoding and backoff behavior.
 async fn handle_request(
     client: Client<HttpConnector, BoxBody<Bytes, hyper::Error>>,
     trace_endpoint: &Uri,
+    content_type: &'static str,
     bytes: Bytes,
     backoff_behavior: BackoffBehavior,
     labels: &[(String, String)],
@@ -422,7 +423,7 @@ async fn handle_request(
         let request = Request::builder()
             .method(hyper::Method::POST)
             .uri(trace_endpoint)
-            .header("Content-Type", "application/msgpack")
+            .header("Content-Type", content_type)
             .header("Content-Length", block_length)
             .header("Datadog-Send-Real-Http-Status", "true")
             .body(body);

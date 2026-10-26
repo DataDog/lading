@@ -189,7 +189,7 @@ pub enum Config {
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
-    /// Generates `TraceAgent` payloads in `MsgPack` format
+    /// Generates trace payloads in `MessagePack` or protobuf format
     #[serde(rename = "trace_agent")]
     TraceAgent(crate::trace_agent::Config),
     /// Generates JSON records from a user-supplied YAML template file

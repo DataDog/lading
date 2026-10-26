@@ -30,6 +30,27 @@ Key files to understand:
 - [`pkg/trace/api/version.go`][version_go] - Protocol version definitions
 - [`pkg/proto/datadog/trace/span.proto`][span_proto] - Span structure definition
 
+## Agent-to-intake protobuf payloads
+
+The `agent_payload` variant generates protobuf `AgentPayload` messages for
+`/api/v0.2/traces`, the endpoint to which an Agent forwards traces. This is not
+the tracer-facing `/v0.2/traces` MessagePack protocol. It uses
+`Content-Type: application/x-protobuf` and the same trace-shape settings as
+`v0.4`, including `priority_weights`. Each generated trace becomes one complete
+`TraceChunk`; chunks share one `TracerPayload` inside an `AgentPayload`.
+
+See the [intake example](../../../examples/trace-agent-intake.yaml). The block
+size includes protobuf envelopes and length prefixes. A trace that cannot fit is
+not split; a budget too small for one complete trace produces no block. Cached
+block metadata counts spans, not trace chunks or requests. As with other fixed
+block caches, cycling the cache replays trace IDs; size the cache for the intended
+workload rather than assuming every request contains new IDs.
+
+The wire fields follow `agent_payload.proto`, `tracer_payload.proto`, and
+`span.proto` from the Datadog Agent revision linked below. Fields outside the
+v0.4 trace model, such as span links and events, are not generated. This variant
+neither simulates Agent-side normalization/sampling nor requires an Agent relay.
+
 ## V0.4 Specification
 
 ### Protocol Definition

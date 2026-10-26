@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Trace-agent `agent_payload` generation for the agent-to-intake
+  `/api/v0.2/traces` protobuf endpoint, reusing v0.4 trace-shape settings.
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,
   and an exact `chunks_per_payload` batch size.

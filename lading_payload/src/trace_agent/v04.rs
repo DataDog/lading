@@ -56,7 +56,7 @@ const MAX_CONTEXTS: u32 = 1_000_000;
 const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
 /// Span metric from which the trace-agent reads a trace's sampling priority.
-const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
+pub(super) const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 
 /// Configuration for v0.4 trace payload generation.
 ///
@@ -211,49 +211,49 @@ impl Config {
 )]
 pub struct Span<'a> {
     /// `service` is the name of the service with which this span is associated.
-    service: &'a str,
+    pub(super) service: &'a str,
     /// `name` is the operation name of this span.
-    name: &'a str,
+    pub(super) name: &'a str,
     /// `resource` is the resource name of this span, also sometimes called the
     /// endpoint (for web spans).
-    resource: &'a str,
+    pub(super) resource: &'a str,
     /// `traceID` is the ID of the trace to which this span belongs.
-    trace_id: u64,
+    pub(super) trace_id: u64,
     /// `spanID` is the ID of this span.
-    span_id: u64,
+    pub(super) span_id: u64,
     /// `parentID` is the ID of this span's parent, or zero if this span has no
     /// parent.
-    parent_id: u64,
+    pub(super) parent_id: u64,
     /// `start` is the number of nanoseconds between the Unix epoch and the
     /// beginning of this span.
-    start: i64,
+    pub(super) start: i64,
     /// `duration` is the time length of this span in nanoseconds.
-    duration: i64,
+    pub(super) duration: i64,
     /// `error` is 1 if there is an error associated with this span, or 0 if
     /// there is not.
-    error: i32,
+    pub(super) error: i32,
     /// `meta` is a mapping from tag name to tag value for string-valued tags.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    meta: BTreeMap<&'a str, &'a str>,
+    pub(super) meta: BTreeMap<&'a str, &'a str>,
     /// `metrics` is a mapping from tag name to tag value for numeric-valued
     /// tags.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    metrics: BTreeMap<&'a str, f64>,
+    pub(super) metrics: BTreeMap<&'a str, f64>,
     /// `kind` is the type of the service with which this span is associated.
     /// Example values: web, db, lambda.
     #[serde(rename = "type")]
-    kind: &'a str,
+    pub(super) kind: &'a str,
     /// `meta_struct` is a registry of structured "other" data used by, e.g.,
     /// `AppSec`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    meta_struct: BTreeMap<&'a str, Vec<u8>>,
+    pub(super) meta_struct: BTreeMap<&'a str, Vec<u8>>,
 }
 
 /// Represents a single trace (array of spans with same `trace_id`)
 #[derive(Debug)]
 pub struct Trace<'a> {
     /// The spans that make up this trace
-    spans: Vec<Span<'a>>,
+    pub(super) spans: Vec<Span<'a>>,
 }
 
 /// A template for service/operation/resource combinations used in trace generation

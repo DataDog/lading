@@ -1,0 +1,35 @@
+# Agent-to-intake protobuf, not the tracer-facing /v0.2/traces MessagePack protocol.
+generator:
+  - trace_agent:
+      seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+        59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+      target_uri: "http://127.0.0.1:8126"
+      bytes_per_second: "1 MiB"
+      maximum_block_size: "512 KiB"
+      maximum_prebuild_cache_size_bytes: "16 MiB"
+      parallel_connections: 4
+      variant:
+        agent_payload:
+          contexts:
+            constant: 1000
+          spans_per_trace:
+            constant: 8
+          tags_per_span:
+            constant: 2
+          metrics_per_span:
+            constant: 1
+          error_rate: 0.01
+          service_name_length:
+            constant: 8
+          operation_name_length:
+            constant: 12
+          resource_name_length:
+            constant: 16
+          span_type_length:
+            constant: 3
+          tag_key_length:
+            constant: 5
+          tag_value_length:
+            constant: 16
+          metric_key_length:
+            constant: 5

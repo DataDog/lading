@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod agent_payload;
 pub mod v04;
 pub mod v1;
 
@@ -30,6 +31,8 @@ pub enum Config {
     /// Version 1.0: msgpack `idx`/ETP tracer payload, with streaming string table
     #[serde(rename = "v1.0")]
     V1(v1::Config),
+    /// Agent-to-intake protobuf payloads, using the v0.4 trace-shape settings.
+    AgentPayload(v04::Config),
 }
 
 impl Config {
@@ -39,6 +42,7 @@ impl Config {
         match self {
             Self::V04(_) => "v0.4",
             Self::V1(_) => "v1.0",
+            Self::AgentPayload(_) => "agent_payload",
         }
     }
 
@@ -48,6 +52,16 @@ impl Config {
         match self {
             Self::V04(_) => "/v0.4/traces",
             Self::V1(_) => "/v1.0/traces",
+            Self::AgentPayload(_) => "/api/v0.2/traces",
+        }
+    }
+
+    /// Return the media type of the selected payload encoding.
+    #[must_use]
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            Self::V04(_) | Self::V1(_) => "application/msgpack",
+            Self::AgentPayload(_) => "application/x-protobuf",
         }
     }
 }
@@ -64,7 +78,7 @@ impl Config {
     /// Returns an error if the configuration is invalid
     pub fn valid(&self) -> Result<(), String> {
         match self {
-            Config::V04(config) => config
+            Config::V04(config) | Config::AgentPayload(config) => config
                 .valid()
                 .map_err(|_| "invalid configuration".to_string()),
             Config::V1(config) => config
@@ -76,14 +90,16 @@ impl Config {
 
 /// A version-dispatched trace payload serializer.
 ///
-/// The two protocol versions generate different payload types, so a single enum lets the block
-/// cache hold either without monomorphizing its construction logic per version.
+/// The protocol variants generate different payload types, so a single enum lets the block
+/// cache hold any variant without monomorphizing its construction logic per version.
 #[derive(Debug)]
 pub enum Serializer {
     /// Version 0.4: msgpack array of arrays of spans.
     V04(v04::V04),
     /// Version 1.0: msgpack `idx`/ETP tracer payload.
     V1(v1::V1),
+    /// Agent-to-intake protobuf payload.
+    AgentPayload(agent_payload::AgentPayload),
 }
 
 impl crate::Serialize for Serializer {
@@ -100,6 +116,7 @@ impl crate::Serialize for Serializer {
         match self {
             Serializer::V04(ser) => ser.to_bytes(rng, max_bytes, writer),
             Serializer::V1(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Serializer::AgentPayload(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 
@@ -107,6 +124,7 @@ impl crate::Serialize for Serializer {
         match self {
             Serializer::V04(ser) => ser.data_points_generated(),
             Serializer::V1(ser) => ser.data_points_generated(),
+            Serializer::AgentPayload(ser) => ser.data_points_generated(),
         }
     }
 }
