@@ -41,6 +41,7 @@ doctest = false
 
 [dev-dependencies]
 approx = { workspace = true }
+arrow-schema = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }

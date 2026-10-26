@@ -10,7 +10,6 @@ members = [
   "lading_payload",
   "lading_throttle",
 ]
-exclude = ["lading_capture/tests/support/reference_v1"]
 
 [workspace.dependencies]
 anyhow = "1.0"

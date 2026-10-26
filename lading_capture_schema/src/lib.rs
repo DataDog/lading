@@ -2,8 +2,8 @@
 //!
 //! This crate exposes the exact column layout used by `lading-capture` so
 //! downstream consumers can read capture files without relying on ad-hoc
-//! schema reconstruction. The independent capture contract is documented in
-//! `docs/capture-format.md`.
+//! schema reconstruction. See this crate's README for the capture contract and
+//! Rust loading helpers.
 
 mod validation;
 mod version;

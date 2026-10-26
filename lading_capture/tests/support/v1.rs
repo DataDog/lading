@@ -1,19 +1,38 @@
-//! Frozen 1.x data-reading behavior, independent of writer schemas and constants.
-//!
-//! Changes to this decoder or its dependency pins need explicit compatibility
-//! review. Do not adapt it to make a same-major producer change pass.
+//! Keep V1 decoding expectations independent of producer constants, using current workspace libraries.
 
-use std::io;
-
-use crate::model::Record;
+use std::{collections::BTreeMap, io};
 
 use arrow_array::{
     Array, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray,
     TimestampMillisecondArray, UInt64Array,
 };
+use arrow_schema::Schema;
 use bytes::Bytes;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use uuid::Uuid;
+
+/// V1 records compare logical values without imposing row or label-pair order.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Record {
+    pub run_id: [u8; 16],
+    pub time: i64,
+    pub fetch_index: u64,
+    pub metric_name: String,
+    pub metric_kind: String,
+    pub value_int: Option<u64>,
+    pub value_float_bits: Option<u64>,
+    pub labels: BTreeMap<String, String>,
+    pub value_histogram: Option<Vec<u8>>,
+}
+
+/// Load the frozen Arrow schema instead of deriving expectations from the current writer.
+///
+/// # Errors
+///
+/// Return an error if the snapshot cannot decode as an Arrow schema.
+pub(crate) fn schema() -> io::Result<Schema> {
+    serde_json::from_str(include_str!("../fixtures/v1.arrow.json")).map_err(io::Error::other)
+}
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -29,14 +48,11 @@ fn column<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> io::Res
         .ok_or_else(|| invalid(format!("unexpected type for {name}")))
 }
 
-/// Read named capture columns and fixed map roles with default Parquet reader options.
-///
-/// Footer-version admission policy is deliberately separate from this data test.
-/// Small batches exercise labels across batch boundaries.
+/// Read named V1 columns and fixed map roles with current Parquet reader options.
 ///
 /// # Errors
 ///
-/// Return an error when the fixed reader cannot decode the file or its known columns.
+/// Return an error when a file cannot decode with the fixed V1 expectations.
 pub(crate) fn read(data: &[u8]) -> io::Result<Vec<Record>> {
     let reader = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(data))
         .map_err(io::Error::other)?
@@ -60,7 +76,6 @@ pub(crate) fn read(data: &[u8]) -> io::Result<Vec<Record>> {
             if !matches!(kind, "counter" | "gauge" | "histogram") {
                 return Err(invalid(format!("unknown metric kind {kind}")));
             }
-            // Map roles stay positional even when top-level columns move.
             let entries = labels.value(row);
             let keys = entries
                 .column(0)
@@ -99,7 +114,6 @@ pub(crate) fn read(data: &[u8]) -> io::Result<Vec<Record>> {
             });
         }
     }
-    // Canonical record order keeps physical row and batch ordering outside the compatibility contract.
     records.sort();
     Ok(records)
 }

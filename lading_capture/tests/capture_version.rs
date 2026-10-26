@@ -1,7 +1,7 @@
-//! Verify version metadata and compatibility independently of current writer assumptions.
+//! Check versioned captures against frozen V1 schema and record expectations.
 
-#[path = "support/reference.rs"]
-mod reference;
+#[path = "support/v1.rs"]
+mod v1;
 
 use std::{
     error::Error,
@@ -45,7 +45,6 @@ use protobuf::Message;
 use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
-const PRE_V1: &[u8] = include_bytes!("fixtures/pre_v1.parquet");
 const V1: &[u8] = include_bytes!("fixtures/v1.parquet");
 
 fn lines(values: &[u64]) -> Vec<Line> {
@@ -82,7 +81,9 @@ fn write_capture(lines: &[Line]) -> TestResult<Bytes> {
         writer.write_metric(line)?;
     }
     writer.close()?;
-    Ok(Bytes::from(output.into_inner()))
+    let data = Bytes::from(output.into_inner());
+    assert_v1_contract(data.clone())?;
+    Ok(data)
 }
 
 fn version(data: Bytes) -> TestResult<Option<Version>> {
@@ -126,9 +127,30 @@ fn write_batches(
     Ok(Bytes::from(output))
 }
 
+fn assert_v1_contract(data: Bytes) -> TestResult {
+    let declared = version(data.clone())?.ok_or("missing capture version")?;
+    assert_eq!(
+        declared.major, 1,
+        "add a frozen contract for capture version {declared}"
+    );
+    let actual = ParquetRecordBatchReaderBuilder::try_new(data)?;
+    lading_capture_schema::validate_schema(actual.schema(), &v1::schema()?)?;
+    let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?;
+    for expected in baseline.parquet_schema().root_schema().get_fields() {
+        let observed = actual
+            .parquet_schema()
+            .root_schema()
+            .get_fields()
+            .iter()
+            .find(|field| field.name() == expected.name())
+            .ok_or("missing native Parquet field")?;
+        assert_eq!(observed, expected);
+    }
+    Ok(())
+}
+
 fn input_batch() -> TestResult<RecordBatch> {
-    let mut reader =
-        ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(PRE_V1))?.build()?;
+    let mut reader = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?.build()?;
     let batch = reader.next().ok_or("missing fixture batch")??;
     if reader.next().transpose()?.is_some() {
         return Err("expected exactly one fixture batch".into());
@@ -137,10 +159,10 @@ fn input_batch() -> TestResult<RecordBatch> {
 }
 
 #[test]
-fn new_metadata_preserves_frozen_reader_output() -> TestResult {
+fn writer_output_preserves_v1_records() -> TestResult {
     let data = write_capture(&lines(&[10, 20, 30]))?;
     assert_eq!(version(data.clone())?, Some(CURRENT_CAPTURE_VERSION));
-    assert_eq!(reference::read(&data)?, reference::read(V1)?);
+    assert_eq!(v1::read(&data)?, v1::read(V1)?);
     let file = tempfile::NamedTempFile::new()?;
     std::fs::write(file.path(), &data)?;
     let validation = validate_parquet(file.path(), None)?;
@@ -156,51 +178,61 @@ fn zero_rows_still_have_version_and_schema() -> TestResult {
     assert_eq!(version(data.clone())?, Some(CURRENT_CAPTURE_VERSION));
     let builder = reader_builder(data.clone())?;
     assert_eq!(builder.metadata().file_metadata().num_rows(), 0);
-    assert_eq!(builder.schema().fields(), capture_schema().fields());
-    assert!(reference::read(&data)?.is_empty());
+    lading_capture_schema::validate_schema(builder.schema(), &v1::schema()?)?;
+    assert!(v1::read(&data)?.is_empty());
     Ok(())
 }
 
-/// Both frozen baselines remain readable without changing their metadata or records.
+/// The frozen V1 capture retains its declared schema and complete logical records.
 #[test]
-fn frozen_fixtures_work_with_current_reader() -> TestResult {
-    let expected_records = reference::read(PRE_V1)?;
-    for (filename, data, declared_version) in [
-        ("pre_v1.parquet", PRE_V1, None),
-        ("v1.parquet", V1, Some(Version::new(1, 0, 0))),
-    ] {
-        assert_eq!(
-            version(Bytes::from_static(data))?,
-            declared_version,
-            "{filename}"
-        );
-        let batches = reader_builder(Bytes::from_static(data))?
-            .with_batch_size(1)
-            .build()?
-            .collect::<Result<Vec<_>, _>>()?;
-        assert_eq!(batches.len(), 3, "{filename}");
-        assert!(
-            batches.iter().all(|batch| batch.num_rows() == 1),
-            "{filename}"
-        );
-        assert_eq!(reference::read(data)?, expected_records, "{filename}");
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(filename);
-        let validation = validate_parquet(path, None)?;
-        assert!(validation.is_valid(), "{filename}");
-        assert_eq!(validation.line_count, 3, "{filename}");
-        assert_eq!(validation.unique_series, 2, "{filename}");
-    }
+fn frozen_v1_works_with_current_reader() -> TestResult {
+    assert_eq!(
+        version(Bytes::from_static(V1))?,
+        Some(Version::new(1, 0, 0))
+    );
+    assert_v1_contract(Bytes::from_static(V1))?;
+    let batches = reader_builder(Bytes::from_static(V1))?
+        .with_batch_size(1)
+        .build()?
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(batches.len(), 3);
+    assert!(batches.iter().all(|batch| batch.num_rows() == 1));
+    let expected = [
+        (0u64, 1000, 10, vec![("env", "prod"), ("service", "api")]),
+        (1, 2000, 20, vec![("env", "staging")]),
+        (2, 3000, 30, vec![("env", "prod"), ("service", "api")]),
+    ]
+    .into_iter()
+    .map(|(tick, time, value, labels)| v1::Record {
+        run_id: [0; 16],
+        time,
+        fetch_index: tick,
+        metric_name: "requests".to_string(),
+        metric_kind: "counter".to_string(),
+        value_int: Some(value),
+        value_float_bits: None,
+        labels: labels
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect(),
+        value_histogram: None,
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(v1::read(V1)?, expected);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1.parquet");
+    let validation = validate_parquet(path, None)?;
+    assert!(validation.is_valid());
+    assert_eq!(validation.line_count, 3);
+    assert_eq!(validation.unique_series, 2);
     Ok(())
 }
 
 proptest! {
-    /// For all scalar inputs: the unchanged 1.x reader preserves the writer's integer values.
+    /// For all scalar inputs: V1 decoding preserves the writer's integer values.
     #[test]
-    fn unchanged_reader_preserves_values(values in collection::vec(any::<u64>(), 1..32)) {
+    fn v1_decoder_preserves_values(values in collection::vec(any::<u64>(), 1..32)) {
         let data = write_capture(&lines(&values)).map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let records = reference::read(&data)?;
+        let records = v1::read(&data)?;
         prop_assert_eq!(records.len(), values.len());
         for (record, expected) in records.iter().zip(values) {
             prop_assert_eq!(record.value_int, Some(expected));
@@ -212,12 +244,13 @@ proptest! {
 /// Any column permutation and ignorable top-level field preserve 1.x decoding.
 #[test]
 fn column_order_and_extras_are_not_version_boundaries() -> TestResult {
-    let expected = reference::read(PRE_V1)?;
+    let expected = v1::read(V1)?;
     let batch = input_batch()?;
     proptest!(|(order in collection::vec(any::<u64>(), 9), insertion in 0usize..10)| {
         let result = reordered_capture(&batch, order, insertion)
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let decoded = reference::read(&result)?;
+        assert_v1_contract(result.clone()).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let decoded = v1::read(&result)?;
         prop_assert_eq!(decoded.as_slice(), expected.as_slice());
         let reader = reader_builder(result)?.with_batch_size(1).build()?;
         let batches = reader.collect::<Result<Vec<_>, _>>()?;
@@ -258,7 +291,7 @@ fn reordered_capture(batch: &RecordBatch, order: Vec<u64>, insertion: usize) -> 
 
 /// For all dictionary settings: decoded rows equal the baseline across three row groups.
 #[test]
-fn page_dictionary_encoding_keeps_unchanged_readers() -> TestResult {
+fn page_dictionary_encoding_preserves_v1_contract() -> TestResult {
     let batch = input_batch()?;
     for dictionary in [false, true] {
         let properties = WriterProperties::builder()
@@ -271,8 +304,9 @@ fn page_dictionary_encoding_keeps_unchanged_readers() -> TestResult {
         writer.write(&batch)?;
         writer.close()?;
         let data = Bytes::from(output);
+        assert_v1_contract(data.clone())?;
         assert_eq!(reader_builder(data.clone())?.metadata().num_row_groups(), 3);
-        assert_eq!(reference::read(&data)?, reference::read(PRE_V1)?);
+        assert_eq!(v1::read(&data)?, v1::read(V1)?);
     }
     Ok(())
 }
@@ -285,7 +319,8 @@ fn physical_row_order_does_not_change_the_contract() -> TestResult {
         .map(|row| batch.slice(row, 1))
         .collect();
     let data = write_batches(batch.schema(), &reversed, declared(Some("1.0.0")), true)?;
-    assert_eq!(reference::read(&data)?, reference::read(PRE_V1)?);
+    assert_v1_contract(data.clone())?;
+    assert_eq!(v1::read(&data)?, v1::read(V1)?);
     Ok(())
 }
 
@@ -316,7 +351,8 @@ fn scalar_kinds_and_histograms_keep_existing_representation() -> TestResult {
         .value_histogram
         .clone_from(&payload);
     let data = write_capture(&records)?;
-    let decoded = reference::read(&data)?;
+    let decoded = v1::read(&data)?;
+    assert_eq!(decoded.len(), records.len());
     for (input, output) in records.iter().zip(&decoded) {
         match input.value {
             LineValue::Int(value) => {
@@ -347,7 +383,7 @@ fn nonfinite_scalars_do_not_gain_new_validation() -> TestResult {
         record.value = LineValue::Float(value);
     }
     let data = write_capture(&records)?;
-    let decoded = reference::read(&data)?;
+    let decoded = v1::read(&data)?;
     assert_eq!(decoded.len(), values.len());
     for (record, value) in decoded.iter().zip(values) {
         assert_eq!(record.value_float_bits, Some(value.to_bits()));
@@ -356,7 +392,7 @@ fn nonfinite_scalars_do_not_gain_new_validation() -> TestResult {
 }
 
 #[test]
-fn malformed_metadata_never_falls_back_to_legacy() -> TestResult {
+fn malformed_version_metadata_is_rejected() -> TestResult {
     for metadata in [
         declared(None),
         declared(Some("")),
@@ -367,6 +403,20 @@ fn malformed_metadata_never_falls_back_to_legacy() -> TestResult {
         let data = write_batches(Arc::new(capture_schema()), &[], metadata, true)?;
         assert!(matches!(reader_builder(data), Err(ReadError::Metadata(_))));
     }
+    Ok(())
+}
+
+#[test]
+fn missing_version_uses_standard_parquet_reader() -> TestResult {
+    let batch = input_batch()?;
+    let data = write_batches(batch.schema(), &[batch], vec![], true)?;
+    assert_eq!(version(data.clone())?, None);
+    let batches = reader_builder(data.clone())?
+        .with_batch_size(1)
+        .build()?
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(batches.len(), 3);
+    assert_eq!(v1::read(&data)?, v1::read(V1)?);
     Ok(())
 }
 
@@ -387,7 +437,7 @@ fn unsupported_major_is_checked_before_arrow_schema() -> TestResult {
 }
 
 #[test]
-fn versioned_schema_checks_do_not_tighten_legacy() -> TestResult {
+fn nullable_mandatory_fields_fail_v1_schema_checks() -> TestResult {
     let batch = input_batch()?;
     let fields: Vec<_> = batch
         .schema()
@@ -403,19 +453,6 @@ fn versioned_schema_checks_do_not_tighten_legacy() -> TestResult {
         .collect();
     let schema = Arc::new(Schema::new(fields));
     let batch = RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec())?;
-    let legacy = write_batches(
-        Arc::clone(&schema),
-        std::slice::from_ref(&batch),
-        vec![],
-        true,
-    )?;
-    assert!(
-        reader_builder(legacy)?
-            .build()?
-            .next()
-            .transpose()?
-            .is_some()
-    );
     let tagged = write_batches(schema, &[batch], declared(Some("1.0.0")), true)?;
     assert!(matches!(reader_builder(tagged), Err(ReadError::Schema(_))));
     Ok(())
@@ -479,8 +516,8 @@ fn reversed_map_roles_are_not_compatible() -> TestResult {
     )?;
     let batch = replace_labels(&batch, labels)?;
     let data = write_batches(batch.schema(), &[batch], declared(Some("1.0.0")), true)?;
-    let decoded = reference::read(&data)?;
-    assert_ne!(decoded, reference::read(PRE_V1)?);
+    let decoded = v1::read(&data)?;
+    assert_ne!(decoded, v1::read(V1)?);
     let first = decoded.first().ok_or("missing decoded row")?;
     assert_eq!(first.labels.get("prod").map(String::as_str), Some("env"));
     assert!(matches!(reader_builder(data), Err(ReadError::Schema(_))));
@@ -525,7 +562,14 @@ fn dictionary_representation_is_not_a_same_major_change() -> TestResult {
     let labels = MapArray::try_new(entry, labels.offsets().clone(), entries, None, false)?;
     let batch = replace_labels(&batch, labels)?;
     let data = write_batches(batch.schema(), &[batch], declared(Some("1.1.0")), true)?;
-    assert!(reference::read(&data).is_err());
+    let actual = ParquetRecordBatchReaderBuilder::try_new(data.clone())?;
+    let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?;
+    assert_eq!(
+        actual.parquet_schema().root_schema(),
+        baseline.parquet_schema().root_schema()
+    );
+    assert!(lading_capture_schema::validate_schema(actual.schema(), &v1::schema()?).is_err());
+    assert!(v1::read(&data).is_err());
     assert!(matches!(reader_builder(data), Err(ReadError::Schema(_))));
     Ok(())
 }

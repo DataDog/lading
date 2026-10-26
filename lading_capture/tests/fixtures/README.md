@@ -1,14 +1,11 @@
-# Frozen capture fixtures
+# Frozen V1 contract
 
-These synthetic fixtures freeze the same nine-column data layout before and after capture version stamping. Neither file comes from a production archive.
+`v1.parquet` captures the initial `1.0.0` writer's schema and three synthetic counter records with values `10`, `20`, and `30`. Its raw footer declares `capture.version = "1.0.0"`.
 
-| File | Raw `capture.version` | Source |
-| --- | --- | --- |
-| `pre_v1.parquet` | Absent | The unversioned `main` writer layout, captured before version stamping |
-| `v1.parquet` | `1.0.0` | The initial V1 Lading writer |
+`v1.arrow.json` records the Arrow field declarations extracted from that accepted capture using Arrow's schema serialization.
 
-Both files contain three counter rows, a nil run UUID, timestamps `1000`, `2000`, and `3000`, and values `10`, `20`, and `30`. Repeated `env=prod`/`service=api` labels surround an `env=staging` row.
+Tests compare named native fields, frozen Arrow declarations, and expected logical-record values. The in-process helper uses current workspace dependencies and keeps its V1 expectations independent of producer constants.
 
-Both use `Utf8` label keys and values, Parquet v2 writer properties, ZSTD level 3, and the standard embedded Arrow schema. The current reader and the frozen reference reader must read both files and preserve their records.
+Treat both baseline artifacts as fixed. Each new major format gets a separate baseline and explicit test coverage.
 
-Keep both files frozen. Do not regenerate either file during tests or writer dependency updates.
+See the [format contract](../../../lading_capture_schema/README.md) for the declared versions and field rules.

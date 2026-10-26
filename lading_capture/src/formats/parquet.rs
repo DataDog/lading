@@ -41,7 +41,7 @@ pub enum ReadError {
     /// The file footer or Arrow schema cannot be read.
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
-    /// A present capture version is malformed, not an unversioned file.
+    /// A present capture version has invalid metadata.
     #[error(transparent)]
     Metadata(#[from] MetadataError),
     /// Lading's current reader does not implement this declared major.
@@ -59,13 +59,12 @@ pub enum ReadError {
 
 /// Load metadata once and construct Lading's capture batch-reader builder.
 ///
-/// Lading rejects unknown majors here. Other consumers can use the shared
-/// metadata parser with their own policy. Unversioned files retain the existing
-/// reading path without stricter schema checks.
+/// Lading checks declared versions and reuses footer metadata for Arrow decoding.
+/// Files without a version key follow the ordinary Parquet reading path.
 ///
 /// # Errors
 ///
-/// Return an error for unreadable metadata, invalid versions, unsupported majors, or a mismatched declared schema.
+/// Return an error for unreadable metadata, invalid declared versions, unsupported majors, or a mismatched declared schema.
 pub fn reader_builder<T: ChunkReader + 'static>(
     reader: T,
 ) -> Result<ParquetRecordBatchReaderBuilder<T>, ReadError> {
