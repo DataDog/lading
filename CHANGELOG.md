@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Container build no longer fails on stale apt version pins for `libssl-dev` and
   `protobuf-compiler`.
+- Updated `zstd` to 0.14, `arrow`/`parquet` to 60, and `tokio` to 1.54 to resolve
+  RUSTSEC-2026-0386, RUSTSEC-2026-0391, RUSTSEC-2026-0398, RUSTSEC-2026-0403, and
+  RUSTSEC-2026-0410.
 
 ### Added
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
