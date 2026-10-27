@@ -13,13 +13,13 @@ use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
 use crate::{
-    formats::parquet::{LabelError, ReadError, reader_builder, resolve_labels},
+    formats::parquet::{LabelStrings, ReadError, reader_builder, resolve_labels},
     validate::ValidationResult,
 };
 use arrow_array::{
     Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
 };
-use lading_capture_schema::columns;
+use lading_capture_schema::{LabelEncoding, columns};
 
 /// Errors for parquet validation
 #[derive(thiserror::Error, Debug)]
@@ -31,6 +31,9 @@ pub enum Error {
     #[error(transparent)]
     Capture(#[from] ReadError),
     /// Label columns do not match the selected schema major version.
+    ///
+    /// A declared major that differs from the selected major arrives as
+    /// `Capture(ReadError::VersionMismatch)` instead.
     #[error("version mismatch: {0}")]
     VersionMismatch(String),
     /// Parquet error
@@ -47,10 +50,20 @@ pub enum Error {
     InvalidColumnType(String),
 }
 
-impl From<LabelError> for Error {
-    fn from(error: LabelError) -> Self {
-        Self::VersionMismatch(error.to_string())
-    }
+/// Read label strings, or describe a label type that the selected major does not use.
+fn labels<'a>(
+    column: &'a dyn Array,
+    role: &str,
+    encoding: LabelEncoding,
+    schema_major_version: u64,
+) -> Result<LabelStrings<'a>, Error> {
+    resolve_labels(column, encoding).ok_or_else(|| {
+        Error::VersionMismatch(format!(
+            "schema major version {schema_major_version} uses {expected} for {role} and does not support {actual}",
+            expected = encoding.data_type(),
+            actual = column.data_type(),
+        ))
+    })
 }
 
 /// Validates a parquet capture file using columnar operations.
@@ -89,6 +102,10 @@ pub fn validate_parquet<P: AsRef<Path>>(
 ) -> Result<ValidationResult, Error> {
     let file = File::open(path)?;
     let reader = reader_builder(file, schema_major_version)?.build()?;
+    let encoding =
+        LabelEncoding::for_major(schema_major_version).ok_or(ReadError::UnsupportedMajor {
+            schema_major_version,
+        })?;
 
     // Phase 1: Streaming assertions
     //
@@ -200,10 +217,18 @@ pub fn validate_parquet<P: AsRef<Path>>(
             }
 
             let labels_slice: StructArray = labels_array.value(row);
-            let key_array =
-                resolve_labels(labels_slice.column(0), "Label keys", schema_major_version)?;
-            let value_array =
-                resolve_labels(labels_slice.column(1), "Label values", schema_major_version)?;
+            let key_array = labels(
+                labels_slice.column(0),
+                "Label keys",
+                encoding,
+                schema_major_version,
+            )?;
+            let value_array = labels(
+                labels_slice.column(1),
+                "Label values",
+                encoding,
+                schema_major_version,
+            )?;
 
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
             for (key, value) in key_array.iter().zip(value_array.iter()) {

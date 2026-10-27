@@ -176,14 +176,13 @@ fn current_writer_has_a_frozen_baseline() {
     assert_eq!(CURRENT_CAPTURE_VERSION.major, CURRENT.number());
 }
 
+/// For the three counter rows: `read(write(rows), CURRENT) = expected_records()`, and
+/// `validate_parquet` accepts the output with two series.
 #[test]
 fn writer_output_preserves_current_records() -> TestResult {
     let data = write_capture(&lines(&[10, 20, 30]))?;
     assert_eq!(version(data.clone())?, Some(CURRENT_CAPTURE_VERSION));
-    assert_eq!(
-        frozen::read(&data, CURRENT)?,
-        frozen::read(CURRENT.capture(), CURRENT)?
-    );
+    assert_eq!(frozen::read(&data, CURRENT)?, expected_records());
     let file = tempfile::NamedTempFile::new()?;
     std::fs::write(file.path(), &data)?;
     let validation = validate_parquet(file.path(), None, CURRENT_CAPTURE_VERSION.major)?;
@@ -193,6 +192,8 @@ fn writer_output_preserves_current_records() -> TestResult {
     Ok(())
 }
 
+/// For zero rows: the output declares `CURRENT_CAPTURE_VERSION` and satisfies the frozen
+/// schema of `CURRENT`.
 #[test]
 fn zero_rows_still_have_version_and_schema() -> TestResult {
     let data = write_capture(&[])?;
@@ -284,6 +285,7 @@ proptest! {
     /// For all major not in {1, 2}: reader_builder rejects the selection without reading the file.
     #[test]
     fn undefined_selected_major_fails_before_io(
+        // Undefined majors: keep in sync with `LabelEncoding::for_major`.
         major in prop_oneof![Just(0u64), Just(3), Just(u64::MAX), any::<u64>()],
     ) {
         proptest::prop_assume!(!matches!(major, 1 | 2));
@@ -319,7 +321,7 @@ proptest! {
 #[test]
 fn column_order_and_extras_are_not_version_boundaries() -> TestResult {
     for major in MAJORS {
-        let expected = frozen::read(major.capture(), major)?;
+        let expected = expected_records();
         let batch = input_batch(major)?;
         proptest!(|(order in collection::vec(any::<u64>(), 9), insertion in 0usize..10)| {
             let result = reordered_capture(&batch, order, insertion, major)
@@ -397,15 +399,14 @@ fn page_dictionary_encoding_preserves_frozen_contracts() -> TestResult {
             assert_contract(data.clone(), major)?;
             let builder = reader_builder(data.clone(), major.number())?;
             assert_eq!(builder.metadata().num_row_groups(), 3);
-            assert_eq!(
-                frozen::read(&data, major)?,
-                frozen::read(major.capture(), major)?
-            );
+            assert_eq!(frozen::read(&data, major)?, expected_records());
         }
     }
     Ok(())
 }
 
+/// For all frozen majors M and the reversed row order R:
+/// `read(write(R(rows)), M) = expected_records()`.
 #[test]
 fn physical_row_order_does_not_change_the_contract() -> TestResult {
     for major in MAJORS {
@@ -416,14 +417,13 @@ fn physical_row_order_does_not_change_the_contract() -> TestResult {
             .collect();
         let data = write_batches(batch.schema(), &reversed, tag(major, 0), true)?;
         assert_contract(data.clone(), major)?;
-        assert_eq!(
-            frozen::read(&data, major)?,
-            frozen::read(major.capture(), major)?
-        );
+        assert_eq!(frozen::read(&data, major)?, expected_records());
     }
     Ok(())
 }
 
+/// For all (kind, value) cases: the populated scalar slot and the histogram payload
+/// decode to the written value.
 #[test]
 fn scalar_kinds_and_histograms_keep_existing_representation() -> TestResult {
     let cases = [
@@ -474,6 +474,7 @@ fn scalar_kinds_and_histograms_keep_existing_representation() -> TestResult {
     Ok(())
 }
 
+/// For all v in {NaN, +inf, -inf, -0.0}: the decoded float bits equal `v.to_bits()`.
 #[test]
 fn nonfinite_scalars_do_not_gain_new_validation() -> TestResult {
     let values = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0];
@@ -491,6 +492,8 @@ fn nonfinite_scalars_do_not_gain_new_validation() -> TestResult {
     Ok(())
 }
 
+/// For all malformed or duplicate `capture.version` entries: `reader_builder` returns
+/// `Metadata`.
 #[test]
 fn malformed_version_metadata_is_rejected() -> TestResult {
     for metadata in [
@@ -524,22 +527,31 @@ fn missing_version_uses_standard_parquet_reader() -> TestResult {
                 .collect::<Result<Vec<_>, _>>()?;
             assert_eq!(batches.len(), 3);
         }
-        assert_eq!(
-            frozen::read(&data, layout)?,
-            frozen::read(layout.capture(), layout)?
-        );
+        assert_eq!(frozen::read(&data, layout)?, expected_records());
         let file = tempfile::NamedTempFile::new()?;
         std::fs::write(file.path(), &data)?;
         assert!(validate_parquet(file.path(), None, layout.number())?.is_valid());
+        let arrow_type = |major: Major| match major {
+            Major::V1 => "Utf8",
+            Major::V2 => "Dictionary(Int32, Utf8)",
+        };
+        let expected = format!(
+            "schema major version {major} uses {selected} for Label keys and does not support {actual}",
+            major = other.number(),
+            selected = arrow_type(other),
+            actual = arrow_type(layout),
+        );
         assert!(matches!(
             validate_parquet(file.path(), None, other.number()),
             Err(lading_capture::validate::parquet::Error::VersionMismatch(message))
-                if message.starts_with(&format!("schema major version {other} uses ", other = other.number()))
+                if message == expected
         ));
     }
     Ok(())
 }
 
+/// For a declared major 99 and an invalid Arrow schema hint: `reader_builder` returns
+/// `VersionMismatch` before it decodes the Arrow schema.
 #[test]
 fn other_declared_major_is_checked_before_arrow_schema() -> TestResult {
     let metadata = vec![
@@ -557,6 +569,7 @@ fn other_declared_major_is_checked_before_arrow_schema() -> TestResult {
     Ok(())
 }
 
+/// For all frozen majors M: a nullable `time` field fails the schema check of M.
 #[test]
 fn nullable_mandatory_fields_fail_frozen_schema_checks() -> TestResult {
     for major in MAJORS {
@@ -645,7 +658,7 @@ fn reversed_map_roles_are_not_compatible() -> TestResult {
         let batch = replace_labels(&batch, labels)?;
         let data = write_batches(batch.schema(), &[batch], tag(major, 0), true)?;
         let decoded = frozen::read(&data, major)?;
-        assert_ne!(decoded, frozen::read(major.capture(), major)?);
+        assert_ne!(decoded, expected_records());
         let first = decoded.first().ok_or("missing decoded row")?;
         assert_eq!(first.labels.get("prod").map(String::as_str), Some("env"));
         assert!(matches!(
@@ -722,6 +735,22 @@ fn dictionary_labels_need_a_new_major() -> TestResult {
     Ok(())
 }
 
+/// `Utf8` labels fail the V2 Arrow contract, so a file tagged 2.0 with V1 labels fails
+/// `reader_builder` with major 2. The frozen decoders also reject the other major's layout.
+#[test]
+fn utf8_labels_fail_the_v2_contract() -> TestResult {
+    let batch = input_batch(Major::V1)?;
+    let data = write_batches(batch.schema(), &[batch], tag(Major::V2, 0), true)?;
+    assert!(matches!(
+        reader_builder(data.clone(), Major::V2.number()),
+        Err(ReadError::Schema(_))
+    ));
+    assert!(frozen::read(&data, Major::V2).is_err());
+    assert!(frozen::read(Major::V1.capture(), Major::V2).is_err());
+    assert!(frozen::read(Major::V2.capture(), Major::V1).is_err());
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 struct CountingReader {
     data: Bytes,
@@ -748,6 +777,8 @@ impl ChunkReader for CountingReader {
     }
 }
 
+/// The read calls of `reader_builder` equal the read calls of the standard Parquet
+/// builder.
 #[test]
 fn metadata_preflight_does_not_duplicate_io() -> TestResult {
     let reader = CountingReader {

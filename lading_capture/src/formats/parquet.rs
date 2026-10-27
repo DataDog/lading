@@ -18,8 +18,8 @@ use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, Field, Schema};
 use lading_capture_schema::{
     CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, LabelEncoding, MetadataError,
-    SchemaError, capture_schema, capture_schema_for_major, columns, label_dictionary_type,
-    parse_capture_version, validate_schema,
+    SchemaError, capture_schema, capture_schema_for_major, columns, parse_capture_version,
+    validate_schema,
 };
 use parquet::{
     arrow::{
@@ -136,64 +136,21 @@ impl<'a> LabelStrings<'a> {
     }
 }
 
-/// Errors when label strings do not match a schema major version.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum LabelError {
-    /// Lading does not define the selected schema major version.
-    #[error("unsupported schema major version {schema_major_version}")]
-    UnsupportedMajor {
-        /// Major version that the caller selected.
-        schema_major_version: u64,
-    },
-    /// The label column does not use the representation of the selected major.
-    #[error(
-        "schema major version {schema_major_version} uses {expected} for {column} and does not support {actual}"
-    )]
-    Representation {
-        /// Label column role, for example `Label keys`.
-        column: String,
-        /// Arrow type that the selected major uses.
-        expected: &'static str,
-        /// Arrow type that the column uses.
-        actual: String,
-        /// Major version that the caller selected.
-        schema_major_version: u64,
-    },
-}
-
-/// Read label strings with the representation of one schema major version.
+/// Read label strings with one label encoding.
 ///
-/// # Errors
-///
-/// Return an error if Lading does not define `schema_major_version`, or if `column` does
-/// not use that major's label representation.
-pub fn resolve_labels<'a>(
-    column: &'a dyn Array,
-    column_name: &str,
-    schema_major_version: u64,
-) -> Result<LabelStrings<'a>, LabelError> {
-    let encoding =
-        LabelEncoding::for_major(schema_major_version).ok_or(LabelError::UnsupportedMajor {
-            schema_major_version,
-        })?;
-    let representation = |expected| LabelError::Representation {
-        column: column_name.to_string(),
-        expected,
-        actual: column.data_type().to_string(),
-        schema_major_version,
-    };
+/// Return `None` if `column` does not use `encoding`.
+#[must_use]
+pub fn resolve_labels(column: &dyn Array, encoding: LabelEncoding) -> Option<LabelStrings<'_>> {
     match encoding {
         LabelEncoding::Utf8 => column
             .as_any()
             .downcast_ref::<StringArray>()
-            .map(LabelStrings::Utf8)
-            .ok_or_else(|| representation("Utf8")),
+            .map(LabelStrings::Utf8),
         LabelEncoding::Dictionary => column
             .as_any()
             .downcast_ref::<DictionaryArray<Int32Type>>()
             .and_then(DictionaryArray::downcast_dict::<StringArray>)
-            .map(LabelStrings::Dictionary)
-            .ok_or_else(|| representation("Dictionary(Int32, Utf8)")),
+            .map(LabelStrings::Dictionary),
     }
 }
 
@@ -400,7 +357,7 @@ impl<W: Write + Seek + Send> Format<W> {
             (
                 Arc::new(Field::new(
                     columns::LABEL_KEY,
-                    label_dictionary_type(),
+                    LabelEncoding::Dictionary.data_type(),
                     false,
                 )),
                 keys_array as ArrayRef,
@@ -408,7 +365,7 @@ impl<W: Write + Seek + Send> Format<W> {
             (
                 Arc::new(Field::new(
                     columns::LABEL_VALUE,
-                    label_dictionary_type(),
+                    LabelEncoding::Dictionary.data_type(),
                     false,
                 )),
                 values_array as ArrayRef,
@@ -529,55 +486,57 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::line::{Line, LineValue, MetricKind};
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
+    use protobuf::Message;
+    use rustc_hash::FxHashMap;
+    use std::io::Cursor;
+    use uuid::Uuid;
 
     mod resolve_labels {
-        use super::super::{LabelError, resolve_labels};
+        use super::super::resolve_labels;
         use arrow_array::{
             Array, DictionaryArray, Int32Array, LargeStringArray, StringArray,
             types::{Int8Type, Int32Type},
         };
-        use proptest::{
-            collection,
-            prelude::{Just, any},
-            prop_assert_eq, prop_assume, prop_oneof, proptest,
-        };
+        use lading_capture_schema::LabelEncoding;
+        use proptest::{collection, prelude::Just, prop_assert_eq, proptest, strategy::Strategy};
         use std::sync::Arc;
 
-        fn read(column: &dyn Array, major: u64) -> Result<Vec<String>, LabelError> {
-            Ok(resolve_labels(column, "Label keys", major)?
-                .iter()
-                .map(str::to_string)
-                .collect())
+        fn read(column: &dyn Array, encoding: LabelEncoding) -> Option<Vec<String>> {
+            Some(
+                resolve_labels(column, encoding)?
+                    .iter()
+                    .map(str::to_string)
+                    .collect(),
+            )
         }
 
         proptest! {
-            /// For all string vectors v: `resolve_labels(Utf8(v), 1)` yields v, and
-            /// `resolve_labels(Dictionary(v), 2)` yields v.
+            /// For all string vectors v and offsets o <= len(v): `resolve_labels` on the slice
+            /// v[o..] yields v[o..] for `Utf8` and for `Dictionary`.
             #[test]
-            fn both_majors_yield_entry_order(values in collection::vec("[a-z]{0,4}", 0..16)) {
-                let utf8 = StringArray::from(values.clone());
+            fn both_encodings_yield_entry_order(
+                (values, offset) in collection::vec("[a-z]{0,4}", 0..16)
+                    .prop_flat_map(|values| {
+                        let len = values.len();
+                        (Just(values), 0..=len)
+                    }),
+            ) {
+                let len = values.len() - offset;
+                let expected = values[offset..].to_vec();
+                let utf8 = StringArray::from(values.clone()).slice(offset, len);
                 let dictionary: DictionaryArray<Int32Type> =
                     values.iter().map(String::as_str).collect();
-                prop_assert_eq!(read(&utf8, 1)?, values.clone());
-                prop_assert_eq!(read(&dictionary, 2)?, values);
-            }
-
-            /// For all major not in {1, 2}: `resolve_labels` returns `UnsupportedMajor`.
-            #[test]
-            fn undefined_majors_fail(
-                major in prop_oneof![Just(0u64), Just(3), Just(u64::MAX), any::<u64>()],
-            ) {
-                prop_assume!(!matches!(major, 1 | 2));
-                let column = StringArray::from(vec!["env"]);
-                prop_assert_eq!(
-                    read(&column, major),
-                    Err(LabelError::UnsupportedMajor { schema_major_version: major })
-                );
+                let dictionary = dictionary.slice(offset, len);
+                prop_assert_eq!(read(&utf8, LabelEncoding::Utf8), Some(expected.clone()));
+                prop_assert_eq!(read(&dictionary, LabelEncoding::Dictionary), Some(expected));
             }
         }
 
-        /// For all (column, M) where column does not use the label encoding of M:
-        /// `resolve_labels` returns `Representation` for M.
+        /// For each (column, E) in the table, where column does not use encoding E:
+        /// `resolve_labels(column, E) = None`.
         #[test]
         fn other_representations_fail() -> Result<(), arrow_schema::ArrowError> {
             let utf8 = StringArray::from(vec!["env"]);
@@ -587,37 +546,18 @@ mod tests {
                 Int32Array::from(vec![0]),
                 Arc::new(LargeStringArray::from(vec!["env"])),
             )?;
-            let cases: [(&dyn Array, u64, &str); 4] = [
-                (&utf8, 2, "Dictionary(Int32, Utf8)"),
-                (&dictionary, 1, "Utf8"),
-                (&small_keys, 2, "Dictionary(Int32, Utf8)"),
-                (&large_values, 2, "Dictionary(Int32, Utf8)"),
+            let cases: [(&dyn Array, LabelEncoding); 4] = [
+                (&utf8, LabelEncoding::Dictionary),
+                (&dictionary, LabelEncoding::Utf8),
+                (&small_keys, LabelEncoding::Dictionary),
+                (&large_values, LabelEncoding::Dictionary),
             ];
-            for (column, major, expected) in cases {
-                assert_eq!(
-                    read(column, major),
-                    Err(LabelError::Representation {
-                        column: "Label keys".to_string(),
-                        expected,
-                        actual: column.data_type().to_string(),
-                        schema_major_version: major,
-                    })
-                );
+            for (column, encoding) in cases {
+                assert!(resolve_labels(column, encoding).is_none());
             }
-            assert_eq!(
-                read(&utf8, 2).map_err(|error| error.to_string()),
-                Err("schema major version 2 uses Dictionary(Int32, Utf8) for Label keys and does not support Utf8".to_string())
-            );
             Ok(())
         }
     }
-    use crate::line::{Line, LineValue, MetricKind};
-    use datadog_protos::metrics::Dogsketch;
-    use ddsketch_agent::DDSketch;
-    use protobuf::Message;
-    use rustc_hash::FxHashMap;
-    use std::io::Cursor;
-    use uuid::Uuid;
 
     #[test]
     fn buffers_metrics_before_flush() {

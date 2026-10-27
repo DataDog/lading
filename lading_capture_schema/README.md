@@ -86,7 +86,7 @@ A null `value_histogram` cell represents an empty payload.
 2. Use declared version to select decoding behavior.
 3. Decode the columns and values you need.
 
-Lading's `captool` and `validate_parquet` read one schema major version. `captool --schema-major-version <MAJOR>` selects it, and the default is the current writer's major. These tools reject a file that declares a different major. For a file without `capture.version`, the selected major also selects the label decoding.
+Lading's `captool` and `validate_parquet` read one schema major version. `captool --schema-major-version <MAJOR>` selects it, and the default is the current writer's major. `validate_parquet` takes it as its `schema_major_version` argument. These tools reject a file that declares a different major. For a file without `capture.version`, the selected major also selects the label decoding.
 
 ## Rust helpers
 
@@ -98,6 +98,7 @@ Use `lading_capture_schema` for shared version parsing, field names, and schema 
 | `parse_capture_version(entries)`    | Parse raw footer pairs and return the declared version, or `None` when absent |
 | `capture_schema()`, `columns::*`    | Get the current writer's Arrow schema and field names                         |
 | `capture_schema_for_major(major)`   | Get the Arrow schema of one major version, or `None` when it is not defined   |
+| `LabelEncoding::for_major(major)`   | Get the label key and value encoding of one major version, or `None`          |
 | `validate_schema(actual, expected)` | Check mandatory declarations while allowing extra top-level columns           |
 
 `CURRENT_CAPTURE_VERSION` identifies the current writer's format.

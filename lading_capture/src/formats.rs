@@ -78,7 +78,7 @@ mod tests {
     use bytes::Bytes;
     use datadog_protos::metrics::Dogsketch;
     use ddsketch_agent::DDSketch;
-    use lading_capture_schema::CURRENT_CAPTURE_VERSION;
+    use lading_capture_schema::{CURRENT_CAPTURE_VERSION, LabelEncoding};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use proptest::prelude::*;
     use protobuf::Message;
@@ -562,9 +562,12 @@ mod tests {
                 };
 
                 let labels_slice: StructArray = labels_array.value(row_idx);
-                let major = CURRENT_CAPTURE_VERSION.major;
-                let keys = resolve_labels(labels_slice.column(0), "Label keys", major)?;
-                let values = resolve_labels(labels_slice.column(1), "Label values", major)?;
+                let encoding = LabelEncoding::for_major(CURRENT_CAPTURE_VERSION.major)
+                    .ok_or("current major has no label encoding")?;
+                let keys = resolve_labels(labels_slice.column(0), encoding)
+                    .ok_or("label keys do not use the current label encoding")?;
+                let values = resolve_labels(labels_slice.column(1), encoding)
+                    .ok_or("label values do not use the current label encoding")?;
 
                 let mut labels = FxHashMap::default();
                 for (key, value) in keys.iter().zip(values.iter()) {

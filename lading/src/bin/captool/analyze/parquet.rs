@@ -8,8 +8,8 @@ use std::fs::File;
 use std::path::Path;
 
 use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
-use lading_capture::formats::parquet::{LabelError, ReadError, reader_builder, resolve_labels};
-use lading_capture_schema::columns;
+use lading_capture::formats::parquet::{LabelStrings, ReadError, reader_builder, resolve_labels};
+use lading_capture_schema::{LabelEncoding, columns};
 use rustc_hash::FxHashMap;
 
 use super::{MetricInfo, SeriesStats};
@@ -24,6 +24,9 @@ pub(crate) enum Error {
     #[error(transparent)]
     Capture(#[from] ReadError),
     /// Label columns do not match the selected schema major version.
+    ///
+    /// A declared major that differs from the selected major arrives as
+    /// `Capture(ReadError::VersionMismatch)` instead.
     #[error("version mismatch: {0}")]
     VersionMismatch(String),
     /// Parquet error
@@ -40,10 +43,20 @@ pub(crate) enum Error {
     InvalidColumnType(String),
 }
 
-impl From<LabelError> for Error {
-    fn from(error: LabelError) -> Self {
-        Self::VersionMismatch(error.to_string())
-    }
+/// Read label strings, or describe a label type that the selected major does not use.
+fn labels<'a>(
+    column: &'a dyn Array,
+    role: &str,
+    encoding: LabelEncoding,
+    schema_major_version: u64,
+) -> Result<LabelStrings<'a>, Error> {
+    resolve_labels(column, encoding).ok_or_else(|| {
+        Error::VersionMismatch(format!(
+            "schema major version {schema_major_version} uses {expected} for {role} and does not support {actual}",
+            expected = encoding.data_type(),
+            actual = column.data_type(),
+        ))
+    })
 }
 
 /// Lists all unique metrics in a parquet capture file.
@@ -112,6 +125,10 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
 ) -> Result<FxHashMap<BTreeSet<String>, SeriesStats>, Error> {
     let file = File::open(path)?;
     let reader = reader_builder(file, schema_major_version)?.build()?;
+    let encoding =
+        LabelEncoding::for_major(schema_major_version).ok_or(ReadError::UnsupportedMajor {
+            schema_major_version,
+        })?;
 
     let mut series_map: FxHashMap<BTreeSet<String>, Vec<(u64, f64)>> = FxHashMap::default();
 
@@ -184,10 +201,18 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
             // Extract labels
             let mut sorted_labels = BTreeSet::new();
             let labels_slice = labels_array.value(row);
-            let key_array =
-                resolve_labels(labels_slice.column(0), "Label keys", schema_major_version)?;
-            let value_array =
-                resolve_labels(labels_slice.column(1), "Label values", schema_major_version)?;
+            let key_array = labels(
+                labels_slice.column(0),
+                "Label keys",
+                encoding,
+                schema_major_version,
+            )?;
+            let value_array = labels(
+                labels_slice.column(1),
+                "Label values",
+                encoding,
+                schema_major_version,
+            )?;
 
             for (key, val) in key_array.iter().zip(value_array.iter()) {
                 sorted_labels.insert(format!("{key}:{val}"));
@@ -242,18 +267,57 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
 mod tests {
     use super::*;
 
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::Arc};
 
+    use arrow_array::RecordBatch;
+    use arrow_schema::Schema;
     use lading_capture::{
         formats::parquet::Format,
         line::{Line, LineValue, MetricKind},
     };
     use lading_capture_schema::CURRENT_CAPTURE_VERSION;
+    use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
     use tempfile::NamedTempFile;
 
     fn fixture(major: u64) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../lading_capture/tests/fixtures/v{major}.parquet"))
+    }
+
+    /// For an untagged file with V1 labels and the default major 2: `list_metrics` succeeds,
+    /// and `analyze_metric` returns `VersionMismatch` because it decodes labels.
+    #[test]
+    fn untagged_v1_labels_need_schema_major_version_1() -> Result<(), Box<dyn std::error::Error>> {
+        let batches = ParquetRecordBatchReaderBuilder::try_new(File::open(fixture(1))?)?
+            .build()?
+            .collect::<Result<Vec<_>, _>>()?;
+        let first = batches.first().ok_or("missing fixture batch")?;
+        let schema = Arc::new(Schema::new(first.schema().fields().clone()));
+        let capture = NamedTempFile::new()?;
+        let mut writer = ArrowWriter::try_new(capture.reopen()?, Arc::clone(&schema), None)?;
+        for batch in &batches {
+            writer.write(&RecordBatch::try_new(
+                Arc::clone(&schema),
+                batch.columns().to_vec(),
+            )?)?;
+        }
+        writer.close()?;
+
+        let major = CURRENT_CAPTURE_VERSION.major;
+        assert_eq!(list_metrics(capture.path(), major)?.len(), 1);
+        let error = analyze_metric(capture.path(), "requests", major).err();
+        assert!(
+            matches!(
+                &error,
+                Some(Error::VersionMismatch(message))
+                    if message == &format!(
+                        "schema major version {major} uses Dictionary(Int32, Utf8) for Label keys and does not support Utf8"
+                    )
+            ),
+            "unexpected result {error:?}"
+        );
+        assert_eq!(analyze_metric(capture.path(), "requests", 1)?.len(), 2);
+        Ok(())
     }
 
     /// For all frozen majors M: captool reads the M.0 capture only with schema major version M.

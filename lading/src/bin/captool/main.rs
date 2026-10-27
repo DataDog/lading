@@ -42,7 +42,8 @@ struct Args {
     dump_values: bool,
 
     /// Parquet capture schema major version to read. captool rejects files that
-    /// declare a different major.
+    /// declare a different major. For a file without capture.version, it also
+    /// selects the label decoding.
     #[clap(long, global = true, default_value_t = CURRENT_CAPTURE_VERSION.major)]
     schema_major_version: u64,
 
@@ -362,44 +363,66 @@ mod tests {
     use super::*;
 
     /// For all argv without `--schema-major-version`:
-    /// `parse(argv).schema_major_version = CURRENT_CAPTURE_VERSION.major`.
+    /// `parse(argv).schema_major_version = CURRENT_CAPTURE_VERSION.major`, and `validate`
+    /// argv parse as `Command::Validate`.
     #[test]
     fn schema_major_version_defaults_to_current() -> Result<(), clap::Error> {
-        for argv in [
-            vec!["captool", "capture.parquet"],
-            vec!["captool", "validate", "capture.parquet"],
+        for (argv, validate) in [
+            (vec!["captool", "capture.parquet"], false),
+            (vec!["captool", "validate", "capture.parquet"], true),
         ] {
             let args = Args::try_parse_from(argv)?;
             assert_eq!(args.schema_major_version, CURRENT_CAPTURE_VERSION.major);
+            assert_eq!(
+                matches!(args.command, Some(Command::Validate { .. })),
+                validate
+            );
         }
         Ok(())
     }
 
     /// For all argv with `--schema-major-version 1` before or after `validate`:
-    /// `parse(argv).schema_major_version = 1`. A value that is not an integer fails to parse.
+    /// `parse(argv).schema_major_version = 1`. A value that is not an integer fails with
+    /// `ValueValidation`.
     #[test]
     fn schema_major_version_selects_a_major() -> Result<(), clap::Error> {
-        for argv in [
-            vec!["captool", "--schema-major-version", "1", "capture.parquet"],
-            vec![
-                "captool",
-                "validate",
-                "--schema-major-version",
-                "1",
-                "capture.parquet",
-            ],
-            vec![
-                "captool",
-                "--schema-major-version",
-                "1",
-                "validate",
-                "capture.parquet",
-            ],
+        for (argv, validate) in [
+            (
+                vec!["captool", "--schema-major-version", "1", "capture.parquet"],
+                false,
+            ),
+            (
+                vec![
+                    "captool",
+                    "validate",
+                    "--schema-major-version",
+                    "1",
+                    "capture.parquet",
+                ],
+                true,
+            ),
+            (
+                vec![
+                    "captool",
+                    "--schema-major-version",
+                    "1",
+                    "validate",
+                    "capture.parquet",
+                ],
+                true,
+            ),
         ] {
             let args = Args::try_parse_from(argv)?;
             assert_eq!(args.schema_major_version, 1);
+            assert_eq!(
+                matches!(args.command, Some(Command::Validate { .. })),
+                validate
+            );
         }
-        assert!(Args::try_parse_from(["captool", "--schema-major-version", "one", "x"]).is_err());
+        let error = Args::try_parse_from(["captool", "--schema-major-version", "one", "x"])
+            .err()
+            .map(|error| error.kind());
+        assert_eq!(error, Some(clap::error::ErrorKind::ValueValidation));
         Ok(())
     }
 }

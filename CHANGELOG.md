@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenTelemetry metric weights may now be zero, which disables that metric type.
   Only an all-zero set is rejected.
 - **Breaking Change**: Capture Parquet files now declare `capture.version = "2.0"` and use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Arrow consumers must read these columns as dictionary arrays.
-- **Breaking Change**: `captool` reads one capture schema major version. Select it with `--schema-major-version`. The default is the current major, `2`. `captool` rejects files that declare a different major. Use `--schema-major-version 1` for `1.x` captures and for captures without `capture.version`. `validate_parquet` takes the major as an argument with no default.
+- **Breaking Change**: `captool` reads one capture schema major version. Select it with `--schema-major-version`. The default is the current major, `2`. `captool` rejects files that declare a different major. Use `--schema-major-version 1` for `1.x` captures and for captures without `capture.version`. `validate_parquet` takes the major as its `schema_major_version` argument.
 
 ### Fixed
 - Container build no longer fails on stale apt version pins for `libssl-dev` and

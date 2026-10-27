@@ -49,7 +49,7 @@ pub mod columns {
 /// Builds the Arrow [`Schema`] used by the current `lading-capture` parquet writer.
 #[must_use]
 pub fn capture_schema() -> Schema {
-    schema_with_labels(label_dictionary_type())
+    schema_with_labels(LabelEncoding::Dictionary.data_type())
 }
 
 /// Builds the Arrow [`Schema`] that capture files of one major version declare.
@@ -66,6 +66,9 @@ pub enum LabelEncoding {
     /// V1 stores label keys and values as `Utf8`.
     Utf8,
     /// V2 stores label keys and values as `Dictionary(Int32, Utf8)`.
+    ///
+    /// Dictionary arrays let Arrow readers share repeated label strings in memory instead of
+    /// decoding one string for each label entry.
     Dictionary,
 }
 
@@ -87,7 +90,9 @@ impl LabelEncoding {
     pub fn data_type(self) -> DataType {
         match self {
             Self::Utf8 => DataType::Utf8,
-            Self::Dictionary => label_dictionary_type(),
+            Self::Dictionary => {
+                DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
+            }
         }
     }
 }
@@ -129,14 +134,6 @@ fn labels_entry_field(label_type: DataType) -> Arc<Field> {
     ))
 }
 
-/// Return the Arrow logical type for label keys and values in the current writer.
-///
-/// Dictionary arrays let Arrow readers share repeated label strings in memory instead of decoding one string for each label entry.
-#[must_use]
-pub fn label_dictionary_type() -> DataType {
-    DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +173,7 @@ mod tests {
         /// `LabelEncoding::for_major(major) = None`.
         #[test]
         fn undefined_majors_have_no_schema(
+            // Undefined majors: keep in sync with `LabelEncoding::for_major`.
             major in prop_oneof![Just(0u64), Just(3), Just(u64::MAX), any::<u64>()],
         ) {
             prop_assume!(!matches!(major, 1 | 2));

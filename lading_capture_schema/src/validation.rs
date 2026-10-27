@@ -105,7 +105,7 @@ mod tests {
 
     mod validate_schema {
         use super::*;
-        use crate::{capture_schema, capture_schema_for_major, columns, label_dictionary_type};
+        use crate::{LabelEncoding, capture_schema, capture_schema_for_major, columns};
         use arrow_schema::Fields;
         use proptest::{collection, prelude::any, prop_assert, proptest};
         use std::sync::Arc;
@@ -235,7 +235,10 @@ mod tests {
         /// entry fields are (key, value), in this order.
         #[test]
         fn label_map_roles_are_ordered() -> Result<(), &'static str> {
-            for (major, label_type) in [(1, DataType::Utf8), (2, label_dictionary_type())] {
+            for (major, label_type) in [
+                (1, DataType::Utf8),
+                (2, LabelEncoding::Dictionary.data_type()),
+            ] {
                 let expected = capture_schema_for_major(major).ok_or("missing schema")?;
                 label_map_roles_are_ordered_for(&expected, &label_type);
             }
@@ -279,8 +282,8 @@ mod tests {
             for major in [1, 2] {
                 let expected = capture_schema_for_major(major).ok_or("missing schema")?;
                 for (key, value) in [
-                    (DataType::Utf8, label_dictionary_type()),
-                    (label_dictionary_type(), DataType::Utf8),
+                    (DataType::Utf8, LabelEncoding::Dictionary.data_type()),
+                    (LabelEncoding::Dictionary.data_type(), DataType::Utf8),
                 ] {
                     let entry = Field::new(
                         columns::LABEL_ENTRIES,
