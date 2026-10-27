@@ -27,7 +27,8 @@ use lading_capture::{
     validate::parquet::validate_parquet,
 };
 use lading_capture_schema::{
-    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, Version, capture_schema, parse_capture_version,
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, capture_schema,
+    parse_capture_version,
 };
 use parquet::{
     arrow::{
@@ -86,7 +87,7 @@ fn write_capture(lines: &[Line]) -> TestResult<Bytes> {
     Ok(data)
 }
 
-fn version(data: Bytes) -> TestResult<Option<Version>> {
+fn version(data: Bytes) -> TestResult<Option<CaptureVersion>> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(data)?;
     Ok(parse_capture_version(
         builder
@@ -188,7 +189,7 @@ fn zero_rows_still_have_version_and_schema() -> TestResult {
 fn frozen_v1_works_with_current_reader() -> TestResult {
     assert_eq!(
         version(Bytes::from_static(V1))?,
-        Some(Version::new(1, 0, 0))
+        Some(CaptureVersion::new(1, 0))
     );
     assert_v1_contract(Bytes::from_static(V1))?;
     let batches = reader_builder(Bytes::from_static(V1))?
@@ -286,7 +287,7 @@ fn reordered_capture(batch: &RecordBatch, order: Vec<u64>, insertion: usize) -> 
         })
         .collect::<Result<_, _>>()?;
     let batch = RecordBatch::try_new(Arc::clone(&schema), arrays)?;
-    write_batches(schema, &[batch], declared(Some("1.1.0")), true)
+    write_batches(schema, &[batch], declared(Some("1.1")), true)
 }
 
 /// For all dictionary settings: decoded rows equal the baseline across three row groups.
@@ -297,7 +298,7 @@ fn page_dictionary_encoding_preserves_v1_contract() -> TestResult {
         let properties = WriterProperties::builder()
             .set_dictionary_enabled(dictionary)
             .set_max_row_group_size(1)
-            .set_key_value_metadata(Some(declared(Some("1.0.0"))))
+            .set_key_value_metadata(Some(declared(Some("1.0"))))
             .build();
         let mut output = Vec::new();
         let mut writer = ArrowWriter::try_new(&mut output, batch.schema(), Some(properties))?;
@@ -318,7 +319,7 @@ fn physical_row_order_does_not_change_the_contract() -> TestResult {
         .rev()
         .map(|row| batch.slice(row, 1))
         .collect();
-    let data = write_batches(batch.schema(), &reversed, declared(Some("1.0.0")), true)?;
+    let data = write_batches(batch.schema(), &reversed, declared(Some("1.0")), true)?;
     assert_v1_contract(data.clone())?;
     assert_eq!(v1::read(&data)?, v1::read(V1)?);
     Ok(())
@@ -396,9 +397,9 @@ fn malformed_version_metadata_is_rejected() -> TestResult {
     for metadata in [
         declared(None),
         declared(Some("")),
-        declared(Some("1.0")),
+        declared(Some("1.0.0")),
         declared(Some("1.0.1")),
-        vec![KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("1.0.0".to_string())); 2],
+        vec![KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("1.0".to_string())); 2],
     ] {
         let data = write_batches(Arc::new(capture_schema()), &[], metadata, true)?;
         assert!(matches!(reader_builder(data), Err(ReadError::Metadata(_))));
@@ -423,7 +424,7 @@ fn missing_version_uses_standard_parquet_reader() -> TestResult {
 #[test]
 fn unsupported_major_is_checked_before_arrow_schema() -> TestResult {
     let metadata = vec![
-        KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("99.0.0".to_string())),
+        KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("99.0".to_string())),
         KeyValue::new(
             ARROW_SCHEMA_META_KEY.to_string(),
             Some("invalid Arrow schema".to_string()),
@@ -453,7 +454,7 @@ fn nullable_mandatory_fields_fail_v1_schema_checks() -> TestResult {
         .collect();
     let schema = Arc::new(Schema::new(fields));
     let batch = RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec())?;
-    let tagged = write_batches(schema, &[batch], declared(Some("1.0.0")), true)?;
+    let tagged = write_batches(schema, &[batch], declared(Some("1.0")), true)?;
     assert!(matches!(reader_builder(tagged), Err(ReadError::Schema(_))));
     Ok(())
 }
@@ -515,7 +516,7 @@ fn reversed_map_roles_are_not_compatible() -> TestResult {
         false,
     )?;
     let batch = replace_labels(&batch, labels)?;
-    let data = write_batches(batch.schema(), &[batch], declared(Some("1.0.0")), true)?;
+    let data = write_batches(batch.schema(), &[batch], declared(Some("1.0")), true)?;
     let decoded = v1::read(&data)?;
     assert_ne!(decoded, v1::read(V1)?);
     let first = decoded.first().ok_or("missing decoded row")?;
@@ -561,7 +562,7 @@ fn dictionary_representation_is_not_a_same_major_change() -> TestResult {
     let entry = Arc::new(Field::new("entries", entries.data_type().clone(), false));
     let labels = MapArray::try_new(entry, labels.offsets().clone(), entries, None, false)?;
     let batch = replace_labels(&batch, labels)?;
-    let data = write_batches(batch.schema(), &[batch], declared(Some("1.1.0")), true)?;
+    let data = write_batches(batch.schema(), &[batch], declared(Some("1.1")), true)?;
     let actual = ParquetRecordBatchReaderBuilder::try_new(data.clone())?;
     let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?;
     assert_eq!(

@@ -1,6 +1,6 @@
 # Frozen V1 contract
 
-`v1.parquet` captures the initial `1.0.0` writer's schema and three synthetic counter records with values `10`, `20`, and `30`. Its raw footer declares `capture.version = "1.0.0"`.
+`v1.parquet` captures the initial `1.0` writer's schema and three synthetic counter records with values `10`, `20`, and `30`. Its raw footer declares `capture.version = "1.0"`.
 
 `v1.arrow.json` records the Arrow field declarations extracted from that accepted capture using Arrow's schema serialization.
 

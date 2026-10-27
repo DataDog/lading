@@ -8,10 +8,10 @@
 mod validation;
 mod version;
 
-pub use semver::Version;
 pub use validation::{SchemaError, validate_schema};
 pub use version::{
-    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, MetadataError, parse_capture_version,
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, MetadataError,
+    parse_capture_version,
 };
 
 use std::sync::Arc;

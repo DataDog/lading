@@ -16,7 +16,7 @@ use arrow_array::{
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
 use lading_capture_schema::{
-    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, MetadataError, SchemaError, Version,
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, MetadataError, SchemaError,
     capture_schema, columns, parse_capture_version, validate_schema,
 };
 use parquet::{
@@ -48,7 +48,7 @@ pub enum ReadError {
     #[error("unsupported capture version {version} (supported major: {supported_major})")]
     UnsupportedVersion {
         /// Valid declared version.
-        version: Version,
+        version: CaptureVersion,
         /// Major implemented by this reader.
         supported_major: u64,
     },
@@ -77,11 +77,11 @@ pub fn reader_builder<T: ChunkReader + 'static>(
             .flatten()
             .map(|entry| (entry.key.as_str(), entry.value.as_deref())),
     )?;
-    if let Some(version) = &version
+    if let Some(version) = version
         && version.major != CURRENT_CAPTURE_VERSION.major
     {
         return Err(ReadError::UnsupportedVersion {
-            version: version.clone(),
+            version,
             supported_major: CURRENT_CAPTURE_VERSION.major,
         });
     }

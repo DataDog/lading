@@ -15,7 +15,6 @@ readme = "README.md"
 
 [dependencies]
 arrow-schema = { workspace = true }
-semver = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

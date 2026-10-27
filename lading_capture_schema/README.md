@@ -8,19 +8,19 @@ Capture versions are independent of Lading releases, Rust crate versions, and Pa
 
 | Capture version | Definition | Frozen baseline |
 | --- | --- | --- |
-| `1.0.0` | V1 schema | [Capture](../lading_capture/tests/fixtures/v1.parquet) and [Arrow schema](../lading_capture/tests/fixtures/v1.arrow.json) |
+| `1.0` | V1 schema | [Capture](../lading_capture/tests/fixtures/v1.parquet) and [Arrow schema](../lading_capture/tests/fixtures/v1.arrow.json) |
 
 ## Version metadata
 
 The writer records exactly one raw footer entry:
 
 ```text
-capture.version = "1.0.0"
+capture.version = "1.0"
 ```
 
 The entry belongs to `FileMetaData.key_value_metadata`. A finalized zero-row capture contains the schema and version entry.
 
-Version values use canonical SemVer syntax: `major.minor.patch`, with unsigned 64-bit numeric components. The patch component is always zero. The value consists of these three numeric components.
+Capture versions use `major.minor` syntax with unsigned 64-bit components. Components contain ASCII decimal digits. Only zero itself starts with `0`.
 
 The shared parser returns the declared version when the key exists and `None` when it is absent. Invalid values and duplicate version keys produce metadata errors.
 
@@ -99,6 +99,7 @@ Use `lading_capture_schema` for shared version parsing, field names, and schema 
 
 | API | Purpose |
 | --- | --- |
+| `CaptureVersion` | Represent, parse, and format the major and minor components |
 | `parse_capture_version(entries)` | Parse raw footer pairs and return the declared version, or `None` when absent |
 | `capture_schema()`, `columns::*` | Get the current writer's Arrow schema and field names |
 | `validate_schema(actual, expected)` | Check mandatory declarations while allowing extra top-level columns |
