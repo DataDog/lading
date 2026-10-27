@@ -17,7 +17,6 @@ use metrics::counter;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_yaml::with::singleton_map_recursive;
 use std::{net::SocketAddr, time::Duration};
-use tracing::error;
 
 use super::General;
 use crate::blackhole::common;

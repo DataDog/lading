@@ -998,7 +998,7 @@ mod test {
         SMALLEST_PROTOBUF, randomize_exp_bucket_counts,
     };
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
-    use opentelemetry_proto::tonic::common::v1::any_value;
+    use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value};
     use opentelemetry_proto::tonic::metrics::v1::{
         ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint, ScopeMetrics,
         exponential_histogram_data_point, metric::Data, number_data_point,
@@ -1622,27 +1622,27 @@ mod test {
                     match &metric.data {
                         Some(Data::Gauge(gauge)) => {
                             for point in &gauge.data_points {
-                                assert!(!point.attributes.is_empty());
+                                assert_ne!(point.attributes, [] as [KeyValue; 0]);
                             }
                         }
                         Some(Data::Sum(sum)) => {
                             for point in &sum.data_points {
-                                assert!(!point.attributes.is_empty());
+                                assert_ne!(point.attributes, [] as [KeyValue; 0]);
                             }
                         }
                         Some(Data::Histogram(histogram)) => {
                             for point in &histogram.data_points {
-                                assert!(!point.attributes.is_empty());
+                                assert_ne!(point.attributes, [] as [KeyValue; 0]);
                             }
                         }
                         Some(Data::ExponentialHistogram(exp_histogram)) => {
                             for point in &exp_histogram.data_points {
-                                assert!(!point.attributes.is_empty());
+                                assert_ne!(point.attributes, [] as [KeyValue; 0]);
                             }
                         }
                         Some(Data::Summary(summary)) => {
                             for point in &summary.data_points {
-                                assert!(!point.attributes.is_empty());
+                                assert_ne!(point.attributes, [] as [KeyValue; 0]);
                             }
                         }
                         None => {}

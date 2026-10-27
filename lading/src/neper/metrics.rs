@@ -138,8 +138,7 @@ pub(crate) fn run_metrics_thread(
     // Final snapshot to capture remaining deltas.
     snapshot.snapshot_and_submit(thread_metrics, labels);
 
-    if snapshot_count > 0 {
-        let avg_ns = total_snapshot_ns / snapshot_count;
+    if let Some(avg_ns) = total_snapshot_ns.checked_div(snapshot_count) {
         tracing::info!(
             avg_snapshot_ns = avg_ns,
             snapshots = snapshot_count,

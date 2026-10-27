@@ -27,9 +27,9 @@ jobs:
       if: steps.label-check.outputs.has_label == 'false'
       run: |
           if git diff --quiet HEAD^ -- CHANGELOG.md; then
-              echo "any_changed=false" >> $GITHUB_OUTPUT
+              echo "any_changed=false" >> "$GITHUB_OUTPUT"
           else
-              echo "any_changed=true" >> $GITHUB_OUTPUT
+              echo "any_changed=true" >> "$GITHUB_OUTPUT"
           fi
 
     - name: Assert CHANGELOG.md is modified

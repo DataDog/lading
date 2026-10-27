@@ -27,22 +27,21 @@ experimental = true
 
 [tools]
 # GitHub Actions workflow linter
-actionlint = "1.7.3"
+actionlint = "1.7.12"
 
 # Code pattern matching for custom lints
-"aqua:ast-grep/ast-grep" = "0.39.5"
+"aqua:ast-grep/ast-grep" = "0.51.0"
 
-# Fast test runner
-"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.72"
+# ci/install-nextest builds the test runner with patched TLS dependencies.
 
 # License and security auditing
-"aqua:EmbarkStudios/cargo-deny" = "0.19.0"
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
 # Unused dependency detection
-"github:bnjbvr/cargo-machete" = "0.9.1"
+"github:bnjbvr/cargo-machete" = "0.9.2"
 
 # Protocol buffer linter and breaking change detector
-buf = "1.50.0"
+buf = "1.74.0"
 
 # Protocol buffer compiler
-protoc = "33.2"
+protoc = "36.2"

@@ -2,7 +2,6 @@ pub(crate) mod cpu;
 pub(crate) mod io;
 pub(crate) mod memory;
 
-use core::f64;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -386,7 +385,7 @@ mod tests {
         });
 
         assert!(res.is_ok());
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [(String, f64); 0]);
     }
 
     #[test]
@@ -400,7 +399,7 @@ mod tests {
         });
 
         assert!(res.is_ok());
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [(String, f64); 0]);
     }
 
     #[test]
@@ -433,6 +432,6 @@ mod tests {
         });
 
         assert!(res.is_err());
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [(String, f64); 0]);
     }
 }

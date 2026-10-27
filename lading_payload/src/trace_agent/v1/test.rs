@@ -364,7 +364,7 @@ fn error_injection_marks_spans_the_way_real_tracers_do() {
     let chunk = generator
         .generate_chunk(&mut rng)
         .expect("should not fail to generate");
-    assert!(!chunk.spans.is_empty());
+    assert_ne!(chunk.spans, [] as [Span; 0]);
     for span in &chunk.spans {
         assert!(span.error, "every span should carry the error bit");
         let find = |key: &str| {
@@ -409,7 +409,7 @@ fn a_suboperation_rate_of_zero_never_produces_a_child_span() {
         .generate_payload(&mut rng, 1)
         .expect("should not fail to generate");
     assert_eq!(span_count, 1);
-    assert!(!payload.is_empty());
+    assert_ne!(payload, [] as [u8; 0]);
 
     // With one span per chunk, the count equals the exact configured chunk count.
     let mut bytes = Vec::new();
@@ -417,7 +417,7 @@ fn a_suboperation_rate_of_zero_never_produces_a_child_span() {
         .to_bytes(&mut rng, 65_536, &mut bytes)
         .expect("should not fail to generate");
     assert_eq!(generator.last_span_count, 1);
-    assert!(!bytes.is_empty());
+    assert_ne!(bytes, [] as [u8; 0]);
 }
 
 #[test]

@@ -6,18 +6,21 @@ stages:
 
 variables:
   DOCKER_RUNNER_REGISTRY: "registry.ddbuild.io/docker"
-  DOCKER_RUNNER_IMAGE_TAG: "24.0.4-gbi-focal"
+  DOCKER_RUNNER_IMAGE_TAG: "v145790967-90c0e60-29.4.0-noble@sha256:ef0e8cf88f1c40082078303597332879065c46225a8b7f060713c4b8d28e92bd"
   REPO_CI_REGISTRY: "registry.ddbuild.io/images/ci/lading-fuzz"
 
 ci-container-image:
   stage: .pre
   image: "$DOCKER_RUNNER_REGISTRY:$DOCKER_RUNNER_IMAGE_TAG"
+  before_script:
+    - apt-get update && apt-get upgrade -y && apt-get install -y ca-certificates
+    - ci/update-ca-certificates
   script: |
-    IMAGE_TAG="${REPO_CI_REGISTRY}:$(date --utc +%Y-%m-%d)-${CI_COMMIT_SHORT_SHA}"
-    docker buildx build -t $IMAGE_TAG --push . -f ci/Dockerfiles/Dockerfile.fuzz
-  when: manual
-  except:
-    - tags
-    - schedules
+    IMAGE_TAG="${REPO_CI_REGISTRY}:${CI_COMMIT_SHA}"
+    docker buildx build --pull --no-cache -t "$IMAGE_TAG" --push . -f ci/Dockerfiles/Dockerfile.fuzz
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == "main" && $CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_COMMIT_REF_NAME == "main" && $CI_PIPELINE_SOURCE == "push"'
+    - when: manual
   tags:
     - "arch:amd64"
