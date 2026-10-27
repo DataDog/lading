@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};
 
-use crate::templated_json::TemplatedJson;
+use crate::{
+    templated_json::TemplatedJson,
+    trace_agent::{self, Serializer, agent_payload, v1, v04},
+};
 
 /// Error for block construction
 #[derive(Debug, thiserror::Error)]
@@ -232,8 +235,6 @@ impl Cache {
                 )?
             }
             crate::Config::TraceAgent(config) => {
-                use crate::trace_agent::{self, Serializer, v1, v04};
-
                 let mut ta = match config {
                     trace_agent::Config::V04(v04_config) => {
                         Serializer::V04(v04::V04::with_config(v04_config.clone(), &mut rng)?)
@@ -241,6 +242,9 @@ impl Cache {
                     trace_agent::Config::V1(v1_config) => {
                         Serializer::V1(v1::V1::with_config(v1_config.clone(), &mut rng)?)
                     }
+                    trace_agent::Config::AgentPayload(config) => Serializer::AgentPayload(
+                        agent_payload::AgentPayload::with_config(config.clone(), &mut rng)?,
+                    ),
                 };
 
                 let span = span!(Level::INFO, "fixed", payload = "trace-agent");
