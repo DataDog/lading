@@ -297,7 +297,7 @@ fn page_dictionary_encoding_preserves_v1_contract() -> TestResult {
     for dictionary in [false, true] {
         let properties = WriterProperties::builder()
             .set_dictionary_enabled(dictionary)
-            .set_max_row_group_size(1)
+            .set_max_row_group_row_count(Some(1))
             .set_key_value_metadata(Some(declared(Some("1.0"))))
             .build();
         let mut output = Vec::new();
