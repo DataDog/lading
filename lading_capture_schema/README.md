@@ -32,10 +32,10 @@ Major versions should be incremented when the schema is backwards incompatible.
 
 The table describes V1's Arrow representation. The writer stores the standard `ARROW:schema` hint alongside Parquet's native schema. See [Parquet file structure](https://parquet.apache.org/docs/file-format/), [logical types](https://parquet.apache.org/docs/file-format/types/logicaltypes/), and [Arrow/Parquet schema handling](https://docs.rs/parquet/57.3.0/parquet/arrow/) for these layers.
 
-Every V1 file declares all columns below. 
+Every V1 file declares all columns below.
 
-- Nullable means that a row can contain a null cell. 
-- The column remains part of the file schema even when all its cells are null. 
+- Nullable means that a row can contain a null cell.
+- The column remains part of the file schema even when all its cells are null.
 - Column names are unique.
 
 | Column            | Arrow type                     | Nullable cells |
@@ -75,7 +75,7 @@ Both storage forms are valid for counters and gauges. `Float64` supports IEEE 75
 
 ### Histograms
 
-A populated `value_histogram` cell contains serialized `Dogsketch` protobuf bytes. The capture manager writes a `0.0` floating-point placeholder in the scalar slot for histogram rows. Read histogram measurements from the sketch payload. 
+A populated `value_histogram` cell contains serialized `Dogsketch` protobuf bytes. The capture manager writes a `0.0` floating-point placeholder in the scalar slot for histogram rows. Read histogram measurements from the sketch payload.
 
 A null `value_histogram` cell represents an empty payload.
 
