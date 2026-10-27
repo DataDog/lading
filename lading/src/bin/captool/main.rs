@@ -12,6 +12,7 @@ use futures::io;
 use lading_capture::format::{CaptureFormat, detect_format};
 use lading_capture::line::Line;
 use lading_capture::validate::{jsonl, parquet};
+use lading_capture_schema::CURRENT_CAPTURE_VERSION;
 use tokio::{
     fs,
     io::{AsyncBufReadExt, BufReader},
@@ -39,6 +40,11 @@ struct Args {
     /// dump a metric's values. Requires --metric.
     #[clap(short, long)]
     dump_values: bool,
+
+    /// Parquet capture schema major version to read. captool rejects files that
+    /// declare a different major.
+    #[clap(long, global = true, default_value_t = CURRENT_CAPTURE_VERSION.major)]
+    schema_major_version: u64,
 
     /// Path to line-delimited capture file (not used with subcommands)
     capture_path: Option<String>,
@@ -88,7 +94,7 @@ async fn main() -> Result<(), Error> {
         min_seconds,
     }) = args.command
     {
-        return validate_capture(&capture_path, min_seconds).await;
+        return validate_capture(&capture_path, min_seconds, args.schema_major_version).await;
     }
 
     // For non-subcommand usage, capture_path is required
@@ -112,13 +118,16 @@ async fn main() -> Result<(), Error> {
         let metrics = match format {
             CaptureFormat::Parquet => {
                 let path_str = capture_path_str.to_owned();
-                tokio::task::spawn_blocking(move || analyze::parquet::list_metrics(&path_str))
-                    .await
-                    .expect("list_metrics task panicked")
-                    .map_err(|e| {
-                        error!("Failed to list metrics: {e}");
-                        Error::InvalidArgs
-                    })?
+                let schema_major_version = args.schema_major_version;
+                tokio::task::spawn_blocking(move || {
+                    analyze::parquet::list_metrics(&path_str, schema_major_version)
+                })
+                .await
+                .expect("list_metrics task panicked")
+                .map_err(|e| {
+                    error!("Failed to list metrics: {e}");
+                    Error::InvalidArgs
+                })?
             }
             CaptureFormat::Jsonl { compressed } => {
                 let file = fs::File::open(capture_path).await?;
@@ -163,8 +172,9 @@ async fn main() -> Result<(), Error> {
             CaptureFormat::Parquet => {
                 let path_str = capture_path_str.to_owned();
                 let metric_clone = metric_name.clone();
+                let schema_major_version = args.schema_major_version;
                 tokio::task::spawn_blocking(move || {
-                    analyze::parquet::analyze_metric(&path_str, &metric_clone)
+                    analyze::parquet::analyze_metric(&path_str, &metric_clone, schema_major_version)
                 })
                 .await
                 .expect("analyze_metric task panicked")
@@ -227,7 +237,11 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> Result<(), Error> {
+async fn validate_capture(
+    capture_path_str: &str,
+    min_seconds: Option<u64>,
+    schema_major_version: u64,
+) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
         error!("Capture file {capture_path_str} does not exist");
@@ -243,13 +257,15 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
         CaptureFormat::Parquet => {
             info!("Detected parquet format, using columnar validation");
             let path_str = capture_path_str.to_owned();
-            tokio::task::spawn_blocking(move || parquet::validate_parquet(&path_str, min_seconds))
-                .await
-                .expect("validation task panicked")
-                .map_err(|e| {
-                    error!("Parquet validation failed: {e}");
-                    Error::InvalidArgs
-                })?
+            tokio::task::spawn_blocking(move || {
+                parquet::validate_parquet(&path_str, min_seconds, schema_major_version)
+            })
+            .await
+            .expect("validation task panicked")
+            .map_err(|e| {
+                error!("Parquet validation failed: {e}");
+                Error::InvalidArgs
+            })?
         }
         CaptureFormat::Jsonl { compressed } => {
             let file = fs::File::open(capture_path).await?;
@@ -339,4 +355,51 @@ fn report_validation_result(
     }
     info!("Capture file is valid");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// For all argv without `--schema-major-version`:
+    /// `parse(argv).schema_major_version = CURRENT_CAPTURE_VERSION.major`.
+    #[test]
+    fn schema_major_version_defaults_to_current() -> Result<(), clap::Error> {
+        for argv in [
+            vec!["captool", "capture.parquet"],
+            vec!["captool", "validate", "capture.parquet"],
+        ] {
+            let args = Args::try_parse_from(argv)?;
+            assert_eq!(args.schema_major_version, CURRENT_CAPTURE_VERSION.major);
+        }
+        Ok(())
+    }
+
+    /// For all argv with `--schema-major-version 1` before or after `validate`:
+    /// `parse(argv).schema_major_version = 1`. A value that is not an integer fails to parse.
+    #[test]
+    fn schema_major_version_selects_a_major() -> Result<(), clap::Error> {
+        for argv in [
+            vec!["captool", "--schema-major-version", "1", "capture.parquet"],
+            vec![
+                "captool",
+                "validate",
+                "--schema-major-version",
+                "1",
+                "capture.parquet",
+            ],
+            vec![
+                "captool",
+                "--schema-major-version",
+                "1",
+                "validate",
+                "capture.parquet",
+            ],
+        ] {
+            let args = Args::try_parse_from(argv)?;
+            assert_eq!(args.schema_major_version, 1);
+        }
+        assert!(Args::try_parse_from(["captool", "--schema-major-version", "one", "x"]).is_err());
+        Ok(())
+    }
 }

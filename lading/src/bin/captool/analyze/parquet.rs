@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
-use arrow_array::{Array, ArrayAccessor, Float64Array, MapArray, StringArray, UInt64Array};
-use lading_capture::formats::parquet::{ReadError, reader_builder, resolve_label_dictionary};
+use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
+use lading_capture::formats::parquet::{LabelError, ReadError, reader_builder, resolve_labels};
 use lading_capture_schema::columns;
 use rustc_hash::FxHashMap;
 
@@ -23,6 +23,9 @@ pub(crate) enum Error {
     /// Capture metadata or declared schema error.
     #[error(transparent)]
     Capture(#[from] ReadError),
+    /// Label columns do not match the selected schema major version.
+    #[error("version mismatch: {0}")]
+    VersionMismatch(String),
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -37,6 +40,12 @@ pub(crate) enum Error {
     InvalidColumnType(String),
 }
 
+impl From<LabelError> for Error {
+    fn from(error: LabelError) -> Self {
+        Self::VersionMismatch(error.to_string())
+    }
+}
+
 /// Lists all unique metrics in a parquet capture file.
 ///
 /// Returns a sorted list of (kind, name) tuples.
@@ -44,9 +53,12 @@ pub(crate) enum Error {
 /// # Errors
 ///
 /// Returns an error if the file cannot be read or has invalid schema.
-pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, Error> {
+pub(crate) fn list_metrics<P: AsRef<Path>>(
+    path: P,
+    schema_major_version: u64,
+) -> Result<Vec<MetricInfo>, Error> {
     let file = File::open(path)?;
-    let reader = reader_builder(file)?.build()?;
+    let reader = reader_builder(file, schema_major_version)?.build()?;
 
     let mut metrics: BTreeSet<MetricInfo> = BTreeSet::new();
 
@@ -96,9 +108,10 @@ pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, E
 pub(crate) fn analyze_metric<P: AsRef<Path>>(
     path: P,
     metric_name: &str,
+    schema_major_version: u64,
 ) -> Result<FxHashMap<BTreeSet<String>, SeriesStats>, Error> {
     let file = File::open(path)?;
-    let reader = reader_builder(file)?.build()?;
+    let reader = reader_builder(file, schema_major_version)?.build()?;
 
     let mut series_map: FxHashMap<BTreeSet<String>, Vec<(u64, f64)>> = FxHashMap::default();
 
@@ -171,14 +184,12 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
             // Extract labels
             let mut sorted_labels = BTreeSet::new();
             let labels_slice = labels_array.value(row);
-            let key_array = resolve_label_dictionary(labels_slice.column(0), "Label keys")
-                .map_err(Error::InvalidColumnType)?;
-            let value_array = resolve_label_dictionary(labels_slice.column(1), "Label values")
-                .map_err(Error::InvalidColumnType)?;
+            let key_array =
+                resolve_labels(labels_slice.column(0), "Label keys", schema_major_version)?;
+            let value_array =
+                resolve_labels(labels_slice.column(1), "Label values", schema_major_version)?;
 
-            for i in 0..key_array.len() {
-                let key = key_array.value(i);
-                let val = value_array.value(i);
+            for (key, val) in key_array.iter().zip(value_array.iter()) {
                 sorted_labels.insert(format!("{key}:{val}"));
             }
 
@@ -231,13 +242,50 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
 mod tests {
     use super::*;
 
+    use std::path::PathBuf;
+
     use lading_capture::{
         formats::parquet::Format,
         line::{Line, LineValue, MetricKind},
     };
+    use lading_capture_schema::CURRENT_CAPTURE_VERSION;
     use tempfile::NamedTempFile;
 
-    /// Writer output must preserve label groups and statistics in captool.
+    fn fixture(major: u64) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../lading_capture/tests/fixtures/v{major}.parquet"))
+    }
+
+    /// For all frozen majors M: captool reads the M.0 capture only with schema major version M.
+    #[test]
+    fn frozen_captures_need_their_selected_major() -> Result<(), Box<dyn std::error::Error>> {
+        for (major, other) in [(1, 2), (2, 1)] {
+            assert_eq!(
+                list_metrics(fixture(major), major)?,
+                vec![MetricInfo {
+                    kind: "counter".to_string(),
+                    name: "requests".to_string(),
+                }]
+            );
+            let series = analyze_metric(fixture(major), "requests", major)?;
+            assert_eq!(series.len(), 2);
+            let prod_key = ["env:prod".to_string(), "service:api".to_string()].into();
+            let prod = series.get(&prod_key).ok_or("missing prod series")?;
+            assert_eq!(prod.values, vec![(0, 10.0), (2, 30.0)]);
+            assert!(matches!(
+                list_metrics(fixture(major), other),
+                Err(Error::Capture(ReadError::VersionMismatch { .. }))
+            ));
+            assert!(matches!(
+                analyze_metric(fixture(major), "requests", other),
+                Err(Error::Capture(ReadError::VersionMismatch { .. }))
+            ));
+        }
+        Ok(())
+    }
+
+    /// For all writer output read with `CURRENT_CAPTURE_VERSION.major`: each distinct label set
+    /// is one series, and its statistics equal those of its input values.
     #[test]
     #[expect(clippy::float_cmp, reason = "Statistics use exact integer inputs.")]
     fn analyze_metric_reads_writer_output() -> Result<(), Box<dyn std::error::Error>> {
@@ -270,14 +318,14 @@ mod tests {
         writer.close()?;
 
         assert_eq!(
-            list_metrics(capture.path())?,
+            list_metrics(capture.path(), CURRENT_CAPTURE_VERSION.major)?,
             vec![MetricInfo {
                 kind: "counter".to_string(),
                 name: "requests".to_string(),
             }]
         );
 
-        let series = analyze_metric(capture.path(), "requests")?;
+        let series = analyze_metric(capture.path(), "requests", CURRENT_CAPTURE_VERSION.major)?;
         assert_eq!(series.len(), 2);
 
         let prod_key = ["env:prod".to_string(), "service:api".to_string()].into();

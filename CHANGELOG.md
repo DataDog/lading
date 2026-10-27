@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - OpenTelemetry metric weights may now be zero, which disables that metric type.
   Only an all-zero set is rejected.
-- **Breaking Change**: Capture Parquet files now use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Consumers must read these columns as dictionary arrays. Update downstream readers with the writer because the schemas differ.
+- **Breaking Change**: Capture Parquet files now declare `capture.version = "2.0"` and use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Arrow consumers must read these columns as dictionary arrays.
+- **Breaking Change**: `captool` reads one capture schema major version. Select it with `--schema-major-version`. The default is the current major, `2`. `captool` rejects files that declare a different major. Use `--schema-major-version 1` for `1.x` captures and for captures without `capture.version`. `validate_parquet` takes the major as an argument with no default.
 
 ### Fixed
 - Container build no longer fails on stale apt version pins for `libssl-dev` and
@@ -20,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Trace-agent `agent_payload` generation for the agent-to-intake
   `/api/v0.2/traces` protobuf endpoint, reusing v0.4 trace-shape settings, with
   configurable host and tracer identity cardinality (`hosts`, `tracers`).
-- Capture Parquet files now include a `capture.version` footer entry, starting at `1.0`.
+- Capture Parquet files now include a `capture.version` footer entry.
 - Trace-agent payload generation for `/v1.0/traces` (idx/ETP), with a service
   graph, streaming string interning, error injection, span links and events,
   and an exact `chunks_per_payload` batch size.

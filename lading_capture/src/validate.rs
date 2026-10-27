@@ -44,6 +44,7 @@ mod tests {
     use crate::line::{Line, LineValue, MetricKind};
     use crate::validate::jsonl::validate_lines;
     use crate::validate::parquet::validate_parquet;
+    use lading_capture_schema::CURRENT_CAPTURE_VERSION;
 
     /// Helper to create test lines with various patterns
     fn create_test_lines() -> Vec<Line> {
@@ -102,7 +103,8 @@ mod tests {
             writer.close().expect("close parquet");
         }
 
-        let result = validate_parquet(parquet_file.path(), None).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
 
         assert_eq!(result.line_count, 3);
         assert_eq!(result.unique_fetch_indices, 3);
@@ -164,7 +166,8 @@ mod tests {
             writer.close().expect("close parquet");
         }
 
-        let result = validate_parquet(parquet_file.path(), None).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
 
         // Parquet detects: mapping violation (fetch_index_errors) + per-series monotonicity violation (per_series_errors)
         assert_eq!(result.fetch_index_errors, 1);
@@ -244,11 +247,59 @@ mod tests {
             writer.close().expect("close parquet");
         }
 
-        let result = validate_parquet(parquet_file.path(), None).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
 
         // Parquet checks time is strictly increasing within each series
         assert_eq!(result.per_series_errors, 1);
         assert!(!result.is_valid());
+    }
+
+    #[test]
+    fn parquet_validation_allows_time_reordering_across_different_series() {
+        let run_id = Uuid::new_v4();
+        let lines = vec![
+            Line {
+                run_id,
+                time: 2000,
+                fetch_index: 0,
+                metric_name: "test.counter".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(1),
+                labels: FxHashMap::default(),
+                value_histogram: Vec::new(),
+            },
+            Line {
+                run_id,
+                time: 1000, // Time goes backward but different series - OK
+                fetch_index: 1,
+                metric_name: "test.gauge".to_string(),
+                metric_kind: MetricKind::Gauge,
+                value: LineValue::Float(42.0),
+                labels: FxHashMap::default(),
+                value_histogram: Vec::new(),
+            },
+        ];
+
+        // Write to parquet
+        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        {
+            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
+                .expect("create parquet writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write to parquet");
+            }
+            writer.flush().expect("flush parquet");
+            writer.close().expect("close parquet");
+        }
+
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
+
+        // Different series can have overlapping timestamps
+        assert_eq!(result.per_series_errors, 0);
+        assert_eq!(result.fetch_index_errors, 0);
+        assert!(result.is_valid());
     }
 
     /// For equal metric names and kinds, distinct label values define distinct series.
@@ -292,7 +343,7 @@ mod tests {
             writer.close()?;
         }
 
-        let result = validate_parquet(parquet_file.path(), None)?;
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)?;
 
         assert_eq!(result.unique_series, 2);
         assert_eq!(result.per_series_errors, 0);
@@ -364,7 +415,8 @@ mod tests {
             writer.close().expect("close parquet");
         }
 
-        let result = validate_parquet(parquet_file.path(), Some(60)).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), Some(60), CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
 
         assert_eq!(result.min_seconds_errors, 1);
         assert!(!result.is_valid());
@@ -489,7 +541,8 @@ mod tests {
             writer.close().expect("close parquet");
         }
 
-        let result = validate_parquet(parquet_file.path(), None).expect("parquet validation");
+        let result = validate_parquet(parquet_file.path(), None, CURRENT_CAPTURE_VERSION.major)
+            .expect("parquet validation");
 
         // When sorted by fetch_index: [2→2000, 5→5000, 8→8000] - valid!
         assert_eq!(result.fetch_index_errors, 0);

@@ -10,15 +10,16 @@ use std::{
 };
 
 use arrow_array::{
-    Array, ArrayRef, BinaryArray, DictionaryArray, Float64Array, MapArray, RecordBatch,
-    StringArray, StructArray, TimestampMillisecondArray, TypedDictionaryArray, UInt64Array,
-    builder::StringDictionaryBuilder, types::Int32Type,
+    Array, ArrayAccessor, ArrayRef, BinaryArray, DictionaryArray, Float64Array, MapArray,
+    RecordBatch, StringArray, StructArray, TimestampMillisecondArray, TypedDictionaryArray,
+    UInt64Array, builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, Field, Schema};
 use lading_capture_schema::{
-    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, MetadataError, SchemaError,
-    capture_schema, columns, label_dictionary_type, parse_capture_version, validate_schema,
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, LabelEncoding, MetadataError,
+    SchemaError, capture_schema, capture_schema_for_major, columns, label_dictionary_type,
+    parse_capture_version, validate_schema,
 };
 use parquet::{
     arrow::{
@@ -45,13 +46,19 @@ pub enum ReadError {
     /// A present capture version has invalid metadata.
     #[error(transparent)]
     Metadata(#[from] MetadataError),
-    /// Lading's current reader does not implement this declared major.
-    #[error("unsupported capture version {version} (supported major: {supported_major})")]
-    UnsupportedVersion {
+    /// Lading does not define the selected schema major version.
+    #[error("unsupported schema major version {schema_major_version}")]
+    UnsupportedMajor {
+        /// Major version that the caller selected.
+        schema_major_version: u64,
+    },
+    /// The declared capture version has a different major than the selected one.
+    #[error("capture version {version} does not match schema major version {schema_major_version}")]
+    VersionMismatch {
         /// Valid declared version.
         version: CaptureVersion,
-        /// Major implemented by this reader.
-        supported_major: u64,
+        /// Major version that the caller selected.
+        schema_major_version: u64,
     },
     /// A versioned file disagrees with its known field contract.
     #[error(transparent)]
@@ -60,15 +67,22 @@ pub enum ReadError {
 
 /// Load metadata once and construct Lading's capture batch-reader builder.
 ///
-/// Lading checks declared versions and reuses footer metadata for Arrow decoding.
-/// Files without a version key follow the ordinary Parquet reading path.
+/// The caller selects one schema major version. A declared version must have this major,
+/// and its Arrow schema must satisfy that major's field contract. Minor versions of the same
+/// major are compatible. Files without a version key follow the ordinary Parquet reading path.
 ///
 /// # Errors
 ///
-/// Return an error for unreadable metadata, invalid declared versions, unsupported majors, or a mismatched declared schema.
+/// Return an error for an undefined schema major version, unreadable metadata, invalid
+/// declared versions, a different declared major, or a mismatched declared schema.
 pub fn reader_builder<T: ChunkReader + 'static>(
     reader: T,
+    schema_major_version: u64,
 ) -> Result<ParquetRecordBatchReaderBuilder<T>, ReadError> {
+    let expected =
+        capture_schema_for_major(schema_major_version).ok_or(ReadError::UnsupportedMajor {
+            schema_major_version,
+        })?;
     let metadata = ParquetMetaDataReader::new().parse_and_finish(&reader)?;
     let version = parse_capture_version(
         metadata
@@ -79,37 +93,108 @@ pub fn reader_builder<T: ChunkReader + 'static>(
             .map(|entry| (entry.key.as_str(), entry.value.as_deref())),
     )?;
     if let Some(version) = version
-        && version.major != CURRENT_CAPTURE_VERSION.major
+        && version.major != schema_major_version
     {
-        return Err(ReadError::UnsupportedVersion {
+        return Err(ReadError::VersionMismatch {
             version,
-            supported_major: CURRENT_CAPTURE_VERSION.major,
+            schema_major_version,
         });
     }
     let metadata = ArrowReaderMetadata::try_new(Arc::new(metadata), ArrowReaderOptions::default())?;
     if version.is_some() {
-        validate_schema(metadata.schema().as_ref(), &capture_schema())?;
+        validate_schema(metadata.schema().as_ref(), &expected)?;
     }
     Ok(ParquetRecordBatchReaderBuilder::new_with_metadata(
         reader, metadata,
     ))
 }
 
-/// Read label strings through a typed dictionary view without copying them.
+/// Label key or value strings from one schema major version, read without copies.
+#[derive(Debug, Clone, Copy)]
+pub enum LabelStrings<'a> {
+    /// V1 stores label strings as `Utf8`.
+    Utf8(&'a StringArray),
+    /// V2 stores label strings as `Dictionary(Int32, Utf8)`.
+    Dictionary(TypedDictionaryArray<'a, Int32Type, StringArray>),
+}
+
+impl<'a> LabelStrings<'a> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Utf8(array) => array.len(),
+            Self::Dictionary(array) => array.len(),
+        }
+    }
+
+    /// Iterate over the label strings in entry order.
+    pub fn iter(self) -> impl Iterator<Item = &'a str> {
+        // Indexes stay below `len`, so Arrow value access stays in bounds.
+        (0..self.len()).map(move |index| match self {
+            Self::Utf8(array) => array.value(index),
+            Self::Dictionary(array) => array.value(index),
+        })
+    }
+}
+
+/// Errors when label strings do not match a schema major version.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LabelError {
+    /// Lading does not define the selected schema major version.
+    #[error("unsupported schema major version {schema_major_version}")]
+    UnsupportedMajor {
+        /// Major version that the caller selected.
+        schema_major_version: u64,
+    },
+    /// The label column does not use the representation of the selected major.
+    #[error(
+        "schema major version {schema_major_version} uses {expected} for {column} and does not support {actual}"
+    )]
+    Representation {
+        /// Label column role, for example `Label keys`.
+        column: String,
+        /// Arrow type that the selected major uses.
+        expected: &'static str,
+        /// Arrow type that the column uses.
+        actual: String,
+        /// Major version that the caller selected.
+        schema_major_version: u64,
+    },
+}
+
+/// Read label strings with the representation of one schema major version.
 ///
 /// # Errors
 ///
-/// Return an error if `column` does not use `Dictionary(Int32, Utf8)`.
-pub fn resolve_label_dictionary<'a>(
+/// Return an error if Lading does not define `schema_major_version`, or if `column` does
+/// not use that major's label representation.
+pub fn resolve_labels<'a>(
     column: &'a dyn Array,
     column_name: &str,
-) -> Result<TypedDictionaryArray<'a, Int32Type, StringArray>, String> {
-    column
-        .as_any()
-        .downcast_ref::<DictionaryArray<Int32Type>>()
-        .ok_or_else(|| format!("{column_name} must use Dictionary(Int32, Utf8)"))?
-        .downcast_dict::<StringArray>()
-        .ok_or_else(|| format!("{column_name} dictionary values must use Utf8"))
+    schema_major_version: u64,
+) -> Result<LabelStrings<'a>, LabelError> {
+    let encoding =
+        LabelEncoding::for_major(schema_major_version).ok_or(LabelError::UnsupportedMajor {
+            schema_major_version,
+        })?;
+    let representation = |expected| LabelError::Representation {
+        column: column_name.to_string(),
+        expected,
+        actual: column.data_type().to_string(),
+        schema_major_version,
+    };
+    match encoding {
+        LabelEncoding::Utf8 => column
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .map(LabelStrings::Utf8)
+            .ok_or_else(|| representation("Utf8")),
+        LabelEncoding::Dictionary => column
+            .as_any()
+            .downcast_ref::<DictionaryArray<Int32Type>>()
+            .and_then(DictionaryArray::downcast_dict::<StringArray>)
+            .map(LabelStrings::Dictionary)
+            .ok_or_else(|| representation("Dictionary(Int32, Utf8)")),
+    }
 }
 
 /// Parquet format errors
@@ -444,6 +529,88 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod resolve_labels {
+        use super::super::{LabelError, resolve_labels};
+        use arrow_array::{
+            Array, DictionaryArray, Int32Array, LargeStringArray, StringArray,
+            types::{Int8Type, Int32Type},
+        };
+        use proptest::{
+            collection,
+            prelude::{Just, any},
+            prop_assert_eq, prop_assume, prop_oneof, proptest,
+        };
+        use std::sync::Arc;
+
+        fn read(column: &dyn Array, major: u64) -> Result<Vec<String>, LabelError> {
+            Ok(resolve_labels(column, "Label keys", major)?
+                .iter()
+                .map(str::to_string)
+                .collect())
+        }
+
+        proptest! {
+            /// For all string vectors v: `resolve_labels(Utf8(v), 1)` yields v, and
+            /// `resolve_labels(Dictionary(v), 2)` yields v.
+            #[test]
+            fn both_majors_yield_entry_order(values in collection::vec("[a-z]{0,4}", 0..16)) {
+                let utf8 = StringArray::from(values.clone());
+                let dictionary: DictionaryArray<Int32Type> =
+                    values.iter().map(String::as_str).collect();
+                prop_assert_eq!(read(&utf8, 1)?, values.clone());
+                prop_assert_eq!(read(&dictionary, 2)?, values);
+            }
+
+            /// For all major not in {1, 2}: `resolve_labels` returns `UnsupportedMajor`.
+            #[test]
+            fn undefined_majors_fail(
+                major in prop_oneof![Just(0u64), Just(3), Just(u64::MAX), any::<u64>()],
+            ) {
+                prop_assume!(!matches!(major, 1 | 2));
+                let column = StringArray::from(vec!["env"]);
+                prop_assert_eq!(
+                    read(&column, major),
+                    Err(LabelError::UnsupportedMajor { schema_major_version: major })
+                );
+            }
+        }
+
+        /// For all (column, M) where column does not use the label encoding of M:
+        /// `resolve_labels` returns `Representation` for M.
+        #[test]
+        fn other_representations_fail() -> Result<(), arrow_schema::ArrowError> {
+            let utf8 = StringArray::from(vec!["env"]);
+            let dictionary: DictionaryArray<Int32Type> = vec!["env"].into_iter().collect();
+            let small_keys: DictionaryArray<Int8Type> = vec!["env"].into_iter().collect();
+            let large_values = DictionaryArray::<Int32Type>::try_new(
+                Int32Array::from(vec![0]),
+                Arc::new(LargeStringArray::from(vec!["env"])),
+            )?;
+            let cases: [(&dyn Array, u64, &str); 4] = [
+                (&utf8, 2, "Dictionary(Int32, Utf8)"),
+                (&dictionary, 1, "Utf8"),
+                (&small_keys, 2, "Dictionary(Int32, Utf8)"),
+                (&large_values, 2, "Dictionary(Int32, Utf8)"),
+            ];
+            for (column, major, expected) in cases {
+                assert_eq!(
+                    read(column, major),
+                    Err(LabelError::Representation {
+                        column: "Label keys".to_string(),
+                        expected,
+                        actual: column.data_type().to_string(),
+                        schema_major_version: major,
+                    })
+                );
+            }
+            assert_eq!(
+                read(&utf8, 2).map_err(|error| error.to_string()),
+                Err("schema major version 2 uses Dictionary(Int32, Utf8) for Label keys and does not support Utf8".to_string())
+            );
+            Ok(())
+        }
+    }
     use crate::line::{Line, LineValue, MetricKind};
     use datadog_protos::metrics::Dogsketch;
     use ddsketch_agent::DDSketch;

@@ -13,12 +13,11 @@ use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
 use crate::{
-    formats::parquet::{ReadError, reader_builder, resolve_label_dictionary},
+    formats::parquet::{LabelError, ReadError, reader_builder, resolve_labels},
     validate::ValidationResult,
 };
 use arrow_array::{
-    Array, ArrayAccessor, MapArray, StringArray, StructArray, TimestampMillisecondArray,
-    UInt64Array,
+    Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
 };
 use lading_capture_schema::columns;
 
@@ -31,6 +30,9 @@ pub enum Error {
     /// Capture metadata or declared schema error.
     #[error(transparent)]
     Capture(#[from] ReadError),
+    /// Label columns do not match the selected schema major version.
+    #[error("version mismatch: {0}")]
+    VersionMismatch(String),
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -45,7 +47,17 @@ pub enum Error {
     InvalidColumnType(String),
 }
 
+impl From<LabelError> for Error {
+    fn from(error: LabelError) -> Self {
+        Self::VersionMismatch(error.to_string())
+    }
+}
+
 /// Validates a parquet capture file using columnar operations.
+///
+/// Read the file with schema major version `schema_major_version`. A declared
+/// `capture.version` must have this major. For a file without `capture.version`, the
+/// selected major chooses the label decoding.
 ///
 /// It uses a two-phase validation approach:
 ///
@@ -65,15 +77,18 @@ pub enum Error {
 /// # Errors
 ///
 /// Returns an error if the file cannot be opened or read, or if the parquet
-/// schema doesn't match the expected capture format.
+/// schema doesn't match the expected capture format. Also returns an error if Lading
+/// does not define `schema_major_version` or the file declares a different major.
+/// Label columns that do not match the selected major also cause an error.
 #[expect(clippy::cast_sign_loss)]
 #[expect(clippy::too_many_lines)]
 pub fn validate_parquet<P: AsRef<Path>>(
     path: P,
     min_seconds: Option<u64>,
+    schema_major_version: u64,
 ) -> Result<ValidationResult, Error> {
     let file = File::open(path)?;
-    let reader = reader_builder(file)?.build()?;
+    let reader = reader_builder(file, schema_major_version)?.build()?;
 
     // Phase 1: Streaming assertions
     //
@@ -185,15 +200,13 @@ pub fn validate_parquet<P: AsRef<Path>>(
             }
 
             let labels_slice: StructArray = labels_array.value(row);
-            let key_array = resolve_label_dictionary(labels_slice.column(0), "Label keys")
-                .map_err(Error::InvalidColumnType)?;
-            let value_array = resolve_label_dictionary(labels_slice.column(1), "Label values")
-                .map_err(Error::InvalidColumnType)?;
+            let key_array =
+                resolve_labels(labels_slice.column(0), "Label keys", schema_major_version)?;
+            let value_array =
+                resolve_labels(labels_slice.column(1), "Label values", schema_major_version)?;
 
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-            for i in 0..key_array.len() {
-                let key = key_array.value(i);
-                let value = value_array.value(i);
+            for (key, value) in key_array.iter().zip(value_array.iter()) {
                 sorted_labels.insert(format!("{key}:{value}"));
             }
 

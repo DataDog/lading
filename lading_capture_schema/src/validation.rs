@@ -105,7 +105,7 @@ mod tests {
 
     mod validate_schema {
         use super::*;
-        use crate::{capture_schema, columns};
+        use crate::{capture_schema, capture_schema_for_major, columns, label_dictionary_type};
         use arrow_schema::Fields;
         use proptest::{collection, prelude::any, prop_assert, proptest};
         use std::sync::Arc;
@@ -231,17 +231,25 @@ mod tests {
             ));
         }
 
-        /// Only the ordered key/value roles satisfy the label-map contract.
+        /// For all majors M in {1, 2}: `validate_schema` accepts the label map of M only when its
+        /// entry fields are (key, value), in this order.
         #[test]
-        fn label_map_roles_are_ordered() {
-            let expected = capture_schema();
+        fn label_map_roles_are_ordered() -> Result<(), &'static str> {
+            for (major, label_type) in [(1, DataType::Utf8), (2, label_dictionary_type())] {
+                let expected = capture_schema_for_major(major).ok_or("missing schema")?;
+                label_map_roles_are_ordered_for(&expected, &label_type);
+            }
+            Ok(())
+        }
+
+        fn label_map_roles_are_ordered_for(expected: &Schema, label_type: &DataType) {
             for names in [
                 [columns::LABEL_KEY, columns::LABEL_VALUE],
                 [columns::LABEL_VALUE, columns::LABEL_KEY],
             ] {
                 let fields: Vec<_> = names
                     .iter()
-                    .map(|name| Field::new(*name, DataType::Utf8, false))
+                    .map(|name| Field::new(*name, label_type.clone(), false))
                     .collect();
                 let entry = Field::new(
                     columns::LABEL_ENTRIES,
@@ -249,7 +257,7 @@ mod tests {
                     false,
                 );
                 let actual = replace_field(
-                    &expected,
+                    expected,
                     columns::LABELS,
                     Field::new(
                         columns::LABELS,
@@ -258,40 +266,46 @@ mod tests {
                     ),
                 );
                 assert_eq!(
-                    validate_schema(&actual, &expected).is_ok(),
+                    validate_schema(&actual, expected).is_ok(),
                     names == [columns::LABEL_KEY, columns::LABEL_VALUE],
                 );
             }
         }
 
+        /// For all majors M in {1, 2} and label maps with mixed key and value types:
+        /// `validate_schema(actual, M)` returns `TypeMismatch`.
         #[test]
-        fn nested_label_types_are_part_of_the_contract() {
-            let expected = capture_schema();
-            let entry = Field::new(
-                columns::LABEL_ENTRIES,
-                DataType::Struct(Fields::from(vec![
-                    Field::new(
-                        columns::LABEL_KEY,
-                        DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+        fn nested_label_types_are_part_of_the_contract() -> Result<(), &'static str> {
+            for major in [1, 2] {
+                let expected = capture_schema_for_major(major).ok_or("missing schema")?;
+                for (key, value) in [
+                    (DataType::Utf8, label_dictionary_type()),
+                    (label_dictionary_type(), DataType::Utf8),
+                ] {
+                    let entry = Field::new(
+                        columns::LABEL_ENTRIES,
+                        DataType::Struct(Fields::from(vec![
+                            Field::new(columns::LABEL_KEY, key, false),
+                            Field::new(columns::LABEL_VALUE, value, false),
+                        ])),
                         false,
-                    ),
-                    Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
-                ])),
-                false,
-            );
-            let actual = replace_field(
-                &expected,
-                columns::LABELS,
-                Field::new(
-                    columns::LABELS,
-                    DataType::Map(Arc::new(entry), false),
-                    false,
-                ),
-            );
-            assert!(matches!(
-                validate_schema(&actual, &expected),
-                Err(SchemaError::TypeMismatch { .. })
-            ));
+                    );
+                    let actual = replace_field(
+                        &expected,
+                        columns::LABELS,
+                        Field::new(
+                            columns::LABELS,
+                            DataType::Map(Arc::new(entry), false),
+                            false,
+                        ),
+                    );
+                    assert!(matches!(
+                        validate_schema(&actual, &expected),
+                        Err(SchemaError::TypeMismatch { .. })
+                    ));
+                }
+            }
+            Ok(())
         }
     }
 }

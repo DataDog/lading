@@ -1,7 +1,7 @@
-//! Check versioned captures against frozen V1 schema and record expectations.
+//! Check versioned captures against frozen V1 and V2 schema and record expectations.
 
-#[path = "support/v1.rs"]
-mod v1;
+#[path = "support/frozen.rs"]
+mod frozen;
 
 use std::{
     error::Error,
@@ -21,6 +21,7 @@ use arrow_schema::{DataType, Field, Fields, Schema};
 use bytes::Bytes;
 use datadog_protos::metrics::Dogsketch;
 use ddsketch_agent::DDSketch;
+use frozen::Major;
 use lading_capture::{
     formats::parquet::{Format, ReadError, reader_builder},
     line::{Line, LineValue, MetricKind},
@@ -41,12 +42,19 @@ use parquet::{
         reader::{ChunkReader, Length},
     },
 };
-use proptest::{collection, prelude::any, prop_assert_eq, proptest, test_runner::TestCaseError};
+use proptest::{
+    collection,
+    prelude::{Just, any},
+    prop_assert, prop_assert_eq, prop_oneof, proptest,
+    test_runner::TestCaseError,
+};
 use protobuf::Message;
 use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
-const V1: &[u8] = include_bytes!("fixtures/v1.parquet");
+const MAJORS: [Major; 2] = [Major::V1, Major::V2];
+/// The frozen baseline of the current writer's major.
+const CURRENT: Major = Major::V2;
 
 fn lines(values: &[u64]) -> Vec<Line> {
     (0u64..)
@@ -83,7 +91,7 @@ fn write_capture(lines: &[Line]) -> TestResult<Bytes> {
     }
     writer.close()?;
     let data = Bytes::from(output.into_inner());
-    assert_v1_contract(data.clone())?;
+    assert_contract(data.clone(), CURRENT)?;
     Ok(data)
 }
 
@@ -128,15 +136,16 @@ fn write_batches(
     Ok(Bytes::from(output))
 }
 
-fn assert_v1_contract(data: Bytes) -> TestResult {
+fn assert_contract(data: Bytes, major: Major) -> TestResult {
     let declared = version(data.clone())?.ok_or("missing capture version")?;
     assert_eq!(
-        declared.major, 1,
+        declared.major,
+        major.number(),
         "add a frozen contract for capture version {declared}"
     );
     let actual = ParquetRecordBatchReaderBuilder::try_new(data)?;
-    lading_capture_schema::validate_schema(actual.schema(), &v1::schema()?)?;
-    let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?;
+    lading_capture_schema::validate_schema(actual.schema(), &major.schema()?)?;
+    let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(major.capture()))?;
     for expected in baseline.parquet_schema().root_schema().get_fields() {
         let observed = actual
             .parquet_schema()
@@ -150,8 +159,9 @@ fn assert_v1_contract(data: Bytes) -> TestResult {
     Ok(())
 }
 
-fn input_batch() -> TestResult<RecordBatch> {
-    let mut reader = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?.build()?;
+fn input_batch(major: Major) -> TestResult<RecordBatch> {
+    let mut reader =
+        ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(major.capture()))?.build()?;
     let batch = reader.next().ok_or("missing fixture batch")??;
     if reader.next().transpose()?.is_some() {
         return Err("expected exactly one fixture batch".into());
@@ -159,14 +169,24 @@ fn input_batch() -> TestResult<RecordBatch> {
     Ok(batch)
 }
 
+/// `CURRENT_CAPTURE_VERSION.major = CURRENT.number()`, so the current writer major has a
+/// frozen baseline.
 #[test]
-fn writer_output_preserves_v1_records() -> TestResult {
+fn current_writer_has_a_frozen_baseline() {
+    assert_eq!(CURRENT_CAPTURE_VERSION.major, CURRENT.number());
+}
+
+#[test]
+fn writer_output_preserves_current_records() -> TestResult {
     let data = write_capture(&lines(&[10, 20, 30]))?;
     assert_eq!(version(data.clone())?, Some(CURRENT_CAPTURE_VERSION));
-    assert_eq!(v1::read(&data)?, v1::read(V1)?);
+    assert_eq!(
+        frozen::read(&data, CURRENT)?,
+        frozen::read(CURRENT.capture(), CURRENT)?
+    );
     let file = tempfile::NamedTempFile::new()?;
     std::fs::write(file.path(), &data)?;
-    let validation = validate_parquet(file.path(), None)?;
+    let validation = validate_parquet(file.path(), None, CURRENT_CAPTURE_VERSION.major)?;
     assert!(validation.is_valid());
     assert_eq!(validation.line_count, 3);
     assert_eq!(validation.unique_series, 2);
@@ -177,34 +197,21 @@ fn writer_output_preserves_v1_records() -> TestResult {
 fn zero_rows_still_have_version_and_schema() -> TestResult {
     let data = write_capture(&[])?;
     assert_eq!(version(data.clone())?, Some(CURRENT_CAPTURE_VERSION));
-    let builder = reader_builder(data.clone())?;
+    let builder = reader_builder(data.clone(), CURRENT_CAPTURE_VERSION.major)?;
     assert_eq!(builder.metadata().file_metadata().num_rows(), 0);
-    lading_capture_schema::validate_schema(builder.schema(), &v1::schema()?)?;
-    assert!(v1::read(&data)?.is_empty());
+    lading_capture_schema::validate_schema(builder.schema(), &CURRENT.schema()?)?;
+    assert!(frozen::read(&data, CURRENT)?.is_empty());
     Ok(())
 }
 
-/// The frozen V1 capture retains its declared schema and complete logical records.
-#[test]
-fn frozen_v1_works_with_current_reader() -> TestResult {
-    assert_eq!(
-        version(Bytes::from_static(V1))?,
-        Some(CaptureVersion::new(1, 0))
-    );
-    assert_v1_contract(Bytes::from_static(V1))?;
-    let batches = reader_builder(Bytes::from_static(V1))?
-        .with_batch_size(1)
-        .build()?
-        .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(batches.len(), 3);
-    assert!(batches.iter().all(|batch| batch.num_rows() == 1));
-    let expected = [
+fn expected_records() -> Vec<frozen::Record> {
+    [
         (0u64, 1000, 10, vec![("env", "prod"), ("service", "api")]),
         (1, 2000, 20, vec![("env", "staging")]),
         (2, 3000, 30, vec![("env", "prod"), ("service", "api")]),
     ]
     .into_iter()
-    .map(|(tick, time, value, labels)| v1::Record {
+    .map(|(tick, time, value, labels)| frozen::Record {
         run_id: [0; 16],
         time,
         fetch_index: tick,
@@ -218,22 +225,88 @@ fn frozen_v1_works_with_current_reader() -> TestResult {
             .collect(),
         value_histogram: None,
     })
-    .collect::<Vec<_>>();
-    assert_eq!(v1::read(V1)?, expected);
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1.parquet");
-    let validation = validate_parquet(path, None)?;
-    assert!(validation.is_valid());
-    assert_eq!(validation.line_count, 3);
-    assert_eq!(validation.unique_series, 2);
+    .collect()
+}
+
+fn fixture_path(major: Major) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "tests/fixtures/v{major}.parquet",
+        major = major.number()
+    ))
+}
+
+/// For all frozen majors M: the M.0 capture keeps its declared schema and logical records
+/// when Lading reads it with schema major version M.
+#[test]
+fn frozen_captures_work_with_their_selected_major() -> TestResult {
+    for major in MAJORS {
+        let data = Bytes::from_static(major.capture());
+        assert_eq!(
+            version(data.clone())?,
+            Some(CaptureVersion::new(major.number(), 0))
+        );
+        assert_contract(data.clone(), major)?;
+        let batches = reader_builder(data, major.number())?
+            .with_batch_size(1)
+            .build()?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|batch| batch.num_rows() == 1));
+        assert_eq!(frozen::read(major.capture(), major)?, expected_records());
+        let validation = validate_parquet(fixture_path(major), None, major.number())?;
+        assert!(validation.is_valid());
+        assert_eq!(validation.line_count, 3);
+        assert_eq!(validation.unique_series, 2);
+    }
     Ok(())
 }
 
+/// For all frozen majors M and selected majors S != M: Lading rejects the M.0 capture.
+#[test]
+fn selected_major_rejects_other_declared_majors() {
+    for (declared, selected) in [(Major::V1, Major::V2), (Major::V2, Major::V1)] {
+        let data = Bytes::from_static(declared.capture());
+        assert!(matches!(
+            reader_builder(data, selected.number()),
+            Err(ReadError::VersionMismatch { version, schema_major_version })
+                if version.major == declared.number() && schema_major_version == selected.number()
+        ));
+        assert!(matches!(
+            validate_parquet(fixture_path(declared), None, selected.number()),
+            Err(lading_capture::validate::parquet::Error::Capture(
+                ReadError::VersionMismatch { .. }
+            ))
+        ));
+    }
+}
+
 proptest! {
-    /// For all scalar inputs: V1 decoding preserves the writer's integer values.
+    /// For all major not in {1, 2}: reader_builder rejects the selection without reading the file.
     #[test]
-    fn v1_decoder_preserves_values(values in collection::vec(any::<u64>(), 1..32)) {
+    fn undefined_selected_major_fails_before_io(
+        major in prop_oneof![Just(0u64), Just(3), Just(u64::MAX), any::<u64>()],
+    ) {
+        proptest::prop_assume!(!matches!(major, 1 | 2));
+        let reader = CountingReader {
+            data: Bytes::from_static(CURRENT.capture()),
+            calls: Arc::new(AtomicUsize::new(0)),
+        };
+        let result = reader_builder(reader.clone(), major);
+        let rejected = matches!(
+            result,
+            Err(ReadError::UnsupportedMajor { schema_major_version }) if schema_major_version == major
+        );
+        prop_assert!(rejected);
+        prop_assert_eq!(reader.calls.load(Ordering::Relaxed), 0);
+    }
+}
+
+proptest! {
+    /// For all scalar inputs: current-major decoding preserves the writer's integer values.
+    #[test]
+    fn current_decoder_preserves_values(values in collection::vec(any::<u64>(), 1..32)) {
         let data = write_capture(&lines(&values)).map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let records = v1::read(&data)?;
+        let records = frozen::read(&data, CURRENT)?;
         prop_assert_eq!(records.len(), values.len());
         for (record, expected) in records.iter().zip(values) {
             prop_assert_eq!(record.value_int, Some(expected));
@@ -242,25 +315,39 @@ proptest! {
     }
 }
 
-/// Any column permutation and ignorable top-level field preserve 1.x decoding.
+/// For all frozen majors M: any column permutation and ignorable top-level field preserve M.x decoding.
 #[test]
 fn column_order_and_extras_are_not_version_boundaries() -> TestResult {
-    let expected = v1::read(V1)?;
-    let batch = input_batch()?;
-    proptest!(|(order in collection::vec(any::<u64>(), 9), insertion in 0usize..10)| {
-        let result = reordered_capture(&batch, order, insertion)
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        assert_v1_contract(result.clone()).map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let decoded = v1::read(&result)?;
-        prop_assert_eq!(decoded.as_slice(), expected.as_slice());
-        let reader = reader_builder(result)?.with_batch_size(1).build()?;
-        let batches = reader.collect::<Result<Vec<_>, _>>()?;
-        prop_assert_eq!(batches.len(), 3);
-    });
+    for major in MAJORS {
+        let expected = frozen::read(major.capture(), major)?;
+        let batch = input_batch(major)?;
+        proptest!(|(order in collection::vec(any::<u64>(), 9), insertion in 0usize..10)| {
+            let result = reordered_capture(&batch, order, insertion, major)
+                .map_err(|error| TestCaseError::fail(error.to_string()))?;
+            assert_contract(result.clone(), major)
+                .map_err(|error| TestCaseError::fail(error.to_string()))?;
+            let decoded = frozen::read(&result, major)?;
+            prop_assert_eq!(decoded.as_slice(), expected.as_slice());
+            let reader = reader_builder(result, major.number())?.with_batch_size(1).build()?;
+            let batches = reader.collect::<Result<Vec<_>, _>>()?;
+            prop_assert_eq!(batches.len(), 3);
+        });
+    }
     Ok(())
 }
 
-fn reordered_capture(batch: &RecordBatch, order: Vec<u64>, insertion: usize) -> TestResult<Bytes> {
+fn tag(major: Major, minor: u64) -> Vec<KeyValue> {
+    declared(Some(
+        &CaptureVersion::new(major.number(), minor).to_string(),
+    ))
+}
+
+fn reordered_capture(
+    batch: &RecordBatch,
+    order: Vec<u64>,
+    insertion: usize,
+    major: Major,
+) -> TestResult<Bytes> {
     let mut fields: Vec<_> = order
         .into_iter()
         .zip(batch.schema().fields().iter().cloned())
@@ -287,41 +374,53 @@ fn reordered_capture(batch: &RecordBatch, order: Vec<u64>, insertion: usize) -> 
         })
         .collect::<Result<_, _>>()?;
     let batch = RecordBatch::try_new(Arc::clone(&schema), arrays)?;
-    write_batches(schema, &[batch], declared(Some("1.1")), true)
+    write_batches(schema, &[batch], tag(major, 1), true)
 }
 
-/// For all dictionary settings: decoded rows equal the baseline across three row groups.
+/// For all frozen majors and page dictionary settings: decoded rows equal the baseline
+/// across three row groups.
 #[test]
-fn page_dictionary_encoding_preserves_v1_contract() -> TestResult {
-    let batch = input_batch()?;
-    for dictionary in [false, true] {
-        let properties = WriterProperties::builder()
-            .set_dictionary_enabled(dictionary)
-            .set_max_row_group_row_count(Some(1))
-            .set_key_value_metadata(Some(declared(Some("1.0"))))
-            .build();
-        let mut output = Vec::new();
-        let mut writer = ArrowWriter::try_new(&mut output, batch.schema(), Some(properties))?;
-        writer.write(&batch)?;
-        writer.close()?;
-        let data = Bytes::from(output);
-        assert_v1_contract(data.clone())?;
-        assert_eq!(reader_builder(data.clone())?.metadata().num_row_groups(), 3);
-        assert_eq!(v1::read(&data)?, v1::read(V1)?);
+fn page_dictionary_encoding_preserves_frozen_contracts() -> TestResult {
+    for major in MAJORS {
+        let batch = input_batch(major)?;
+        for dictionary in [false, true] {
+            let properties = WriterProperties::builder()
+                .set_dictionary_enabled(dictionary)
+                .set_max_row_group_row_count(Some(1))
+                .set_key_value_metadata(Some(tag(major, 0)))
+                .build();
+            let mut output = Vec::new();
+            let mut writer = ArrowWriter::try_new(&mut output, batch.schema(), Some(properties))?;
+            writer.write(&batch)?;
+            writer.close()?;
+            let data = Bytes::from(output);
+            assert_contract(data.clone(), major)?;
+            let builder = reader_builder(data.clone(), major.number())?;
+            assert_eq!(builder.metadata().num_row_groups(), 3);
+            assert_eq!(
+                frozen::read(&data, major)?,
+                frozen::read(major.capture(), major)?
+            );
+        }
     }
     Ok(())
 }
 
 #[test]
 fn physical_row_order_does_not_change_the_contract() -> TestResult {
-    let batch = input_batch()?;
-    let reversed: Vec<_> = (0..batch.num_rows())
-        .rev()
-        .map(|row| batch.slice(row, 1))
-        .collect();
-    let data = write_batches(batch.schema(), &reversed, declared(Some("1.0")), true)?;
-    assert_v1_contract(data.clone())?;
-    assert_eq!(v1::read(&data)?, v1::read(V1)?);
+    for major in MAJORS {
+        let batch = input_batch(major)?;
+        let reversed: Vec<_> = (0..batch.num_rows())
+            .rev()
+            .map(|row| batch.slice(row, 1))
+            .collect();
+        let data = write_batches(batch.schema(), &reversed, tag(major, 0), true)?;
+        assert_contract(data.clone(), major)?;
+        assert_eq!(
+            frozen::read(&data, major)?,
+            frozen::read(major.capture(), major)?
+        );
+    }
     Ok(())
 }
 
@@ -352,7 +451,7 @@ fn scalar_kinds_and_histograms_keep_existing_representation() -> TestResult {
         .value_histogram
         .clone_from(&payload);
     let data = write_capture(&records)?;
-    let decoded = v1::read(&data)?;
+    let decoded = frozen::read(&data, CURRENT)?;
     assert_eq!(decoded.len(), records.len());
     for (input, output) in records.iter().zip(&decoded) {
         match input.value {
@@ -384,7 +483,7 @@ fn nonfinite_scalars_do_not_gain_new_validation() -> TestResult {
         record.value = LineValue::Float(value);
     }
     let data = write_capture(&records)?;
-    let decoded = v1::read(&data)?;
+    let decoded = frozen::read(&data, CURRENT)?;
     assert_eq!(decoded.len(), values.len());
     for (record, value) in decoded.iter().zip(values) {
         assert_eq!(record.value_float_bits, Some(value.to_bits()));
@@ -402,27 +501,47 @@ fn malformed_version_metadata_is_rejected() -> TestResult {
         vec![KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("1.0".to_string())); 2],
     ] {
         let data = write_batches(Arc::new(capture_schema()), &[], metadata, true)?;
-        assert!(matches!(reader_builder(data), Err(ReadError::Metadata(_))));
+        assert!(matches!(
+            reader_builder(data, CURRENT_CAPTURE_VERSION.major),
+            Err(ReadError::Metadata(_))
+        ));
+    }
+    Ok(())
+}
+
+/// For all frozen majors M: an untagged file with M's layout reads with any defined major,
+/// and the selected major chooses label decoding during validation.
+#[test]
+fn missing_version_uses_standard_parquet_reader() -> TestResult {
+    for (layout, other) in [(Major::V1, Major::V2), (Major::V2, Major::V1)] {
+        let batch = input_batch(layout)?;
+        let data = write_batches(batch.schema(), &[batch], vec![], true)?;
+        assert_eq!(version(data.clone())?, None);
+        for selected in MAJORS {
+            let batches = reader_builder(data.clone(), selected.number())?
+                .with_batch_size(1)
+                .build()?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(batches.len(), 3);
+        }
+        assert_eq!(
+            frozen::read(&data, layout)?,
+            frozen::read(layout.capture(), layout)?
+        );
+        let file = tempfile::NamedTempFile::new()?;
+        std::fs::write(file.path(), &data)?;
+        assert!(validate_parquet(file.path(), None, layout.number())?.is_valid());
+        assert!(matches!(
+            validate_parquet(file.path(), None, other.number()),
+            Err(lading_capture::validate::parquet::Error::VersionMismatch(message))
+                if message.starts_with(&format!("schema major version {other} uses ", other = other.number()))
+        ));
     }
     Ok(())
 }
 
 #[test]
-fn missing_version_uses_standard_parquet_reader() -> TestResult {
-    let batch = input_batch()?;
-    let data = write_batches(batch.schema(), &[batch], vec![], true)?;
-    assert_eq!(version(data.clone())?, None);
-    let batches = reader_builder(data.clone())?
-        .with_batch_size(1)
-        .build()?
-        .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(batches.len(), 3);
-    assert_eq!(v1::read(&data)?, v1::read(V1)?);
-    Ok(())
-}
-
-#[test]
-fn unsupported_major_is_checked_before_arrow_schema() -> TestResult {
+fn other_declared_major_is_checked_before_arrow_schema() -> TestResult {
     let metadata = vec![
         KeyValue::new(CAPTURE_VERSION_KEY.to_string(), Some("99.0".to_string())),
         KeyValue::new(
@@ -431,31 +550,37 @@ fn unsupported_major_is_checked_before_arrow_schema() -> TestResult {
         ),
     ];
     let data = write_batches(Arc::new(capture_schema()), &[], metadata, false)?;
-    assert!(
-        matches!(reader_builder(data), Err(ReadError::UnsupportedVersion { version, .. }) if version.major == 99)
-    );
+    assert!(matches!(
+        reader_builder(data, CURRENT_CAPTURE_VERSION.major),
+        Err(ReadError::VersionMismatch { version, .. }) if version.major == 99
+    ));
     Ok(())
 }
 
 #[test]
-fn nullable_mandatory_fields_fail_v1_schema_checks() -> TestResult {
-    let batch = input_batch()?;
-    let fields: Vec<_> = batch
-        .schema()
-        .fields()
-        .iter()
-        .map(|field| {
-            if field.name() == "time" {
-                Arc::new(field.as_ref().clone().with_nullable(true))
-            } else {
-                Arc::clone(field)
-            }
-        })
-        .collect();
-    let schema = Arc::new(Schema::new(fields));
-    let batch = RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec())?;
-    let tagged = write_batches(schema, &[batch], declared(Some("1.0")), true)?;
-    assert!(matches!(reader_builder(tagged), Err(ReadError::Schema(_))));
+fn nullable_mandatory_fields_fail_frozen_schema_checks() -> TestResult {
+    for major in MAJORS {
+        let batch = input_batch(major)?;
+        let fields: Vec<_> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| {
+                if field.name() == "time" {
+                    Arc::new(field.as_ref().clone().with_nullable(true))
+                } else {
+                    Arc::clone(field)
+                }
+            })
+            .collect();
+        let schema = Arc::new(Schema::new(fields));
+        let batch = RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec())?;
+        let tagged = write_batches(schema, &[batch], tag(major, 0), true)?;
+        assert!(matches!(
+            reader_builder(tagged, major.number()),
+            Err(ReadError::Schema(_))
+        ));
+    }
     Ok(())
 }
 
@@ -488,46 +613,54 @@ fn replace_labels(batch: &RecordBatch, labels: MapArray) -> TestResult<RecordBat
     )?)
 }
 
-/// Reversing map roles must change decoded labels and fail the declared schema check.
+/// For all frozen majors: reversing map roles changes decoded labels and fails the declared
+/// schema check.
 #[test]
 fn reversed_map_roles_are_not_compatible() -> TestResult {
-    let batch = input_batch()?;
-    let labels = batch
-        .column_by_name("labels")
-        .ok_or("missing labels")?
-        .as_any()
-        .downcast_ref::<MapArray>()
-        .ok_or("labels are not a map")?;
-    let old = labels.entries();
-    let fields = Fields::from(vec![
-        Arc::clone(&old.fields()[1]),
-        Arc::clone(&old.fields()[0]),
-    ]);
-    let entries = StructArray::try_new(
-        fields,
-        vec![Arc::clone(old.column(1)), Arc::clone(old.column(0))],
-        None,
-    )?;
-    let labels = MapArray::try_new(
-        Arc::new(Field::new("entries", entries.data_type().clone(), false)),
-        labels.offsets().clone(),
-        entries,
-        None,
-        false,
-    )?;
-    let batch = replace_labels(&batch, labels)?;
-    let data = write_batches(batch.schema(), &[batch], declared(Some("1.0")), true)?;
-    let decoded = v1::read(&data)?;
-    assert_ne!(decoded, v1::read(V1)?);
-    let first = decoded.first().ok_or("missing decoded row")?;
-    assert_eq!(first.labels.get("prod").map(String::as_str), Some("env"));
-    assert!(matches!(reader_builder(data), Err(ReadError::Schema(_))));
+    for major in MAJORS {
+        let batch = input_batch(major)?;
+        let labels = batch
+            .column_by_name("labels")
+            .ok_or("missing labels")?
+            .as_any()
+            .downcast_ref::<MapArray>()
+            .ok_or("labels are not a map")?;
+        let old = labels.entries();
+        let fields = Fields::from(vec![
+            Arc::clone(&old.fields()[1]),
+            Arc::clone(&old.fields()[0]),
+        ]);
+        let entries = StructArray::try_new(
+            fields,
+            vec![Arc::clone(old.column(1)), Arc::clone(old.column(0))],
+            None,
+        )?;
+        let labels = MapArray::try_new(
+            Arc::new(Field::new("entries", entries.data_type().clone(), false)),
+            labels.offsets().clone(),
+            entries,
+            None,
+            false,
+        )?;
+        let batch = replace_labels(&batch, labels)?;
+        let data = write_batches(batch.schema(), &[batch], tag(major, 0), true)?;
+        let decoded = frozen::read(&data, major)?;
+        assert_ne!(decoded, frozen::read(major.capture(), major)?);
+        let first = decoded.first().ok_or("missing decoded row")?;
+        assert_eq!(first.labels.get("prod").map(String::as_str), Some("env"));
+        assert!(matches!(
+            reader_builder(data, major.number()),
+            Err(ReadError::Schema(_))
+        ));
+    }
     Ok(())
 }
 
+/// Dictionary labels keep the native Parquet schema but fail the V1 Arrow contract, so they
+/// need a new major. The same batch tagged 2.0 satisfies the V2 contract and records.
 #[test]
-fn dictionary_representation_is_not_a_same_major_change() -> TestResult {
-    let batch = input_batch()?;
+fn dictionary_labels_need_a_new_major() -> TestResult {
+    let batch = input_batch(Major::V1)?;
     let labels = batch
         .column_by_name("labels")
         .ok_or("missing labels")?
@@ -562,16 +695,30 @@ fn dictionary_representation_is_not_a_same_major_change() -> TestResult {
     let entry = Arc::new(Field::new("entries", entries.data_type().clone(), false));
     let labels = MapArray::try_new(entry, labels.offsets().clone(), entries, None, false)?;
     let batch = replace_labels(&batch, labels)?;
-    let data = write_batches(batch.schema(), &[batch], declared(Some("1.1")), true)?;
+    let data = write_batches(
+        batch.schema(),
+        std::slice::from_ref(&batch),
+        tag(Major::V1, 1),
+        true,
+    )?;
     let actual = ParquetRecordBatchReaderBuilder::try_new(data.clone())?;
-    let baseline = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(V1))?;
+    let baseline =
+        ParquetRecordBatchReaderBuilder::try_new(Bytes::from_static(Major::V1.capture()))?;
     assert_eq!(
         actual.parquet_schema().root_schema(),
         baseline.parquet_schema().root_schema()
     );
-    assert!(lading_capture_schema::validate_schema(actual.schema(), &v1::schema()?).is_err());
-    assert!(v1::read(&data).is_err());
-    assert!(matches!(reader_builder(data), Err(ReadError::Schema(_))));
+    assert!(lading_capture_schema::validate_schema(actual.schema(), &Major::V1.schema()?).is_err());
+    assert!(frozen::read(&data, Major::V1).is_err());
+    assert!(matches!(
+        reader_builder(data, Major::V1.number()),
+        Err(ReadError::Schema(_))
+    ));
+
+    let data = write_batches(batch.schema(), &[batch], tag(Major::V2, 0), true)?;
+    assert_contract(data.clone(), Major::V2)?;
+    reader_builder(data.clone(), Major::V2.number())?;
+    assert_eq!(frozen::read(&data, Major::V2)?, expected_records());
     Ok(())
 }
 
@@ -609,7 +756,7 @@ fn metadata_preflight_does_not_duplicate_io() -> TestResult {
     };
     let _baseline = ParquetRecordBatchReaderBuilder::try_new(reader.clone())?;
     let baseline = reader.calls.swap(0, Ordering::Relaxed);
-    let builder = reader_builder(reader.clone())?;
+    let builder = reader_builder(reader.clone(), CURRENT_CAPTURE_VERSION.major)?;
     assert_eq!(reader.calls.load(Ordering::Relaxed), baseline);
     let rows = builder
         .with_batch_size(1)

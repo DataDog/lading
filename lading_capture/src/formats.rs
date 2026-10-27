@@ -68,16 +68,17 @@ pub trait OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::jsonl;
-    use crate::formats::parquet::resolve_label_dictionary;
+    use crate::formats::parquet::resolve_labels;
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, ArrayAccessor, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
+        Array, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
         TimestampMillisecondArray, UInt64Array,
     };
     use bytes::Bytes;
     use datadog_protos::metrics::Dogsketch;
     use ddsketch_agent::DDSketch;
+    use lading_capture_schema::CURRENT_CAPTURE_VERSION;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use proptest::prelude::*;
     use protobuf::Message;
@@ -561,12 +562,13 @@ mod tests {
                 };
 
                 let labels_slice: StructArray = labels_array.value(row_idx);
-                let keys = resolve_label_dictionary(labels_slice.column(0), "Label keys")?;
-                let values = resolve_label_dictionary(labels_slice.column(1), "Label values")?;
+                let major = CURRENT_CAPTURE_VERSION.major;
+                let keys = resolve_labels(labels_slice.column(0), "Label keys", major)?;
+                let values = resolve_labels(labels_slice.column(1), "Label values", major)?;
 
                 let mut labels = FxHashMap::default();
-                for i in 0..keys.len() {
-                    labels.insert(keys.value(i).to_string(), values.value(i).to_string());
+                for (key, value) in keys.iter().zip(values.iter()) {
+                    labels.insert(key.to_string(), value.to_string());
                 }
 
                 let value_histogram = if value_histogram_array.is_null(row_idx) {

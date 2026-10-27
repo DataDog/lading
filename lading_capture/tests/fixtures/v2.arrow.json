@@ -1,0 +1,123 @@
+{
+  "fields": [
+    {
+      "name": "run_id",
+      "data_type": "Utf8",
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "time",
+      "data_type": {
+        "Timestamp": [
+          "Millisecond",
+          null
+        ]
+      },
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "fetch_index",
+      "data_type": "UInt64",
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "metric_name",
+      "data_type": "Utf8",
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "metric_kind",
+      "data_type": "Utf8",
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "value_int",
+      "data_type": "UInt64",
+      "nullable": true,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "value_float",
+      "data_type": "Float64",
+      "nullable": true,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "labels",
+      "data_type": {
+        "Map": [
+          {
+            "name": "entries",
+            "data_type": {
+              "Struct": [
+                {
+                  "name": "key",
+                  "data_type": {
+                    "Dictionary": [
+                      "Int32",
+                      "Utf8"
+                    ]
+                  },
+                  "nullable": false,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                },
+                {
+                  "name": "value",
+                  "data_type": {
+                    "Dictionary": [
+                      "Int32",
+                      "Utf8"
+                    ]
+                  },
+                  "nullable": false,
+                  "dict_id": 1,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              ]
+            },
+            "nullable": false,
+            "dict_id": 0,
+            "dict_is_ordered": false,
+            "metadata": {}
+          },
+          false
+        ]
+      },
+      "nullable": false,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    },
+    {
+      "name": "value_histogram",
+      "data_type": "Binary",
+      "nullable": true,
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {}
+    }
+  ],
+  "metadata": {}
+}
