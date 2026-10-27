@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Changed
+- OpenTelemetry metric weights may now be zero, which disables that metric type.
+  Only an all-zero set is rejected.
+
+### Fixed
+- Container build no longer fails on stale apt version pins for `libssl-dev` and
+  `protobuf-compiler`.
+- Updated `zstd` to 0.14 and `arrow`/`parquet` to 60 to resolve RUSTSEC-2026-0391,
+  RUSTSEC-2026-0398, RUSTSEC-2026-0403, and RUSTSEC-2026-0410.
 
 ### Added
 - Trace-agent `agent_payload` generation for the agent-to-intake
