@@ -35,9 +35,23 @@ Key files to understand:
 The `agent_payload` variant generates protobuf `AgentPayload` messages for
 `/api/v0.2/traces`, the endpoint to which an Agent forwards traces. This is not
 the tracer-facing `/v0.2/traces` MessagePack protocol. It uses
-`Content-Type: application/x-protobuf` and the same trace-shape settings as
-`v0.4`, including `priority_weights`. Each generated trace becomes one complete
-`TraceChunk`; chunks share one `TracerPayload` inside an `AgentPayload`.
+`Content-Type: application/x-protobuf`. Trace shape is configured under `traces`
+with the same settings as `v0.4`, including `priority_weights`. Without
+`priority_weights`, chunks carry the Agent's `PriorityNone` (-128), i.e. no
+sampling decision.
+
+An Agent runs once per host and forwards traces from every tracer on that host,
+and receivers partition and aggregate by those identities. They are generated
+from the seed rather than fixed, with configurable cardinality:
+
+- `hosts`: distinct Agent identities (`hostName`, `env`, `agentVersion`). Each
+  payload comes from one host.
+- `tracers`: distinct tracer identities (`containerID`, language and its version,
+  tracer version, `runtimeID`, `appVersion`), distributed round-robin across
+  hosts. Must be at least `hosts`, so every host has a tracer.
+
+Each generated trace becomes one complete `TraceChunk` in a `TracerPayload` of a
+tracer belonging to the payload's host. Identity string lengths are fixed.
 
 See the [intake example](../../../examples/trace-agent-intake.yaml). The block
 size includes protobuf envelopes and length prefixes. A trace that cannot fit is

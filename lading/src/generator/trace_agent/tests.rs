@@ -12,7 +12,7 @@ use hyper_util::rt::TokioIo;
 use lading_payload::{
     block::CacheMethod,
     common::config::ConfRange,
-    trace_agent::{self, v04},
+    trace_agent::{self, agent_payload, v04},
 };
 use prost::Message;
 use tokio::{net::TcpListener, time::timeout};
@@ -71,9 +71,16 @@ async fn serve_intake(
                             .expect("read request")
                             .to_bytes();
                         let payload = IntakePayload::decode(body).expect("valid protobuf");
-                        assert_eq!(payload.tracer_payloads.len(), 1);
-                        assert!(!payload.tracer_payloads[0].chunks.is_empty());
-                        for chunk in &payload.tracer_payloads[0].chunks {
+                        // One host owning two tracers: each request carries one or both.
+                        assert!((1..=2).contains(&payload.tracer_payloads.len()));
+                        for tracer in &payload.tracer_payloads {
+                            assert!(!tracer.chunks.is_empty());
+                        }
+                        for chunk in payload
+                            .tracer_payloads
+                            .iter()
+                            .flat_map(|tracer| &tracer.chunks)
+                        {
                             assert_eq!(chunk.spans.len(), 2);
                             assert_eq!(chunk.spans[0].trace_id, chunk.spans[1].trace_id);
                             assert_ne!(chunk.spans[0].span_id, chunk.spans[1].span_id);
@@ -102,12 +109,16 @@ async fn agent_payload_requests_use_the_intake_protocol() -> Result<(), TestErro
         seed: [0; 32],
         target_uri: format!("http://{address}").parse()?,
         backoff_behavior: BackoffBehavior::Ignore,
-        variant: trace_agent::Config::AgentPayload(v04::Config {
-            contexts: ConfRange::Constant(1),
-            spans_per_trace: ConfRange::Constant(2),
-            tags_per_span: ConfRange::Constant(1),
-            metrics_per_span: ConfRange::Constant(0),
-            ..v04::Config::default()
+        variant: trace_agent::Config::AgentPayload(agent_payload::Config {
+            hosts: ConfRange::Constant(1),
+            tracers: ConfRange::Constant(2),
+            traces: v04::Config {
+                contexts: ConfRange::Constant(1),
+                spans_per_trace: ConfRange::Constant(2),
+                tags_per_span: ConfRange::Constant(1),
+                metrics_per_span: ConfRange::Constant(0),
+                ..v04::Config::default()
+            },
         }),
         bytes_per_second: Some(byte_unit::Byte::from_u64(4096)),
         maximum_block_size: byte_unit::Byte::from_u64(4096),

@@ -20,12 +20,20 @@ pub(super) struct AgentPayload {
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub(super) struct TracerPayload {
+    #[prost(string, tag = "1")]
+    pub(super) container_id: String,
     #[prost(string, tag = "2")]
     pub(super) language_name: String,
+    #[prost(string, tag = "3")]
+    pub(super) language_version: String,
     #[prost(string, tag = "4")]
     pub(super) tracer_version: String,
+    #[prost(string, tag = "5")]
+    pub(super) runtime_id: String,
     #[prost(message, repeated, tag = "6")]
     pub(super) chunks: Vec<TraceChunk>,
+    #[prost(string, tag = "10")]
+    pub(super) app_version: String,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]

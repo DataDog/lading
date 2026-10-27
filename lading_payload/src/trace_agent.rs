@@ -31,8 +31,8 @@ pub enum Config {
     /// Version 1.0: msgpack `idx`/ETP tracer payload, with streaming string table
     #[serde(rename = "v1.0")]
     V1(v1::Config),
-    /// Agent-to-intake protobuf payloads, using the v0.4 trace-shape settings.
-    AgentPayload(v04::Config),
+    /// Agent-to-intake protobuf payloads, with configurable host and tracer identities.
+    AgentPayload(agent_payload::Config),
 }
 
 impl Config {
@@ -78,9 +78,12 @@ impl Config {
     /// Returns an error if the configuration is invalid
     pub fn valid(&self) -> Result<(), String> {
         match self {
-            Config::V04(config) | Config::AgentPayload(config) => config
+            Config::V04(config) => config
                 .valid()
                 .map_err(|_| "invalid configuration".to_string()),
+            Config::AgentPayload(config) => config
+                .valid()
+                .map_err(|e| format!("invalid configuration: {e:?}")),
             Config::V1(config) => config
                 .valid()
                 .map_err(|e| format!("invalid configuration: {e}")),
