@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
-use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
-use lading_capture::formats::parquet::{ReadError, reader_builder};
+use arrow_array::{Array, ArrayAccessor, Float64Array, MapArray, StringArray, UInt64Array};
+use lading_capture::formats::parquet::{ReadError, reader_builder, resolve_label_dictionary};
 use lading_capture_schema::columns;
 use rustc_hash::FxHashMap;
 
@@ -171,16 +171,10 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
             // Extract labels
             let mut sorted_labels = BTreeSet::new();
             let labels_slice = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label keys not String".to_string()))?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label values not String".to_string()))?;
+            let key_array = resolve_label_dictionary(labels_slice.column(0), "Label keys")
+                .map_err(Error::InvalidColumnType)?;
+            let value_array = resolve_label_dictionary(labels_slice.column(1), "Label values")
+                .map_err(Error::InvalidColumnType)?;
 
             for i in 0..key_array.len() {
                 let key = key_array.value(i);
@@ -231,4 +225,75 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use lading_capture::{
+        formats::parquet::Format,
+        line::{Line, LineValue, MetricKind},
+    };
+    use tempfile::NamedTempFile;
+
+    /// Writer output must preserve label groups and statistics in captool.
+    #[test]
+    #[expect(clippy::float_cmp, reason = "Statistics use exact integer inputs.")]
+    fn analyze_metric_reads_writer_output() -> Result<(), Box<dyn std::error::Error>> {
+        let run_id = "12345678-9abc-def0-1234-56789abcdef0".parse()?;
+        let capture = NamedTempFile::new()?;
+        let mut writer = Format::new(capture.reopen()?, 3)?;
+        for (env, fetch_index, value) in [
+            ("prod", 0u64, 10),
+            ("prod", 1, 20),
+            ("prod", 2, 30),
+            ("staging", 0, 100),
+            ("staging", 1, 200),
+        ] {
+            writer.write_metric(&Line {
+                run_id,
+                time: 1_000 + u128::from(fetch_index),
+                fetch_index,
+                metric_name: "requests".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(value),
+                labels: [
+                    ("env".to_string(), env.to_string()),
+                    ("service".to_string(), "api".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                value_histogram: Vec::new(),
+            })?;
+        }
+        writer.close()?;
+
+        assert_eq!(
+            list_metrics(capture.path())?,
+            vec![MetricInfo {
+                kind: "counter".to_string(),
+                name: "requests".to_string(),
+            }]
+        );
+
+        let series = analyze_metric(capture.path(), "requests")?;
+        assert_eq!(series.len(), 2);
+
+        let prod_key = ["env:prod".to_string(), "service:api".to_string()].into();
+        let staging_key = ["env:staging".to_string(), "service:api".to_string()].into();
+
+        let prod_stats = series.get(&prod_key).ok_or("missing prod series")?;
+        assert_eq!(prod_stats.min, 10.0);
+        assert_eq!(prod_stats.max, 30.0);
+        assert_eq!(prod_stats.mean, 20.0);
+        assert!(prod_stats.is_monotonic);
+
+        let staging_stats = series.get(&staging_key).ok_or("missing staging series")?;
+        assert_eq!(staging_stats.min, 100.0);
+        assert_eq!(staging_stats.max, 200.0);
+        assert_eq!(staging_stats.mean, 150.0);
+        assert!(staging_stats.is_monotonic);
+        Ok(())
+    }
 }

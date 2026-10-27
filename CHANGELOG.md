@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - OpenTelemetry metric weights may now be zero, which disables that metric type.
   Only an all-zero set is rejected.
+- **Breaking Change**: Capture Parquet files now use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Consumers must read these columns as dictionary arrays. Update downstream readers with the writer because the schemas differ.
 
 ### Fixed
 - Container build no longer fails on stale apt version pins for `libssl-dev` and
