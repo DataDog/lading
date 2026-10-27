@@ -8,7 +8,10 @@
 //! configured rather than fixed: `hosts` bounds the distinct Agent identities and `tracers`
 //! bounds the distinct tracer identities, each tracer belonging to exactly one host.
 
-use std::{collections::BTreeMap, io::Write};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Write,
+};
 
 use prost::Message;
 use rand::{Rng, RngExt};
@@ -32,6 +35,8 @@ const MAX_IDENTITIES: u32 = 100_000;
 // identity bytes keeps windows distinct without building a large pool per generator.
 const MIN_STRING_POOL_SIZE: usize = 16 * 1024;
 const MAX_STRING_POOL_SIZE: usize = 1_000_000;
+// Redraws allowed when a drawn identity string is already in use.
+const MAX_UNIQUE_ATTEMPTS: usize = 64;
 
 // Identity string lengths. Receivers act on cardinality, not length, so these are fixed.
 const HOST_NAME_LENGTH: usize = 16;
@@ -159,19 +164,19 @@ impl AgentPayload {
             host_count * HOST_IDENTITY_BYTES + tracer_count * TRACER_IDENTITY_BYTES;
         let pool_size = (identity_bytes * 4).clamp(MIN_STRING_POOL_SIZE, MAX_STRING_POOL_SIZE);
         let pool = RandomStringPool::with_size(rng, pool_size);
-        let mut text = |length| {
-            pool.of_size(rng, length)
-                .map(str::to_owned)
-                .ok_or(Error::StringGenerate)
-        };
+        // Host names, container IDs and runtime IDs identify an Agent or tracer, so
+        // they are distinct; otherwise the configured cardinality would not be met.
+        let mut host_names = BTreeSet::new();
+        let mut container_ids = BTreeSet::new();
+        let mut runtime_ids = BTreeSet::new();
 
         let mut hosts = Vec::with_capacity(host_count);
         for _ in 0..host_count {
             hosts.push(Host {
                 envelope: wire::AgentPayload {
-                    host_name: text(HOST_NAME_LENGTH)?,
-                    env: text(ENV_LENGTH)?,
-                    agent_version: text(VERSION_LENGTH)?,
+                    host_name: unique_text(&pool, rng, HOST_NAME_LENGTH, &mut host_names)?,
+                    env: text(&pool, rng, ENV_LENGTH)?,
+                    agent_version: text(&pool, rng, VERSION_LENGTH)?,
                     tracer_payloads: Vec::new(),
                 },
                 tracers: Vec::new(),
@@ -180,12 +185,12 @@ impl AgentPayload {
         let mut tracers = Vec::with_capacity(tracer_count);
         for index in 0..tracer_count {
             tracers.push(wire::TracerPayload {
-                container_id: text(CONTAINER_ID_LENGTH)?,
-                language_name: text(LANGUAGE_LENGTH)?,
-                language_version: text(VERSION_LENGTH)?,
-                tracer_version: text(VERSION_LENGTH)?,
-                runtime_id: text(RUNTIME_ID_LENGTH)?,
-                app_version: text(VERSION_LENGTH)?,
+                container_id: unique_text(&pool, rng, CONTAINER_ID_LENGTH, &mut container_ids)?,
+                language_name: text(&pool, rng, LANGUAGE_LENGTH)?,
+                language_version: text(&pool, rng, VERSION_LENGTH)?,
+                tracer_version: text(&pool, rng, VERSION_LENGTH)?,
+                runtime_id: unique_text(&pool, rng, RUNTIME_ID_LENGTH, &mut runtime_ids)?,
+                app_version: text(&pool, rng, VERSION_LENGTH)?,
                 chunks: Vec::new(),
             });
             // Validation guarantees tracer_count >= host_count, so every host gets one.
@@ -200,6 +205,32 @@ impl AgentPayload {
             last_span_count: 0,
         })
     }
+}
+
+fn text<R: Rng + ?Sized>(
+    pool: &RandomStringPool,
+    rng: &mut R,
+    length: usize,
+) -> Result<String, Error> {
+    pool.of_size(rng, length)
+        .map(str::to_owned)
+        .ok_or(Error::StringGenerate)
+}
+
+/// Draw a string of `length` not already in `seen`, redrawing on collision.
+fn unique_text<R: Rng + ?Sized>(
+    pool: &RandomStringPool,
+    rng: &mut R,
+    length: usize,
+    seen: &mut BTreeSet<String>,
+) -> Result<String, Error> {
+    for _ in 0..MAX_UNIQUE_ATTEMPTS {
+        let candidate = text(pool, rng, length)?;
+        if seen.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+    }
+    Err(Error::StringGenerate)
 }
 
 // The containing message fields (AgentPayload.tracerPayloads = 5 and

@@ -161,6 +161,23 @@ proptest! {
         prop_assert!(owners.len() <= tracers as usize);
     }
 
+    /// For all seeds and `1 <= hosts <= tracers`: the generator holds exactly `hosts`
+    /// distinct host names and exactly `tracers` distinct container and runtime IDs, so the
+    /// configured cardinality is met rather than reduced by colliding random strings.
+    #[test]
+    fn identities_are_distinct(seed: u64, hosts in 1u32..64, extra in 0u32..256) {
+        let tracers = hosts + extra;
+        let mut rng = StdRng::seed_from_u64(seed);
+        let generator = AgentPayload::with_config(config(1, hosts, tracers), &mut rng)?;
+        let host_names: BTreeSet<_> = generator.hosts.iter().map(|host| &host.envelope.host_name).collect();
+        let container_ids: BTreeSet<_> = generator.tracers.iter().map(|tracer| &tracer.container_id).collect();
+        let runtime_ids: BTreeSet<_> = generator.tracers.iter().map(|tracer| &tracer.runtime_id).collect();
+        prop_assert_eq!(host_names.len(), hosts as usize);
+        prop_assert_eq!(container_ids.len(), tracers as usize);
+        prop_assert_eq!(runtime_ids.len(), tracers as usize);
+        prop_assert!(generator.hosts.iter().all(|host| !host.tracers.is_empty()));
+    }
+
     /// For all seeds: without `priority_weights`, every chunk carries the Agent's
     /// `PriorityNone`, so receivers see no sampling decision.
     #[test]
