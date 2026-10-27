@@ -8,7 +8,7 @@
 //! configured rather than fixed: `hosts` bounds the distinct Agent identities and `tracers`
 //! bounds the distinct tracer identities, each tracer belonging to exactly one host.
 
-use std::io::Write;
+use std::{collections::BTreeMap, io::Write};
 
 use prost::Message;
 use rand::{Rng, RngExt};
@@ -138,6 +138,8 @@ pub struct AgentPayload {
     hosts: Vec<Host>,
     /// Tracer identities; `chunks` is empty.
     tracers: Vec<wire::TracerPayload>,
+    /// Encoded size of each empty tracer identity, so blocks need not clone unused ones.
+    tracer_bytes: Vec<usize>,
     last_span_count: u64,
 }
 
@@ -193,6 +195,7 @@ impl AgentPayload {
         Ok(Self {
             traces: v04::V04::with_config(config.traces, rng)?,
             hosts,
+            tracer_bytes: tracers.iter().map(Message::encoded_len).collect(),
             tracers,
             last_span_count: 0,
         })
@@ -218,33 +221,27 @@ impl crate::Serialize for AgentPayload {
         }
 
         let host = &self.hosts[rng.random_range(0..self.hosts.len())];
-        let mut tracers: Vec<wire::TracerPayload> = host
-            .tracers
-            .iter()
-            .map(|&index| self.tracers[index].clone())
-            .collect();
-        // Encoded size of each tracer payload, and whether it holds any chunks yet.
-        let mut tracer_bytes: Vec<usize> = tracers.iter().map(Message::encoded_len).collect();
-        let mut used = vec![false; tracers.len()];
+        // Only tracers that receive a chunk are materialized: tracer index ->
+        // (encoded size including its chunks, chunks). A host may own many tracers.
+        let mut groups: BTreeMap<usize, (usize, Vec<wire::TraceChunk>)> = BTreeMap::new();
         let mut total_bytes = host.envelope.encoded_len();
         loop {
             let trace = self.traces.generate(&mut rng)?;
             let chunk = wire::TraceChunk::from(trace);
-            let index = rng.random_range(0..tracers.len());
-            let next_tracer_bytes = tracer_bytes[index] + message_size(chunk.encoded_len());
-            let previous = if used[index] {
-                message_size(tracer_bytes[index])
-            } else {
-                0
+            let tracer = host.tracers[rng.random_range(0..host.tracers.len())];
+            let (previous, current_bytes) = match groups.get(&tracer) {
+                Some(&(bytes, _)) => (message_size(bytes), bytes),
+                None => (0, self.tracer_bytes[tracer]),
             };
+            let next_tracer_bytes = current_bytes + message_size(chunk.encoded_len());
             let next_total = total_bytes - previous + message_size(next_tracer_bytes);
             if next_total > max_bytes {
                 break;
             }
             self.last_span_count += chunk.spans.len() as u64;
-            tracers[index].chunks.push(chunk);
-            tracer_bytes[index] = next_tracer_bytes;
-            used[index] = true;
+            let group = groups.entry(tracer).or_insert_with(|| (0, Vec::new()));
+            group.0 = next_tracer_bytes;
+            group.1.push(chunk);
             total_bytes = next_total;
         }
 
@@ -254,9 +251,12 @@ impl crate::Serialize for AgentPayload {
             return Ok(());
         }
         let mut payload = host.envelope.clone();
-        payload.tracer_payloads = tracers
+        payload.tracer_payloads = groups
             .into_iter()
-            .filter(|tracer| !tracer.chunks.is_empty())
+            .map(|(tracer, (_, chunks))| wire::TracerPayload {
+                chunks,
+                ..self.tracers[tracer].clone()
+            })
             .collect();
         let mut buffer = Vec::with_capacity(payload.encoded_len());
         payload.encode(&mut buffer)?;

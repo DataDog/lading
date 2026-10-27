@@ -290,3 +290,32 @@ fn intake_and_tracer_protocols_have_distinct_routes_and_media_types() {
     assert_eq!(v1.endpoint_path(), "/v1.0/traces");
     assert_eq!(v1.content_type(), "application/msgpack");
 }
+
+/// A host owning the maximum number of tracers still produces small blocks, carrying
+/// a tracer payload only for tracers that received chunks.
+#[test]
+fn many_tracers_on_one_host_emit_only_used_tracers() {
+    let mut rng = StdRng::seed_from_u64(7);
+    let mut generator =
+        AgentPayload::with_config(config(1, 1, 100_000), &mut rng).expect("valid configuration");
+    for _ in 0..64 {
+        let mut bytes = Vec::new();
+        generator
+            .to_bytes(&mut rng, 2048, &mut bytes)
+            .expect("serialize");
+        let payload = wire::AgentPayload::decode(bytes.as_slice()).expect("decode");
+        let chunks: usize = payload
+            .tracer_payloads
+            .iter()
+            .map(|tracer| tracer.chunks.len())
+            .sum();
+        assert!(chunks > 0);
+        assert!(payload.tracer_payloads.len() <= chunks);
+        assert!(
+            payload
+                .tracer_payloads
+                .iter()
+                .all(|tracer| !tracer.chunks.is_empty())
+        );
+    }
+}
