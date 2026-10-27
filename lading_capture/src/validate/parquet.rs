@@ -12,13 +12,14 @@ use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
+use crate::{
+    formats::parquet::{ReadError, reader_builder},
+    validate::ValidationResult,
+};
 use arrow_array::{
     Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
 };
 use lading_capture_schema::columns;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-
-use crate::validate::ValidationResult;
 
 /// Errors for parquet validation
 #[derive(thiserror::Error, Debug)]
@@ -26,6 +27,9 @@ pub enum Error {
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// Capture metadata or declared schema error.
+    #[error(transparent)]
+    Capture(#[from] ReadError),
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -68,8 +72,7 @@ pub fn validate_parquet<P: AsRef<Path>>(
     min_seconds: Option<u64>,
 ) -> Result<ValidationResult, Error> {
     let file = File::open(path)?;
-    let reader_builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let reader = reader_builder.build()?;
+    let reader = reader_builder(file)?.build()?;
 
     // Phase 1: Streaming assertions
     //

@@ -11,10 +11,14 @@ repository = "https://github.com/datadog/lading/"
 keywords = ["random_test", "generator"]
 categories = ["development-tools::profiling"]
 description = "Shared Arrow schema for Lading capture parquet files."
-readme = "../README.md"
+readme = "README.md"
 
 [dependencies]
 arrow-schema = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
 
 [lib]
 doctest = false

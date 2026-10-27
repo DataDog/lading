@@ -2,7 +2,17 @@
 //!
 //! This crate exposes the exact column layout used by `lading-capture` so
 //! downstream consumers can read capture files without relying on ad-hoc
-//! schema reconstruction.
+//! schema reconstruction. See this crate's README for the capture contract and
+//! Rust loading helpers.
+
+mod validation;
+mod version;
+
+pub use validation::{SchemaError, validate_schema};
+pub use version::{
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, MetadataError,
+    parse_capture_version,
+};
 
 use std::sync::Arc;
 
