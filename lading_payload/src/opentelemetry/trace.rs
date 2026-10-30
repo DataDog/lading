@@ -1020,9 +1020,7 @@ impl OpentelemetryTraces {
     where
         R: Rng + ?Sized,
     {
-        config
-            .valid()
-            .map_err(|e| Error::Validation(e.to_string()))?;
+        config.valid().map_err(Error::Validation)?;
 
         let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, STRING_POOL_SIZE));
 

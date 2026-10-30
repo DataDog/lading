@@ -12,9 +12,15 @@ variables:
 ci-container-image:
   stage: .pre
   image: "$DOCKER_RUNNER_REGISTRY:$DOCKER_RUNNER_IMAGE_TAG"
+  # GitLab runners reject unsigned images, so sign the image after the push.
+  id_tokens:
+    DDSIGN_ID_TOKEN:
+      aud: image-integrity
   script: |
     IMAGE_TAG="${REPO_CI_REGISTRY}:$(date --utc +%Y-%m-%d)-${CI_COMMIT_SHORT_SHA}"
-    docker buildx build -t $IMAGE_TAG --push . -f ci/Dockerfiles/Dockerfile.fuzz
+    METADATA_FILE=$(mktemp)
+    docker buildx build -t "${IMAGE_TAG}" --push --metadata-file "${METADATA_FILE}" . -f ci/Dockerfiles/Dockerfile.fuzz
+    ddsign sign "${IMAGE_TAG}" --docker-metadata-file "${METADATA_FILE}"
   when: manual
   except:
     - tags
