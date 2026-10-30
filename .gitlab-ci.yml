@@ -12,12 +12,40 @@ variables:
 ci-container-image:
   stage: .pre
   image: "$DOCKER_RUNNER_REGISTRY:$DOCKER_RUNNER_IMAGE_TAG"
+  # GitLab runners reject unsigned images, so sign the image after the push.
+  id_tokens:
+    DDSIGN_ID_TOKEN:
+      aud: image-integrity
   script: |
     IMAGE_TAG="${REPO_CI_REGISTRY}:$(date --utc +%Y-%m-%d)-${CI_COMMIT_SHORT_SHA}"
-    docker buildx build -t $IMAGE_TAG --push . -f ci/Dockerfiles/Dockerfile.fuzz
-  when: manual
-  except:
-    - tags
-    - schedules
+    # TEMPORARY: the verify job needs a tag that it can know before this job runs.
+    PIPELINE_TAG="${REPO_CI_REGISTRY}:pipeline-${CI_PIPELINE_ID}"
+    METADATA_FILE=$(mktemp)
+    docker buildx build -t "${IMAGE_TAG}" -t "${PIPELINE_TAG}" --push --metadata-file "${METADATA_FILE}" . -f ci/Dockerfiles/Dockerfile.fuzz
+    ddsign sign "${IMAGE_TAG}" --docker-metadata-file "${METADATA_FILE}"
+  rules:
+    - if: $CI_COMMIT_TAG || $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    # TEMPORARY: run without a manual start on the verification branch.
+    - if: $CI_COMMIT_BRANCH == "paul.reinlein/sign-fuzz-ci-image"
+    - when: manual
+      allow_failure: true
+  tags:
+    - "arch:amd64"
+
+# TEMPORARY: start a container from the new image. The cluster image verifier
+# rejects an unsigned image here, so this job proves that signing works. It
+# also checks that the new toolchain builds the fuzz targets.
+ci-container-image-verify:
+  stage: fuzz
+  image: "${REPO_CI_REGISTRY}:pipeline-${CI_PIPELINE_ID}"
+  needs:
+    - ci-container-image
+  rules:
+    - if: $CI_COMMIT_TAG || $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "paul.reinlein/sign-fuzz-ci-image"
+  script:
+    - ci/fuzz --check lading_payload
   tags:
     - "arch:amd64"
