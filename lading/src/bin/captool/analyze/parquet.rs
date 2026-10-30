@@ -8,8 +8,8 @@ use std::fs::File;
 use std::path::Path;
 
 use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
-use lading_capture::formats::parquet::{ReadError, reader_builder};
-use lading_capture_schema::columns;
+use lading_capture::formats::parquet::{LabelStrings, ReadError, reader_builder, resolve_labels};
+use lading_capture_schema::{LabelEncoding, columns};
 use rustc_hash::FxHashMap;
 
 use super::{MetricInfo, SeriesStats};
@@ -23,6 +23,12 @@ pub(crate) enum Error {
     /// Capture metadata or declared schema error.
     #[error(transparent)]
     Capture(#[from] ReadError),
+    /// Label columns do not match the selected schema major version.
+    ///
+    /// A declared major that differs from the selected major arrives as
+    /// `Capture(ReadError::VersionMismatch)` instead.
+    #[error("version mismatch: {0}")]
+    VersionMismatch(String),
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -37,6 +43,22 @@ pub(crate) enum Error {
     InvalidColumnType(String),
 }
 
+/// Read label strings, or describe a label type that the selected major does not use.
+fn labels<'a>(
+    column: &'a dyn Array,
+    role: &str,
+    encoding: LabelEncoding,
+    schema_major_version: u64,
+) -> Result<LabelStrings<'a>, Error> {
+    resolve_labels(column, encoding).ok_or_else(|| {
+        Error::VersionMismatch(format!(
+            "schema major version {schema_major_version} uses {expected} for {role} and does not support {actual}",
+            expected = encoding.data_type(),
+            actual = column.data_type(),
+        ))
+    })
+}
+
 /// Lists all unique metrics in a parquet capture file.
 ///
 /// Returns a sorted list of (kind, name) tuples.
@@ -44,9 +66,12 @@ pub(crate) enum Error {
 /// # Errors
 ///
 /// Returns an error if the file cannot be read or has invalid schema.
-pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, Error> {
+pub(crate) fn list_metrics<P: AsRef<Path>>(
+    path: P,
+    schema_major_version: u64,
+) -> Result<Vec<MetricInfo>, Error> {
     let file = File::open(path)?;
-    let reader = reader_builder(file)?.build()?;
+    let reader = reader_builder(file, schema_major_version)?.build()?;
 
     let mut metrics: BTreeSet<MetricInfo> = BTreeSet::new();
 
@@ -96,9 +121,14 @@ pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, E
 pub(crate) fn analyze_metric<P: AsRef<Path>>(
     path: P,
     metric_name: &str,
+    schema_major_version: u64,
 ) -> Result<FxHashMap<BTreeSet<String>, SeriesStats>, Error> {
     let file = File::open(path)?;
-    let reader = reader_builder(file)?.build()?;
+    let reader = reader_builder(file, schema_major_version)?.build()?;
+    let encoding =
+        LabelEncoding::for_major(schema_major_version).ok_or(ReadError::UnsupportedMajor {
+            schema_major_version,
+        })?;
 
     let mut series_map: FxHashMap<BTreeSet<String>, Vec<(u64, f64)>> = FxHashMap::default();
 
@@ -171,20 +201,20 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
             // Extract labels
             let mut sorted_labels = BTreeSet::new();
             let labels_slice = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label keys not String".to_string()))?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| Error::InvalidColumnType("Label values not String".to_string()))?;
+            let key_array = labels(
+                labels_slice.column(0),
+                "Label keys",
+                encoding,
+                schema_major_version,
+            )?;
+            let value_array = labels(
+                labels_slice.column(1),
+                "Label values",
+                encoding,
+                schema_major_version,
+            )?;
 
-            for i in 0..key_array.len() {
-                let key = key_array.value(i);
-                let val = value_array.value(i);
+            for (key, val) in key_array.iter().zip(value_array.iter()) {
                 sorted_labels.insert(format!("{key}:{val}"));
             }
 
@@ -231,4 +261,151 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::{path::PathBuf, sync::Arc};
+
+    use arrow_array::RecordBatch;
+    use arrow_schema::Schema;
+    use lading_capture::{
+        formats::parquet::Format,
+        line::{Line, LineValue, MetricKind},
+    };
+    use lading_capture_schema::CURRENT_CAPTURE_VERSION;
+    use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
+    use tempfile::NamedTempFile;
+
+    fn fixture(major: u64) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../lading_capture/tests/fixtures/v{major}.parquet"))
+    }
+
+    /// For an untagged file with V1 labels and the default major 2: `list_metrics` succeeds,
+    /// and `analyze_metric` returns `VersionMismatch` because it decodes labels.
+    #[test]
+    fn untagged_v1_labels_need_schema_major_version_1() -> Result<(), Box<dyn std::error::Error>> {
+        let batches = ParquetRecordBatchReaderBuilder::try_new(File::open(fixture(1))?)?
+            .build()?
+            .collect::<Result<Vec<_>, _>>()?;
+        let first = batches.first().ok_or("missing fixture batch")?;
+        let schema = Arc::new(Schema::new(first.schema().fields().clone()));
+        let capture = NamedTempFile::new()?;
+        let mut writer = ArrowWriter::try_new(capture.reopen()?, Arc::clone(&schema), None)?;
+        for batch in &batches {
+            writer.write(&RecordBatch::try_new(
+                Arc::clone(&schema),
+                batch.columns().to_vec(),
+            )?)?;
+        }
+        writer.close()?;
+
+        let major = CURRENT_CAPTURE_VERSION.major;
+        assert_eq!(list_metrics(capture.path(), major)?.len(), 1);
+        let error = analyze_metric(capture.path(), "requests", major).err();
+        assert!(
+            matches!(
+                &error,
+                Some(Error::VersionMismatch(message))
+                    if message == &format!(
+                        "schema major version {major} uses Dictionary(Int32, Utf8) for Label keys and does not support Utf8"
+                    )
+            ),
+            "unexpected result {error:?}"
+        );
+        assert_eq!(analyze_metric(capture.path(), "requests", 1)?.len(), 2);
+        Ok(())
+    }
+
+    /// For all frozen majors M: captool reads the M.0 capture only with schema major version M.
+    #[test]
+    fn frozen_captures_need_their_selected_major() -> Result<(), Box<dyn std::error::Error>> {
+        for (major, other) in [(1, 2), (2, 1)] {
+            assert_eq!(
+                list_metrics(fixture(major), major)?,
+                vec![MetricInfo {
+                    kind: "counter".to_string(),
+                    name: "requests".to_string(),
+                }]
+            );
+            let series = analyze_metric(fixture(major), "requests", major)?;
+            assert_eq!(series.len(), 2);
+            let prod_key = ["env:prod".to_string(), "service:api".to_string()].into();
+            let prod = series.get(&prod_key).ok_or("missing prod series")?;
+            assert_eq!(prod.values, vec![(0, 10.0), (2, 30.0)]);
+            assert!(matches!(
+                list_metrics(fixture(major), other),
+                Err(Error::Capture(ReadError::VersionMismatch { .. }))
+            ));
+            assert!(matches!(
+                analyze_metric(fixture(major), "requests", other),
+                Err(Error::Capture(ReadError::VersionMismatch { .. }))
+            ));
+        }
+        Ok(())
+    }
+
+    /// For all writer output read with `CURRENT_CAPTURE_VERSION.major`: each distinct label set
+    /// is one series, and its statistics equal those of its input values.
+    #[test]
+    #[expect(clippy::float_cmp, reason = "Statistics use exact integer inputs.")]
+    fn analyze_metric_reads_writer_output() -> Result<(), Box<dyn std::error::Error>> {
+        let run_id = "12345678-9abc-def0-1234-56789abcdef0".parse()?;
+        let capture = NamedTempFile::new()?;
+        let mut writer = Format::new(capture.reopen()?, 3)?;
+        for (env, fetch_index, value) in [
+            ("prod", 0u64, 10),
+            ("prod", 1, 20),
+            ("prod", 2, 30),
+            ("staging", 0, 100),
+            ("staging", 1, 200),
+        ] {
+            writer.write_metric(&Line {
+                run_id,
+                time: 1_000 + u128::from(fetch_index),
+                fetch_index,
+                metric_name: "requests".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(value),
+                labels: [
+                    ("env".to_string(), env.to_string()),
+                    ("service".to_string(), "api".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                value_histogram: Vec::new(),
+            })?;
+        }
+        writer.close()?;
+
+        assert_eq!(
+            list_metrics(capture.path(), CURRENT_CAPTURE_VERSION.major)?,
+            vec![MetricInfo {
+                kind: "counter".to_string(),
+                name: "requests".to_string(),
+            }]
+        );
+
+        let series = analyze_metric(capture.path(), "requests", CURRENT_CAPTURE_VERSION.major)?;
+        assert_eq!(series.len(), 2);
+
+        let prod_key = ["env:prod".to_string(), "service:api".to_string()].into();
+        let staging_key = ["env:staging".to_string(), "service:api".to_string()].into();
+
+        let prod_stats = series.get(&prod_key).ok_or("missing prod series")?;
+        assert_eq!(prod_stats.min, 10.0);
+        assert_eq!(prod_stats.max, 30.0);
+        assert_eq!(prod_stats.mean, 20.0);
+        assert!(prod_stats.is_monotonic);
+
+        let staging_stats = series.get(&staging_key).ok_or("missing staging series")?;
+        assert_eq!(staging_stats.min, 100.0);
+        assert_eq!(staging_stats.max, 200.0);
+        assert_eq!(staging_stats.mean, 150.0);
+        assert!(staging_stats.is_monotonic);
+        Ok(())
+    }
 }

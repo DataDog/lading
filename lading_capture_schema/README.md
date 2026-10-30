@@ -9,13 +9,14 @@ Capture versions are independent of Lading releases, Rust crate versions, and Pa
 | Capture version | Definition | Frozen baseline                                                                                                           |
 | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `1.0`           | V1 schema  | [Capture](../lading_capture/tests/fixtures/v1.parquet) and [Arrow schema](../lading_capture/tests/fixtures/v1.arrow.json) |
+| `2.0`           | V2 schema  | [Capture](../lading_capture/tests/fixtures/v2.parquet) and [Arrow schema](../lading_capture/tests/fixtures/v2.arrow.json) |
 
 ## Version metadata
 
 The writer records exactly one raw footer entry:
 
 ```text
-capture.version = "1.0"
+capture.version = "2.0"
 ```
 
 ## Version semantics
@@ -30,25 +31,25 @@ Major versions should be incremented when the schema is backwards incompatible.
 
 ## Schema
 
-The table describes V1's Arrow representation. The writer stores the standard `ARROW:schema` hint alongside Parquet's native schema. See [Parquet file structure](https://parquet.apache.org/docs/file-format/), [logical types](https://parquet.apache.org/docs/file-format/types/logicaltypes/), and [Arrow/Parquet schema handling](https://docs.rs/parquet/57.3.0/parquet/arrow/) for these layers.
+The table describes the Arrow representation of each major version. The writer stores the standard `ARROW:schema` hint alongside Parquet's native schema. See [Parquet file structure](https://parquet.apache.org/docs/file-format/), [logical types](https://parquet.apache.org/docs/file-format/types/logicaltypes/), and [Arrow/Parquet schema handling](https://docs.rs/parquet/60.0.0/parquet/arrow/) for these layers.
 
-Every V1 file declares all columns below.
+Every versioned file declares all columns below.
 
 - Nullable means that a row can contain a null cell.
 - The column remains part of the file schema even when all its cells are null.
 - Column names are unique.
 
-| Column            | Arrow type                     | Nullable cells |
-| ----------------- | ------------------------------ | -------------- |
-| `run_id`          | `Utf8`                         | No             |
-| `time`            | `Timestamp(Millisecond, None)` | No             |
-| `fetch_index`     | `UInt64`                       | No             |
-| `metric_name`     | `Utf8`                         | No             |
-| `metric_kind`     | `Utf8`                         | No             |
-| `value_int`       | `UInt64`                       | Yes            |
-| `value_float`     | `Float64`                      | Yes            |
-| `labels`          | Map of `Utf8` key/value pairs  | No             |
-| `value_histogram` | `Binary`                       | Yes            |
+| Column            | V1 Arrow type                  | V2 Arrow type                                     | Nullable cells |
+| ----------------- | ------------------------------ | ------------------------------------------------- | -------------- |
+| `run_id`          | `Utf8`                         | `Utf8`                                            | No             |
+| `time`            | `Timestamp(Millisecond, None)` | `Timestamp(Millisecond, None)`                    | No             |
+| `fetch_index`     | `UInt64`                       | `UInt64`                                          | No             |
+| `metric_name`     | `Utf8`                         | `Utf8`                                            | No             |
+| `metric_kind`     | `Utf8`                         | `Utf8`                                            | No             |
+| `value_int`       | `UInt64`                       | `UInt64`                                          | Yes            |
+| `value_float`     | `Float64`                      | `Float64`                                         | Yes            |
+| `labels`          | Map of `Utf8` key/value pairs  | Map of `Dictionary(Int32, Utf8)` key/value pairs  | No             |
+| `value_histogram` | `Binary`                       | `Binary`                                          | Yes            |
 
 ## Field interpretation
 
@@ -85,6 +86,8 @@ A null `value_histogram` cell represents an empty payload.
 2. Use declared version to select decoding behavior.
 3. Decode the columns and values you need.
 
+Lading's `captool` and `validate_parquet` read one schema major version. `captool --schema-major-version <MAJOR>` selects it, and the default is the current writer's major. `validate_parquet` takes it as its `schema_major_version` argument. These tools reject a file that declares a different major. For a file without `capture.version`, the selected major also selects the label decoding.
+
 ## Rust helpers
 
 Use `lading_capture_schema` for shared version parsing, field names, and schema declaration checks.
@@ -94,6 +97,8 @@ Use `lading_capture_schema` for shared version parsing, field names, and schema 
 | `CaptureVersion`                    | Represent, parse, and format the major and minor components                   |
 | `parse_capture_version(entries)`    | Parse raw footer pairs and return the declared version, or `None` when absent |
 | `capture_schema()`, `columns::*`    | Get the current writer's Arrow schema and field names                         |
+| `capture_schema_for_major(major)`   | Get the Arrow schema of one major version, or `None` when it is not defined   |
+| `LabelEncoding::for_major(major)`   | Get the label key and value encoding of one major version, or `None`          |
 | `validate_schema(actual, expected)` | Check mandatory declarations while allowing extra top-level columns           |
 
 `CURRENT_CAPTURE_VERSION` identifies the current writer's format.
@@ -102,4 +107,4 @@ Use `lading_capture_schema` for shared version parsing, field names, and schema 
 
 Tests compare output against the frozen native Parquet schema, Arrow schema snapshot, and expected logical records. Schema comparisons allow top-level reordering and compatible extra columns while preserving mandatory declarations and nested map roles.
 
-V1 baselines stay fixed, and each new major format gets its own definition and baseline.
+The V1 and V2 baselines stay fixed, and each new major format gets its own definition and baseline.
