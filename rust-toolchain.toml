@@ -1,5 +1,5 @@
 [toolchain]
 # Update the rust version in-sync with the version in Dockerfile
-channel = "1.90.0"
+channel = "1.91.1"
 components = ["rustfmt", "clippy", "rust-analyzer"]
 profile = "minimal"

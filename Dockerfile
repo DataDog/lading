@@ -1,14 +1,14 @@
 # Update the rust version in-sync with the version in rust-toolchain.toml
 
 # Stage 0: Planner - Extract dependency metadata
-FROM docker.io/rust:1.90.0-slim-bookworm AS planner
+FROM docker.io/rust:1.91.1-slim-bookworm AS planner
 WORKDIR /app
 RUN cargo install cargo-chef --version 0.1.73
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 1: Cacher - Build dependencies only
-FROM docker.io/rust:1.90.0-slim-bookworm AS cacher
+FROM docker.io/rust:1.91.1-slim-bookworm AS cacher
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG AWS_ACCESS_KEY_ID
@@ -47,7 +47,7 @@ RUN --mount=type=secret,id=aws_access_key_id \
     cargo chef cook --release --locked --features logrotate_fs --recipe-path recipe.json
 
 # Stage 2: Builder - Build source code
-FROM docker.io/rust:1.90.0-slim-bookworm AS builder
+FROM docker.io/rust:1.91.1-slim-bookworm AS builder
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ENV CARGO_INCREMENTAL=0
