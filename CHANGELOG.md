@@ -5,17 +5,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.34.0]
 ### Changed
 - OpenTelemetry metric weights may now be zero, which disables that metric type.
   Only an all-zero set is rejected.
 - **Breaking Change**: Capture Parquet files now declare `capture.version = "2.0"` and use `Dictionary(Int32, Utf8)` for label keys and values instead of `Utf8`. Arrow consumers must read these columns as dictionary arrays.
 - **Breaking Change**: `captool` reads one capture schema major version. Select it with `--schema-major-version`. The default is the current major, `2`. `captool` rejects files that declare a different major. Use `--schema-major-version 1` for `1.x` captures and for captures without `capture.version`. `validate_parquet` takes the major as its `schema_major_version` argument.
+- **Breaking Change**: TCP RR `flows` moved from the `tcp_rr` generator to the
+  `tcp_rr` blackhole, which tells the generator how many flows to open. A
+  generator config that sets `flows` now fails to load. Move `flows` to the
+  blackhole config. The default is 1.
 
 ### Fixed
 - Container build no longer fails on stale apt version pins for `libssl-dev` and
   `protobuf-compiler`.
 - Updated `zstd` to 0.14 and `arrow`/`parquet` to 60 to resolve RUSTSEC-2026-0391,
   RUSTSEC-2026-0398, RUSTSEC-2026-0403, and RUSTSEC-2026-0410.
+- cgroup v2 observer: `cgroup.v2.cgroup.procs` and `cgroup.v2.cgroup.threads`
+  are now the number of processes and threads in the cgroup. They were parsed
+  as a single number, so the metric held a PID while the cgroup had one
+  process and disappeared once it had more.
+- Block-cache construction now fails with an actionable error after 1024
+  consecutive rejected blocks instead of retrying indefinitely.
+- Update `rustls-webpki` to 0.103.16 to reject certificate chains containing
+  distrusted intermediate CA public keys.
 
 ### Added
 - Trace-agent `agent_payload` generation for the agent-to-intake
@@ -27,16 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and an exact `chunks_per_payload` batch size.
 - Trace-agent `/v0.4/traces` payloads accept an optional `priority_weights` mapping,
   sampled into the `_sampling_priority_v1` metric on the root span of every trace.
-
-### Fixed
-- cgroup v2 observer: `cgroup.v2.cgroup.procs` and `cgroup.v2.cgroup.threads`
-  are now the number of processes and threads in the cgroup. They were parsed
-  as a single number, so the metric held a PID while the cgroup had one
-  process and disappeared once it had more.
-- Block-cache construction now fails with an actionable error after 1024
-  consecutive rejected blocks instead of retrying indefinitely.
-- Update `rustls-webpki` to 0.103.16 to reject certificate chains containing
-  distrusted intermediate CA public keys.
 
 ## [0.33.0]
 ### Changed
