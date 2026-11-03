@@ -62,7 +62,7 @@ fn parse_component(value: &str) -> Option<u64> {
 }
 
 /// Contract implemented by the current Lading Parquet writer.
-pub const CURRENT_CAPTURE_VERSION: CaptureVersion = CaptureVersion::new(1, 0);
+pub const CURRENT_CAPTURE_VERSION: CaptureVersion = CaptureVersion::new(2, 0);
 
 /// Invalid capture metadata, distinct from a valid but unsupported format.
 #[derive(Debug, thiserror::Error)]

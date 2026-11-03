@@ -10,14 +10,16 @@ use std::{
 };
 
 use arrow_array::{
-    ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array,
+    Array, ArrayAccessor, ArrayRef, BinaryArray, DictionaryArray, Float64Array, MapArray,
+    RecordBatch, StringArray, StructArray, TimestampMillisecondArray, TypedDictionaryArray,
+    UInt64Array, builder::StringDictionaryBuilder, types::Int32Type,
 };
 use arrow_buffer::OffsetBuffer;
-use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
+use arrow_schema::{ArrowError, Field, Schema};
 use lading_capture_schema::{
-    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, MetadataError, SchemaError,
-    capture_schema, columns, parse_capture_version, validate_schema,
+    CAPTURE_VERSION_KEY, CURRENT_CAPTURE_VERSION, CaptureVersion, LabelEncoding, MetadataError,
+    SchemaError, capture_schema, capture_schema_for_major, columns, parse_capture_version,
+    validate_schema,
 };
 use parquet::{
     arrow::{
@@ -44,13 +46,19 @@ pub enum ReadError {
     /// A present capture version has invalid metadata.
     #[error(transparent)]
     Metadata(#[from] MetadataError),
-    /// Lading's current reader does not implement this declared major.
-    #[error("unsupported capture version {version} (supported major: {supported_major})")]
-    UnsupportedVersion {
+    /// Lading does not define the selected schema major version.
+    #[error("unsupported schema major version {schema_major_version}")]
+    UnsupportedMajor {
+        /// Major version that the caller selected.
+        schema_major_version: u64,
+    },
+    /// The declared capture version has a different major than the selected one.
+    #[error("capture version {version} does not match schema major version {schema_major_version}")]
+    VersionMismatch {
         /// Valid declared version.
         version: CaptureVersion,
-        /// Major implemented by this reader.
-        supported_major: u64,
+        /// Major version that the caller selected.
+        schema_major_version: u64,
     },
     /// A versioned file disagrees with its known field contract.
     #[error(transparent)]
@@ -59,15 +67,22 @@ pub enum ReadError {
 
 /// Load metadata once and construct Lading's capture batch-reader builder.
 ///
-/// Lading checks declared versions and reuses footer metadata for Arrow decoding.
-/// Files without a version key follow the ordinary Parquet reading path.
+/// The caller selects one schema major version. A declared version must have this major,
+/// and its Arrow schema must satisfy that major's field contract. Minor versions of the same
+/// major are compatible. Files without a version key follow the ordinary Parquet reading path.
 ///
 /// # Errors
 ///
-/// Return an error for unreadable metadata, invalid declared versions, unsupported majors, or a mismatched declared schema.
+/// Return an error for an undefined schema major version, unreadable metadata, invalid
+/// declared versions, a different declared major, or a mismatched declared schema.
 pub fn reader_builder<T: ChunkReader + 'static>(
     reader: T,
+    schema_major_version: u64,
 ) -> Result<ParquetRecordBatchReaderBuilder<T>, ReadError> {
+    let expected =
+        capture_schema_for_major(schema_major_version).ok_or(ReadError::UnsupportedMajor {
+            schema_major_version,
+        })?;
     let metadata = ParquetMetaDataReader::new().parse_and_finish(&reader)?;
     let version = parse_capture_version(
         metadata
@@ -78,20 +93,65 @@ pub fn reader_builder<T: ChunkReader + 'static>(
             .map(|entry| (entry.key.as_str(), entry.value.as_deref())),
     )?;
     if let Some(version) = version
-        && version.major != CURRENT_CAPTURE_VERSION.major
+        && version.major != schema_major_version
     {
-        return Err(ReadError::UnsupportedVersion {
+        return Err(ReadError::VersionMismatch {
             version,
-            supported_major: CURRENT_CAPTURE_VERSION.major,
+            schema_major_version,
         });
     }
     let metadata = ArrowReaderMetadata::try_new(Arc::new(metadata), ArrowReaderOptions::default())?;
     if version.is_some() {
-        validate_schema(metadata.schema().as_ref(), &capture_schema())?;
+        validate_schema(metadata.schema().as_ref(), &expected)?;
     }
     Ok(ParquetRecordBatchReaderBuilder::new_with_metadata(
         reader, metadata,
     ))
+}
+
+/// Label key or value strings from one schema major version, read without copies.
+#[derive(Debug, Clone, Copy)]
+pub enum LabelStrings<'a> {
+    /// V1 stores label strings as `Utf8`.
+    Utf8(&'a StringArray),
+    /// V2 stores label strings as `Dictionary(Int32, Utf8)`.
+    Dictionary(TypedDictionaryArray<'a, Int32Type, StringArray>),
+}
+
+impl<'a> LabelStrings<'a> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Utf8(array) => array.len(),
+            Self::Dictionary(array) => array.len(),
+        }
+    }
+
+    /// Iterate over the label strings in entry order.
+    pub fn iter(self) -> impl Iterator<Item = &'a str> {
+        // Indexes stay below `len`, so Arrow value access stays in bounds.
+        (0..self.len()).map(move |index| match self {
+            Self::Utf8(array) => array.value(index),
+            Self::Dictionary(array) => array.value(index),
+        })
+    }
+}
+
+/// Read label strings with one label encoding.
+///
+/// Return `None` if `column` does not use `encoding`.
+#[must_use]
+pub fn resolve_labels(column: &dyn Array, encoding: LabelEncoding) -> Option<LabelStrings<'_>> {
+    match encoding {
+        LabelEncoding::Utf8 => column
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .map(LabelStrings::Utf8),
+        LabelEncoding::Dictionary => column
+            .as_any()
+            .downcast_ref::<DictionaryArray<Int32Type>>()
+            .and_then(DictionaryArray::downcast_dict::<StringArray>)
+            .map(LabelStrings::Dictionary),
+    }
 }
 
 /// Parquet format errors
@@ -283,26 +343,38 @@ impl<W: Write + Seek + Send> Format<W> {
         label_offsets.push(0i32);
         label_offsets.extend_from_slice(&self.buffers.label_offsets);
 
-        // Build the labels map array using pre-allocated buffers
-        let keys_array = Arc::new(StringArray::from(self.buffers.label_keys.clone()));
-        let values_array = Arc::new(StringArray::from(self.buffers.label_values.clone()));
+        let mut keys_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for key in &self.buffers.label_keys {
+            keys_builder.append(key)?;
+        }
+        let keys_array = Arc::new(keys_builder.finish());
+        let mut values_builder = StringDictionaryBuilder::<Int32Type>::new();
+        for value in &self.buffers.label_values {
+            values_builder.append(value)?;
+        }
+        let values_array = Arc::new(values_builder.finish());
         let struct_array = StructArray::from(vec![
             (
-                Arc::new(Field::new(columns::LABEL_KEY, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_KEY,
+                    LabelEncoding::Dictionary.data_type(),
+                    false,
+                )),
                 keys_array as ArrayRef,
             ),
             (
-                Arc::new(Field::new(columns::LABEL_VALUE, DataType::Utf8, false)),
+                Arc::new(Field::new(
+                    columns::LABEL_VALUE,
+                    LabelEncoding::Dictionary.data_type(),
+                    false,
+                )),
                 values_array as ArrayRef,
             ),
         ]);
 
         let field = Arc::new(Field::new(
             columns::LABEL_ENTRIES,
-            DataType::Struct(Fields::from(vec![
-                Field::new(columns::LABEL_KEY, DataType::Utf8, false),
-                Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
-            ])),
+            struct_array.data_type().clone(),
             false,
         ));
 
@@ -421,6 +493,71 @@ mod tests {
     use rustc_hash::FxHashMap;
     use std::io::Cursor;
     use uuid::Uuid;
+
+    mod resolve_labels {
+        use super::super::resolve_labels;
+        use arrow_array::{
+            Array, DictionaryArray, Int32Array, LargeStringArray, StringArray,
+            types::{Int8Type, Int32Type},
+        };
+        use lading_capture_schema::LabelEncoding;
+        use proptest::{collection, prelude::Just, prop_assert_eq, proptest, strategy::Strategy};
+        use std::sync::Arc;
+
+        fn read(column: &dyn Array, encoding: LabelEncoding) -> Option<Vec<String>> {
+            Some(
+                resolve_labels(column, encoding)?
+                    .iter()
+                    .map(str::to_string)
+                    .collect(),
+            )
+        }
+
+        proptest! {
+            /// For all string vectors v and offsets o <= len(v): `resolve_labels` on the slice
+            /// v[o..] yields v[o..] for `Utf8` and for `Dictionary`.
+            #[test]
+            fn both_encodings_yield_entry_order(
+                (values, offset) in collection::vec("[a-z]{0,4}", 0..16)
+                    .prop_flat_map(|values| {
+                        let len = values.len();
+                        (Just(values), 0..=len)
+                    }),
+            ) {
+                let len = values.len() - offset;
+                let expected = values[offset..].to_vec();
+                let utf8 = StringArray::from(values.clone()).slice(offset, len);
+                let dictionary: DictionaryArray<Int32Type> =
+                    values.iter().map(String::as_str).collect();
+                let dictionary = dictionary.slice(offset, len);
+                prop_assert_eq!(read(&utf8, LabelEncoding::Utf8), Some(expected.clone()));
+                prop_assert_eq!(read(&dictionary, LabelEncoding::Dictionary), Some(expected));
+            }
+        }
+
+        /// For each (column, E) in the table, where column does not use encoding E:
+        /// `resolve_labels(column, E) = None`.
+        #[test]
+        fn other_representations_fail() -> Result<(), arrow_schema::ArrowError> {
+            let utf8 = StringArray::from(vec!["env"]);
+            let dictionary: DictionaryArray<Int32Type> = vec!["env"].into_iter().collect();
+            let small_keys: DictionaryArray<Int8Type> = vec!["env"].into_iter().collect();
+            let large_values = DictionaryArray::<Int32Type>::try_new(
+                Int32Array::from(vec![0]),
+                Arc::new(LargeStringArray::from(vec!["env"])),
+            )?;
+            let cases: [(&dyn Array, LabelEncoding); 4] = [
+                (&utf8, LabelEncoding::Dictionary),
+                (&dictionary, LabelEncoding::Utf8),
+                (&small_keys, LabelEncoding::Dictionary),
+                (&large_values, LabelEncoding::Dictionary),
+            ];
+            for (column, encoding) in cases {
+                assert!(resolve_labels(column, encoding).is_none());
+            }
+            Ok(())
+        }
+    }
 
     #[test]
     fn buffers_metrics_before_flush() {
