@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- Multiple `http` or `splunk_hec` generators can now run in one lading process.
+  Each generator owns its connection semaphore; previously the second
+  generator panicked at startup.
 
 ### Removed
 
