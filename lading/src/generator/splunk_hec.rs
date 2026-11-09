@@ -31,11 +31,10 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use metrics::{counter, gauge};
-use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{Semaphore, SemaphorePermit},
+    sync::{AcquireError, OwnedSemaphorePermit, Semaphore},
     time::timeout,
 };
 use tracing::{debug, error, info};
@@ -48,7 +47,6 @@ use crate::generator::common::{
     BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
-static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
 const SPLUNK_HEC_JSON_PATH: &str = "/services/collector/event";
 const SPLUNK_HEC_TEXT_PATH: &str = "/services/collector/raw";
@@ -99,6 +97,9 @@ pub struct Config {
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`SplunkHec`].
 pub enum Error {
+    /// The connection semaphore was closed unexpectedly
+    #[error("Connection semaphore closed: {0}")]
+    SemaphoreClosed(#[from] AcquireError),
     /// User supplied HEC path is invalid.
     #[error("User supplied HEC path is not valid")]
     InvalidHECPath,
@@ -157,6 +158,9 @@ pub struct SplunkHec {
     metric_labels: Vec<(String, String)>,
     channels: Channels,
     shutdown: lading_signal::Watcher,
+    /// Bounds in-flight requests for this generator only, so multiple Splunk
+    /// HEC generators can coexist in a single process.
+    connection_semaphore: Arc<Semaphore>,
 }
 
 /// Derive the intended path from the format configuration
@@ -240,9 +244,7 @@ impl SplunkHec {
             channels.enable_acknowledgements(ack_uri, config.token.clone(), ack_settings);
         }
 
-        CONNECTION_SEMAPHORE
-            .set(Semaphore::new(config.parallel_connections as usize))
-            .expect("semaphore already set");
+        let connection_semaphore = Arc::new(Semaphore::new(config.parallel_connections as usize));
 
         Ok(Self {
             channels,
@@ -253,6 +255,7 @@ impl SplunkHec {
             throttle,
             metric_labels: labels,
             shutdown,
+            connection_semaphore,
         })
     }
 
@@ -314,7 +317,7 @@ impl SplunkHec {
                             // think we could also possibly have the send request return
                             // the AckID, meaning we could just keep the channel logic
                             // in this main loop here and avoid the AckService entirely.
-                            let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
+                            let permit = Arc::clone(&self.connection_semaphore).acquire_owned().await?;
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
@@ -340,7 +343,7 @@ impl SplunkHec {
 
 #[expect(clippy::too_many_arguments)]
 async fn send_hec_request<B>(
-    permit: SemaphorePermit<'_>,
+    permit: OwnedSemaphorePermit,
     block_length: usize,
     labels: Vec<(String, String)>,
     channel: Channel,

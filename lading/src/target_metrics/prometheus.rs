@@ -7,16 +7,16 @@
 use std::{str::FromStr, time::Duration};
 
 use metrics::{counter, gauge};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
+use std::sync::LazyLock;
 use tracing::{error, info, trace, warn};
 
 // Regex to match Prometheus label pairs: label_name="label_value"
 // The value can be empty (e.g., label="")
-static LABEL_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(\w+)="([^"]*)""#).expect("Failed to compile label regex"));
+static LABEL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(\w+)="([^"]*)""#).expect("Failed to compile label regex"));
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
