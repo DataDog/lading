@@ -57,8 +57,8 @@ const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
 /// Upper bound on a generated span's duration, in nanoseconds. Ten seconds.
 ///
-/// The trace-agent sums span durations into its APM stats as floating point numbers. Durations near
-/// `i64::MAX` saturate those sums, which makes the stats depend on how spans fall into time buckets.
+/// Durations near `i64::MAX` are unrealistic, and a few of them overflow the span duration sums in the
+/// trace-agent's APM stats.
 const MAX_SPAN_DURATION_NANOS: i64 = 10_000_000_000;
 
 /// Span metric from which the trace-agent reads a trace's sampling priority.

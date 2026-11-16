@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `trace_agent` v0.4 spans now last at most ten seconds, as v1.0 spans do.
-  Durations up to `i64::MAX` saturated the trace-agent's APM stats duration
-  sums, so the stats changed with how spans fell into time buckets.
+  Durations up to `i64::MAX` overflowed the span duration sums in the
+  trace-agent's APM stats.
 
 ### Removed
 
