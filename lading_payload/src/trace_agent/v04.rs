@@ -55,6 +55,12 @@ const MAX_CONTEXTS: u32 = 1_000_000;
 /// Via datadog-agent/pkg/trace/agent/normalizer.go:39
 const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
+/// Upper bound on a generated span's duration, in nanoseconds. Ten seconds.
+///
+/// The trace-agent sums span durations into its APM stats as floating point numbers. Durations near
+/// `i64::MAX` saturate those sums, which makes the stats depend on how spans fall into time buckets.
+const MAX_SPAN_DURATION_NANOS: i64 = 10_000_000_000;
+
 /// Span metric from which the trace-agent reads a trace's sampling priority.
 pub(super) const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 
@@ -366,7 +372,7 @@ impl<'a> Generator<'a> for V04 {
 
         // Generate random duration that doesn't cause overflow:
         // start + duration must fit in i64::MAX
-        let max_duration = i64::MAX - root_start_nanos;
+        let max_duration = (i64::MAX - root_start_nanos).min(MAX_SPAN_DURATION_NANOS);
         let root_duration_nanos = rng.random_range(0..=max_duration);
 
         let root_span_id = rng.random();
@@ -422,7 +428,7 @@ impl<'a> Generator<'a> for V04 {
             // Child spans get independent random timing, not constrained by parent.
             // Each span gets its own random start time and duration that satisfy trace-agent bounds.
             let span_start_nanos = rng.random_range(YEAR_2000_NANOS..=i64::MAX);
-            let max_duration = i64::MAX - span_start_nanos;
+            let max_duration = (i64::MAX - span_start_nanos).min(MAX_SPAN_DURATION_NANOS);
             let span_duration_nanos = rng.random_range(0..=max_duration);
 
             let span_id = rng.random();
@@ -589,7 +595,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
     use serde::Serialize;
 
-    use super::{ConfRange, Config, SAMPLING_PRIORITY_KEY, V04};
+    use super::{ConfRange, Config, MAX_SPAN_DURATION_NANOS, SAMPLING_PRIORITY_KEY, V04};
     use crate::Generator;
 
     proptest! {
@@ -680,6 +686,20 @@ mod test {
             let trace = generator.generate(&mut rng)?;
             let root_span_count = trace.spans.iter().filter(|span| span.parent_id == 0).count();
             prop_assert_eq!(root_span_count, 1, "Trace must have exactly one root span (parent_id = 0)");
+        }
+
+        /// Property: Every span's duration is non-negative, at most
+        /// `MAX_SPAN_DURATION_NANOS`, and its end time fits in an `i64`.
+        #[test]
+        fn span_durations_are_bounded(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            for span in &trace.spans {
+                prop_assert!((0..=MAX_SPAN_DURATION_NANOS).contains(&span.duration));
+                prop_assert!(span.start.checked_add(span.duration).is_some());
+            }
         }
 
         /// Property: Each span has a unique span_id within the trace.
@@ -831,6 +851,6 @@ mod test {
         // value will need to be modified, but keeping it exact allows us to set
         // accurate bounds on memory consumption. Do not make this an
         // inequality.
-        assert_eq!(serialized.len(), 21_075);
+        assert_eq!(serialized.len(), 19_464);
     }
 }
