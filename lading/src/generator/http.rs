@@ -20,10 +20,9 @@ use std::{
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use metrics::counter;
-use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{AcquireError, Semaphore};
 use tracing::{debug, error, info};
 
 use lading_payload::block;
@@ -33,8 +32,6 @@ use crate::generator::common::{
     BlockThrottle, ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError,
     create_throttle,
 };
-
-static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
 /// The HTTP method to be used in requests
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -111,6 +108,9 @@ pub enum Error {
         #[source]
         source: Box<hyper::Error>,
     },
+    /// The connection semaphore was closed unexpectedly
+    #[error("Connection semaphore closed: {0}")]
+    SemaphoreClosed(#[from] AcquireError),
 }
 
 /// The HTTP generator.
@@ -127,6 +127,10 @@ pub struct Http {
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
+    /// Bounds in-flight requests for this generator only. Each generator owns
+    /// its semaphore so that multiple HTTP generators can coexist in a single
+    /// process.
+    connection_semaphore: Arc<Semaphore>,
 }
 
 impl Http {
@@ -183,10 +187,8 @@ impl Http {
                 let concurrency =
                     ConcurrencyStrategy::new(NonZeroU16::new(config.parallel_connections), false);
 
-                // Set the global semaphore based on the concurrency strategy
-                CONNECTION_SEMAPHORE
-                    .set(Semaphore::new(concurrency.connection_count() as usize))
-                    .expect("failed to set semaphore");
+                let connection_semaphore =
+                    Arc::new(Semaphore::new(concurrency.connection_count() as usize));
 
                 Ok(Self {
                     concurrency,
@@ -197,6 +199,7 @@ impl Http {
                     throttle,
                     metric_labels: labels,
                     shutdown,
+                    connection_semaphore,
                 })
             }
         }
@@ -252,7 +255,7 @@ impl Http {
                             let data_points = metadata.data_points;
 
                             let uri_clone = uri.clone();
-                            let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
+                            let permit = Arc::clone(&self.connection_semaphore).acquire_owned().await?;
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);
                                 match client.request(request).await {
@@ -293,10 +296,13 @@ impl Http {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.
-                    let _semaphore = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire_many(u32::from(self.concurrency.connection_count())).await.expect("Connection Semaphore has already closed");
+                    let _semaphore = self.connection_semaphore.acquire_many(u32::from(self.concurrency.connection_count())).await?;
                     return Ok(());
                 },
             }
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

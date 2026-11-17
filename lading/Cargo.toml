@@ -60,7 +60,6 @@ metrics-util = { workspace = true }
 nix = { version = "0.30", features = ["fs", "signal"] }
 num_cpus = { version = "1.17" }
 num-traits = { version = "0.2", default-features = false }
-once_cell = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true, features = ["thread_rng"] }
