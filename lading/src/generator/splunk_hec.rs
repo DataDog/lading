@@ -407,3 +407,6 @@ struct HecResponse {
     #[serde(rename = "ackId")]
     ack_id: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests;
