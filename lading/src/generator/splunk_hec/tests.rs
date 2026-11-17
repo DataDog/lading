@@ -1,6 +1,7 @@
 use std::{
     convert::Infallible,
     error,
+    future::Future,
     net::SocketAddr,
     sync::{
         Arc,
@@ -14,7 +15,8 @@ use http_body_util::{BodyExt, Full};
 use hyper::{Response, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use lading_payload::{block::CacheMethod, splunk_hec::Encoding};
-use tokio::{net::TcpListener, time::timeout};
+use proptest::{prelude::*, test_runner::TestCaseError};
+use tokio::{net::TcpListener, runtime::Builder, time::timeout};
 
 use super::{Config, General, SplunkHec};
 
@@ -73,15 +75,38 @@ fn config(addr: SocketAddr, seed: u8, parallel_connections: u16) -> Result<Confi
     })
 }
 
-/// For all pairs of Splunk HEC generators g1, g2 in one process with limits
-/// L1 != L2: construction succeeds, both send requests, and the maximum number
-/// of concurrent in-flight requests observed at gi's target equals Li.
-///
-/// A process-global semaphore would either panic on the second construction
-/// or make both generators share one limit.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
-    let limits: [u16; 2] = [1, 3];
+/// Run `f` to completion on a fresh multi-threaded runtime, converting its
+/// error into a proptest failure.
+fn run<F>(f: F) -> Result<(), TestCaseError>
+where
+    F: Future<Output = Result<(), TestError>>,
+{
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .map_err(|err| TestCaseError::fail(err.to_string()))?;
+    runtime
+        .block_on(f)
+        .map_err(|err| TestCaseError::fail(err.to_string()))
+}
+
+/// Poll `done` every few milliseconds until it holds, failing after ten
+/// seconds.
+async fn wait_for(mut done: impl FnMut() -> bool) -> Result<(), TestError> {
+    timeout(Duration::from_secs(10), async {
+        while !done() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await?;
+    Ok(())
+}
+
+/// Spin two generators with limits `limits` against their own targets until
+/// each target has seen its generator's full limit in flight, then check that
+/// no target ever saw more.
+async fn independent_limits(limits: [u16; 2], seed: u8) -> Result<(), TestError> {
     let (shutdown_watcher, shutdown_broadcaster) = lading_signal::signal();
 
     let mut servers = Vec::new();
@@ -94,7 +119,7 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
             tokio::spawn(serve(listener, Arc::clone(&observed))),
             observed,
         ));
-        let seed = u8::try_from(index)?;
+        let seed = seed.wrapping_add(u8::try_from(index)?);
         generators.push(SplunkHec::new(
             General {
                 id: Some(format!("splunk-hec-{index}")),
@@ -109,7 +134,14 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
         .map(|generator| tokio::spawn(generator.spin()))
         .collect();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    wait_for(|| {
+        servers.iter().zip(limits).all(|((_, observed), limit)| {
+            observed.max_in_flight.load(Ordering::SeqCst) >= usize::from(limit)
+        })
+    })
+    .await?;
+    // Keep load on a little longer so an over-limit generator would show it.
+    tokio::time::sleep(Duration::from_millis(40)).await;
     shutdown_broadcaster.signal();
 
     for handle in handles {
@@ -118,11 +150,29 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
 
     for ((server, observed), limit) in servers.iter().zip(limits) {
         server.abort();
-        assert!(observed.requests.load(Ordering::SeqCst) > 0);
-        assert_eq!(
-            observed.max_in_flight.load(Ordering::SeqCst),
-            usize::from(limit)
-        );
+        let max = observed.max_in_flight.load(Ordering::SeqCst);
+        if max != usize::from(limit) {
+            return Err(format!("target saw {max} in flight, limit {limit}").into());
+        }
     }
     Ok(())
+}
+
+proptest! {
+    /// For all limits L1, L2 in [1, 4] with L1 != L2 and all seeds s: two Splunk HEC
+    /// generators g1, g2 built in one process with limits L1, L2 both construct
+    /// successfully, and max in-flight requests observed at gi's target equals
+    /// Li.
+    ///
+    /// A process-global semaphore would either panic on the second
+    /// construction or make both generators share one limit.
+    #[test]
+    fn two_generators_enforce_independent_limits(
+        first in 1..=4_u16,
+        offset in 1..=3_u16,
+        seed: u8,
+    ) {
+        let second = (first - 1 + offset) % 4 + 1;
+        run(independent_limits([first, second], seed))?;
+    }
 }

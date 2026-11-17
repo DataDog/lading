@@ -1,6 +1,7 @@
 use std::{
     convert::Infallible,
     error,
+    future::Future,
     net::SocketAddr,
     sync::{
         Arc,
@@ -14,7 +15,8 @@ use http_body_util::{BodyExt, Full};
 use hyper::{Response, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use lading_payload::block::CacheMethod;
-use tokio::{net::TcpListener, sync::Semaphore, task::JoinHandle, time::timeout};
+use proptest::{prelude::*, test_runner::TestCaseError};
+use tokio::{net::TcpListener, runtime::Builder, sync::Semaphore, task::JoinHandle, time::timeout};
 
 use super::{Config, General, Http, Method};
 
@@ -71,15 +73,38 @@ fn config(addr: SocketAddr, seed: u8, parallel_connections: u16) -> Result<Confi
     })
 }
 
-/// For all pairs of HTTP generators g1, g2 in one process with limits L1 != L2:
-/// construction succeeds, and the maximum number of concurrent in-flight
-/// requests observed at gi's target equals Li.
-///
-/// A process-global semaphore would either panic on the second construction
-/// or make both generators share one limit.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
-    let limits: [u16; 2] = [1, 3];
+/// Run `f` to completion on a fresh multi-threaded runtime, converting its
+/// error into a proptest failure.
+fn run<F>(f: F) -> Result<(), TestCaseError>
+where
+    F: Future<Output = Result<(), TestError>>,
+{
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .map_err(|err| TestCaseError::fail(err.to_string()))?;
+    runtime
+        .block_on(f)
+        .map_err(|err| TestCaseError::fail(err.to_string()))
+}
+
+/// Poll `done` every few milliseconds until it holds, failing after ten
+/// seconds.
+async fn wait_for(mut done: impl FnMut() -> bool) -> Result<(), TestError> {
+    timeout(Duration::from_secs(10), async {
+        while !done() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await?;
+    Ok(())
+}
+
+/// Spin two generators with limits `limits` against their own targets until
+/// each target has seen its generator's full limit in flight, then check that
+/// no target ever saw more.
+async fn independent_limits(limits: [u16; 2], seed: u8) -> Result<(), TestError> {
     let (shutdown_watcher, shutdown_broadcaster) = lading_signal::signal();
 
     let mut servers = Vec::new();
@@ -92,7 +117,7 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
             tokio::spawn(serve(listener, Arc::clone(&observed))),
             observed,
         ));
-        let seed = u8::try_from(index)?;
+        let seed = seed.wrapping_add(u8::try_from(index)?);
         generators.push(Http::new(
             General {
                 id: Some(format!("http-{index}")),
@@ -107,7 +132,14 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
         .map(|generator| tokio::spawn(generator.spin()))
         .collect();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    wait_for(|| {
+        servers.iter().zip(limits).all(|((_, observed), limit)| {
+            observed.max_in_flight.load(Ordering::SeqCst) >= usize::from(limit)
+        })
+    })
+    .await?;
+    // Keep load on a little longer so an over-limit generator would show it.
+    tokio::time::sleep(Duration::from_millis(40)).await;
     shutdown_broadcaster.signal();
 
     for handle in handles {
@@ -116,13 +148,31 @@ async fn two_generators_enforce_independent_limits() -> Result<(), TestError> {
 
     for ((server, observed), limit) in servers.iter().zip(limits) {
         server.abort();
-        assert!(observed.requests.load(Ordering::SeqCst) > 0);
-        assert_eq!(
-            observed.max_in_flight.load(Ordering::SeqCst),
-            usize::from(limit)
-        );
+        let max = observed.max_in_flight.load(Ordering::SeqCst);
+        if max != usize::from(limit) {
+            return Err(format!("target saw {max} in flight, limit {limit}").into());
+        }
     }
     Ok(())
+}
+
+proptest! {
+    /// For all limits L1, L2 in [1, 4] with L1 != L2 and all seeds s: two HTTP
+    /// generators g1, g2 built in one process with limits L1, L2 both construct
+    /// successfully, and max in-flight requests observed at gi's target equals
+    /// Li.
+    ///
+    /// A process-global semaphore would either panic on the second
+    /// construction or make both generators share one limit.
+    #[test]
+    fn two_generators_enforce_independent_limits(
+        first in 1..=4_u16,
+        offset in 1..=3_u16,
+        seed: u8,
+    ) {
+        let second = (first - 1 + offset) % 4 + 1;
+        run(independent_limits([first, second], seed))?;
+    }
 }
 
 /// Server state for the shutdown test: the first request is held open until
@@ -159,31 +209,14 @@ async fn serve_gated(listener: TcpListener, gated: Arc<Gated>) -> Result<(), Tes
     }
 }
 
-async fn wait_until_held(gated: &Gated) -> Result<(), TestError> {
-    timeout(Duration::from_secs(10), async {
-        while gated.held.load(Ordering::SeqCst) == 0 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await?;
-    Ok(())
-}
-
-/// For generators g1, g2 with independent shutdown signals, where each target
-/// holds g1's and g2's first request open: after g1 is signalled, g1 does not
-/// exit while its own request is outstanding, g1 exits once that request
-/// completes, and g2 keeps running with its own request still held.
-///
-/// Each generator has spare permits (limit 2, one request held), so it is idle
-/// in its main loop rather than blocked acquiring a permit. Exiting before the
-/// held response would mean shutdown no longer waits on in-flight requests.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn shutdown_waits_only_on_own_requests() -> Result<(), TestError> {
+/// Run the shutdown scenario with per-generator limits `limits`, each at least
+/// 2 so a generator with one held request still has spare permits.
+async fn shutdown_independent(limits: [u16; 2], seed: u8) -> Result<(), TestError> {
     let mut targets = Vec::new();
     let mut broadcasters = Vec::new();
     let mut handles: Vec<JoinHandle<Result<(), super::Error>>> = Vec::new();
     let mut servers = Vec::new();
-    for index in 0..2u8 {
+    for (index, limit) in limits.iter().enumerate() {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let gated = Arc::new(Gated {
@@ -197,7 +230,7 @@ async fn shutdown_waits_only_on_own_requests() -> Result<(), TestError> {
             General {
                 id: Some(format!("http-{index}")),
             },
-            config(addr, index, 2)?,
+            config(addr, seed.wrapping_add(u8::try_from(index)?), *limit)?,
             watcher,
         )?;
         handles.push(tokio::spawn(generator.spin()));
@@ -205,7 +238,7 @@ async fn shutdown_waits_only_on_own_requests() -> Result<(), TestError> {
         broadcasters.push(broadcaster);
     }
     for gated in &targets {
-        wait_until_held(gated).await?;
+        wait_for(|| gated.held.load(Ordering::SeqCst) == 1).await?;
     }
 
     let mut broadcasters = broadcasters.into_iter();
@@ -213,28 +246,26 @@ async fn shutdown_waits_only_on_own_requests() -> Result<(), TestError> {
     let second_shutdown = broadcasters.next().ok_or("missing broadcaster")?;
 
     first_shutdown.signal();
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(
-        !handles[0].is_finished(),
-        "first generator exited with its own request in flight"
-    );
-    assert_eq!(targets[0].held.load(Ordering::SeqCst), 1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    if handles[0].is_finished() {
+        return Err("first generator exited with its own request in flight".into());
+    }
+    if targets[0].held.load(Ordering::SeqCst) != 1 {
+        return Err("first target released its request early".into());
+    }
 
     targets[0].gate.add_permits(1);
     let first = handles.remove(0);
     timeout(Duration::from_secs(10), first).await???;
 
-    assert!(
-        !handles[0].is_finished(),
-        "second generator exited without its own shutdown signal"
-    );
-    assert_eq!(targets[1].held.load(Ordering::SeqCst), 1);
+    if handles[0].is_finished() {
+        return Err("second generator exited without its own shutdown signal".into());
+    }
+    if targets[1].held.load(Ordering::SeqCst) != 1 {
+        return Err("second target released its request early".into());
+    }
     let sent_before = targets[1].requests.load(Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        targets[1].requests.load(Ordering::SeqCst) > sent_before,
-        "second generator stopped sending requests"
-    );
+    wait_for(|| targets[1].requests.load(Ordering::SeqCst) > sent_before).await?;
 
     second_shutdown.signal();
     targets[1].gate.add_permits(1);
@@ -245,4 +276,24 @@ async fn shutdown_waits_only_on_own_requests() -> Result<(), TestError> {
         server.abort();
     }
     Ok(())
+}
+
+proptest! {
+    /// For all limits L1, L2 in [2, 4] and all seeds s, given generators g1, g2
+    /// with independent shutdown signals whose targets each hold the first
+    /// request open: after g1 is signalled, g1 does not exit while its own
+    /// request is outstanding, g1 exits once that request completes, and g2
+    /// keeps running and sending with its own request still held.
+    ///
+    /// Li >= 2 leaves each generator spare permits, so it idles in its main
+    /// loop rather than blocking on a permit. Exiting before the held response
+    /// would mean shutdown no longer waits on in-flight requests.
+    #[test]
+    fn shutdown_waits_only_on_own_requests(
+        first in 2..=4_u16,
+        second in 2..=4_u16,
+        seed: u8,
+    ) {
+        run(shutdown_independent([first, second], seed))?;
+    }
 }
