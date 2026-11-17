@@ -13,7 +13,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{Response, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
-use lading_payload::block::CacheMethod;
+use lading_payload::{block::CacheMethod, splunk_hec::Encoding};
 use tokio::{net::TcpListener, time::timeout};
 
 use super::{Config, General, SplunkHec};
@@ -61,7 +61,7 @@ fn config(addr: SocketAddr, seed: u8, parallel_connections: u16) -> Result<Confi
     Ok(Config {
         seed: [seed; 32],
         target_uri: format!("http://{addr}/").parse()?,
-        format: lading_payload::splunk_hec::Encoding::Json,
+        format: Encoding::Json,
         token: "test-token".to_string(),
         acknowledgements: None,
         maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_u64(1_048_576),
