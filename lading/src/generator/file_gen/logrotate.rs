@@ -158,8 +158,12 @@ pub struct Config {
     #[serde(default)]
     pub throttle: Option<ThrottleConfig>,
     /// Force flush at a regular interval. Defaults to `Duration::MAX`.
-    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
-    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s") and ISO
+    /// 8601 durations (e.g., "PT1S").
+    #[serde(
+        default = "default_flush_every",
+        with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required"
+    )]
     pub flush_every: Duration,
 }
 

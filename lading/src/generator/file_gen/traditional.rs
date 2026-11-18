@@ -129,8 +129,12 @@ pub struct Config {
     /// The load throttle configuration
     pub throttle: Option<ThrottleConfig>,
     /// Force flush at a regular interval. Defaults to `Duration::MAX`.
-    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
-    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s") and ISO
+    /// 8601 durations (e.g., "PT1S").
+    #[serde(
+        default = "default_flush_every",
+        with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required"
+    )]
     pub flush_every: Duration,
 }
 
@@ -394,4 +398,97 @@ fn path_from_template(path_template: &str, index: u32) -> PathBuf {
     let fidx = format!("{index:04}");
     let full_path = path_template.replace("%NNN%", &fidx);
     PathBuf::from(full_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use proptest::prelude::*;
+    use serde_yaml::with::singleton_map_recursive;
+
+    use super::Config;
+
+    /// Parse a minimal traditional `file_gen` config whose `flush_every` key
+    /// holds the YAML scalar `flush_every`, or omits the key when `None`.
+    fn parse(flush_every: Option<&str>) -> Config {
+        let seed = [0u8; 32];
+        let flush_every = flush_every
+            .map(|value| format!("flush_every: {value}"))
+            .unwrap_or_default();
+        let yaml = format!(
+            r#"
+seed: {seed:?}
+path_template: "/tmp/%NNN%.log"
+duplicates: 1
+variant: "ascii"
+maximum_bytes_per_file: "1 MiB"
+maximum_prebuild_cache_size_bytes: "1 MiB"
+{flush_every}
+"#
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        singleton_map_recursive::deserialize(value).unwrap()
+    }
+
+    /// Serialize `config` and deserialize it again, the way lading reads
+    /// nested enums from its config file.
+    fn round_trip(config: &Config) -> Config {
+        let value =
+            singleton_map_recursive::serialize(config, serde_yaml::value::Serializer).unwrap();
+        singleton_map_recursive::deserialize(value).unwrap()
+    }
+
+    /// An omitted `flush_every` defaults to `Duration::MAX`, and that default
+    /// survives serialization.
+    #[test]
+    fn flush_every_default_round_trips() {
+        let config = parse(None);
+        assert_eq!(config.flush_every, Duration::MAX);
+        assert_eq!(round_trip(&config).flush_every, Duration::MAX);
+    }
+
+    /// ISO 8601 durations are accepted in addition to the friendly format.
+    #[test]
+    fn flush_every_accepts_iso8601() {
+        assert_eq!(parse(Some("PT1S")).flush_every, Duration::from_secs(1));
+        assert_eq!(parse(Some("PT1M30S")).flush_every, Duration::from_secs(90));
+    }
+
+    proptest! {
+        /// For all d: Duration, deserialize(serialize(config with
+        /// flush_every = d)).flush_every == d
+        ///
+        /// Serializing a config never loses `flush_every` precision.
+        #[test]
+        fn flush_every_round_trips(secs in any::<u64>(), nanos in 0u32..1_000_000_000) {
+            let mut config = parse(None);
+            config.flush_every = Duration::new(secs, nanos);
+            prop_assert_eq!(round_trip(&config).flush_every, config.flush_every);
+        }
+
+        /// For all n: u32 and each (unit, scale) below:
+        /// parse("{n}{unit}").flush_every == n * scale
+        ///
+        /// The single-unit forms that `humantime` accepted, and that the
+        /// `flush_every` documentation advertises, keep their meaning.
+        #[test]
+        fn flush_every_accepts_humantime_units(
+            n in any::<u32>(),
+            (unit, scale) in prop::sample::select(vec![
+                ("ns", Duration::from_nanos(1)),
+                ("us", Duration::from_micros(1)),
+                ("ms", Duration::from_millis(1)),
+                ("s", Duration::from_secs(1)),
+                ("sec", Duration::from_secs(1)),
+                ("m", Duration::from_secs(60)),
+                ("min", Duration::from_secs(60)),
+                ("h", Duration::from_secs(3600)),
+                ("hr", Duration::from_secs(3600)),
+            ]),
+        ) {
+            let parsed = parse(Some(&format!("\"{n}{unit}\""))).flush_every;
+            prop_assert_eq!(parsed, scale * n);
+        }
+    }
 }
