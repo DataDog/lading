@@ -72,7 +72,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-humantime-serde = { version = "1.1" }
+jiff = { version = "0.2", default-features = false, features = ["std", "serde"] }
 serde_qs = { version = "0.15", default-features = false }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true, features = ["std"] }
@@ -121,10 +121,6 @@ doctest = false
 
 [[bin]]
 name = "lading"
-
-[package.metadata.cargo-machete]
-# False positive: used via `#[serde(with = "humantime_serde")]` field attributes.
-ignored = ["humantime-serde"]
 
 [lints]
 workspace = true

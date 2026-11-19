@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- `file_gen` `flush_every` durations are now parsed by `jiff` instead of the
+  unmaintained `humantime` (RUSTSEC-2026-0542). ISO 8601 durations such as
+  `"PT1S"` are now accepted. Day, week, month and year units such as `"1d"`
+  are no longer accepted; write them in hours instead (e.g., `"24h"`).
 
 ### Fixed
 - `trace_agent` v0.4 spans now last at most ten seconds, as v1.0 spans do.
