@@ -1,0 +1,44 @@
+// Blackhole HTTP payload capture record.
+//
+// The wire format on disk is:
+//
+//   File prologue (8 bytes, written once at file create):
+//     bytes[0..4]  magic       = "LBHC"       // ASCII, "Lading BlackHole Capture"
+//     bytes[4..6]  version     = 0x0001 LE    // file format version
+//     bytes[6..8]  reserved    = 0x0000 LE    // reserved, must be zero
+//
+//   Records (repeated):
+//     A `BlackholeCaptureRecord` serialized as a length-delimited protobuf
+//     message: a `prost`-style varint containing the length in bytes of the
+//     following serialized message, followed by the serialized message.
+//     Compatible with `Message::encode_length_delimited` /
+//     `Message::decode_length_delimited`.
+//
+// The file is append-only. A reader observing EOF mid-record (truncated
+// varint or short payload read) should treat the run as ending there.
+
+syntax = "proto3";
+
+package lading.blackhole.v1;
+
+// One HTTP request captured by lading's HTTP blackhole. The record's
+// `payload` is the decoded request body; `content_type` and `request_path`
+// describe what the target claimed to be sending on this request.
+message BlackholeCaptureRecord {
+  // Milliseconds since the blackhole server started serving.
+  uint64 relative_ms = 1;
+
+  // Size of the compressed (on-wire) request body in bytes, before the
+  // blackhole applied Content-Encoding decoding. Informational.
+  uint64 compressed_bytes = 2;
+
+  // Value of the request's Content-Type header. Empty if absent.
+  string content_type = 3;
+
+  // Path portion of the request URI (e.g. "/api/v2/logs").
+  string request_path = 4;
+
+  // Decoded request body. If the request carried Content-Encoding (gzip,
+  // deflate, zstd), this field is the decompressed body.
+  bytes payload = 5;
+}
