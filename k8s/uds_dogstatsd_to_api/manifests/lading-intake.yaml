@@ -1,0 +1,67 @@
+# Lading intake (blackhole) - mimics Datadog API to receive agent output
+#
+# This deployment acts as a fake Datadog backend for self-contained testing:
+# - Accepts agent API v2 submissions at :8080
+# - Discards all received data (blackhole mode)
+# - Allows testing without external Datadog connectivity
+# - Used with network isolation (deny-egress.yaml) to ensure agent only talks to this intake
+# - Infinite runtime: runs until manually stopped
+#
+# The agent is configured to send to http://lading-intake:8080 instead of Datadog.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lading-intake-config
+  namespace: default
+data:
+  lading.yaml: |
+    blackhole:
+      - datadog:
+          v2:
+            binding_addr: "0.0.0.0:8080"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lading-intake
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lading-intake
+  template:
+    metadata:
+      labels:
+        app: lading-intake
+    spec:
+      containers:
+      - name: lading
+        image: ghcr.io/datadog/lading:0.29.2
+        args:
+        - "--config-path"
+        - "/etc/lading/lading.yaml"
+        - "--no-target"
+        - "--prometheus-addr"
+        - "0.0.0.0:9000"
+        - "--experiment-duration-infinite"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/lading
+      volumes:
+      - name: config
+        configMap:
+          name: lading-intake-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lading-intake
+  namespace: default
+spec:
+  selector:
+    app: lading-intake
+  ports:
+  - port: 8080
+    targetPort: 8080
