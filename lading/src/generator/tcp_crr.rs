@@ -1,4 +1,4 @@
-//! TCP connect/request/response (`tcp_crr`) generator — the client side.
+//! TCP connect/request/response (`tcp_crr`) generator - the client side.
 //! Based on <https://github.com/google/neper>
 //!
 //! Implements neper's `tcp_crr` protocol: each flow connects, sends a
@@ -51,7 +51,7 @@ fn default_data_port() -> u16 {
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_crr` generator.
 ///
-/// Flow count (neper `-F`) is *not* configured here — it is owned by the
+/// Flow count (neper `-F`) is *not* configured here - it is owned by the
 /// `tcp_crr` blackhole and communicated to the generator over the control
 /// port during startup.
 pub struct Config {
