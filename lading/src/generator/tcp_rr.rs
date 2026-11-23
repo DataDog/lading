@@ -16,14 +16,14 @@
 //! `bytes_read`: Response bytes received
 //! `connections_failed`: Failed connection attempts
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{AddrParseError, IpAddr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroUsize};
 
 use serde::{Deserialize, Serialize};
 
 use super::General;
 use crate::generator::common::MetricsBuilder;
-use crate::neper::rr::{self, ClientParams};
+use crate::neper::rr::{self, ClientParams, Mode};
 
 fn default_nonzero_u16() -> NonZeroU16 {
     NonZeroU16::new(1).expect("1 is nonzero")
@@ -81,6 +81,15 @@ pub enum Error {
     /// Shared neper-style request/response error.
     #[error(transparent)]
     Rr(#[from] rr::Error),
+    /// The configured `addr` is not a valid IP address.
+    #[error("invalid addr {addr:?}: {source}")]
+    InvalidAddr {
+        /// The `addr` value from the configuration.
+        addr: String,
+        /// Underlying parse error.
+        #[source]
+        source: AddrParseError,
+    },
 }
 
 #[derive(Debug)]
@@ -107,13 +116,17 @@ impl TcpRr {
     ///
     /// # Errors
     ///
-    /// Returns an error if a worker thread panics or configuration is invalid.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `addr` cannot be parsed as an IP address.
+    /// Returns an error if `addr` is not a valid IP address, if a worker thread
+    /// panics, or if configuration is otherwise invalid.
     pub async fn spin(self) -> Result<(), Error> {
-        let ip: IpAddr = self.config.addr.parse().expect("invalid addr");
+        let ip: IpAddr = self
+            .config
+            .addr
+            .parse()
+            .map_err(|source| Error::InvalidAddr {
+                addr: self.config.addr.clone(),
+                source,
+            })?;
         let params = ClientParams {
             data_addr: SocketAddr::new(ip, self.config.data_port),
             control_addr: SocketAddr::new(ip, self.config.control_port),
@@ -121,6 +134,7 @@ impl TcpRr {
             request_size: self.config.request_size.get(),
             response_size: self.config.response_size.get(),
             no_delay: self.config.no_delay,
+            mode: Mode::Rr,
         };
         rr::run_client(params, self.metric_labels, self.shutdown, "tcp_rr").await?;
         Ok(())
