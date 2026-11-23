@@ -26,6 +26,7 @@ ignore = [
   "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained
   "RUSTSEC-2026-0542", # humantime is unmaintained; removed by #1949
   "RUSTSEC-2026-0543", # chrono is unmaintained; pulled in by arrow, parquet and kube
+  "RUSTSEC-2026-0592", # url Url::origin stack overflow; never called by lading, reqwest or bollard; remove once url 2.5.9 ships
 ]
 
 [bans]
