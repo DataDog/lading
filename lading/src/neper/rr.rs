@@ -75,6 +75,9 @@ pub enum Error {
     /// this the same way so a stopped run fails identically on either side.
     #[error("Shutdown before {0}")]
     ShutdownDuringStartup(String),
+    /// A flow table operation failed.
+    #[error(transparent)]
+    Flow(#[from] flow::Error),
 }
 
 /// Which neper-style protocol the client is driving.
@@ -549,14 +552,12 @@ fn client_thread_main(
                 poll.registry()
                     .register(&mut stream, token, Interest::WRITABLE)
                     .map_err(poll_err("register a flow with the poll registry", addr))?;
-                flows
-                    .insert(Flow {
-                        stream,
-                        token,
-                        state: ClientState::SendRequest,
-                        xfer: request_size,
-                    })
-                    .expect("client should never be able to exceed FlowMap capacity");
+                flows.insert(Flow {
+                    stream,
+                    token,
+                    state: ClientState::SendRequest,
+                    xfer: request_size,
+                })?;
                 metrics.connections_initiated.add(1);
             }
             Err(e) => {
@@ -573,7 +574,7 @@ fn client_thread_main(
         }
         for event in &events {
             let token = event.token();
-            let Some(fl) = flows.get_mut(token) else {
+            let Some(fl) = flows.get_mut(token)? else {
                 continue;
             };
             let action = handle_client_event(fl, mode, &request_buf, &mut response_buf, metrics);
@@ -609,7 +610,7 @@ fn apply_client_action(
     match action {
         ClientAction::Continue => {}
         ClientAction::Reregister(interest) => {
-            if let Some(flow) = flows.get_mut(token) {
+            if let Some(flow) = flows.get_mut(token)? {
                 registry
                     .reregister(&mut flow.stream, flow.token, interest)
                     .map_err(poll_err("reregister a flow with the poll registry", addr))?;
@@ -618,7 +619,7 @@ fn apply_client_action(
         ClientAction::Reconnect => {
             // Take the flow out of the map so the old socket is fully closed
             // before the new connection is opened.
-            let Some(mut flow) = flows.remove(token) else {
+            let Some(mut flow) = flows.remove(token)? else {
                 return Ok(());
             };
             registry
@@ -665,7 +666,7 @@ fn apply_client_action(
         }
         ClientAction::Remove => {
             metrics.connections_closed.add(1);
-            if let Some(mut flow) = flows.remove(token) {
+            if let Some(mut flow) = flows.remove(token)? {
                 registry
                     .deregister(&mut flow.stream)
                     .map_err(poll_err("deregister a flow from the poll registry", addr))?;
@@ -1171,19 +1172,18 @@ fn server_thread_main(
                             // Insert first: `insert` takes the flow by value and
                             // drops it (closing the fd) on failure, so there is
                             // nothing registered to clean up on the error path.
-                            if let Err(err) = flows.insert(Flow {
+                            let flow = match flows.insert(Flow {
                                 stream,
                                 token,
                                 state: ServerState::RecvRequest,
                                 xfer: request_size,
                             }) {
-                                warn!(
-                                    "failed to insert flow in server FlowMap: {err} {0}",
-                                    token.0
-                                );
-                                break;
-                            }
-                            let flow = flows.get_mut(token).expect("flow was just inserted");
+                                Ok(flow) => flow,
+                                Err(err) => {
+                                    warn!("dropping accepted connection: {err}");
+                                    break;
+                                }
+                            };
                             poll.registry()
                                 .register(&mut flow.stream, token, Interest::READABLE)
                                 .map_err(poll_err(
@@ -1205,7 +1205,7 @@ fn server_thread_main(
                 }
             } else {
                 let token = event.token();
-                let Some(fl) = flows.get_mut(token) else {
+                let Some(fl) = flows.get_mut(token)? else {
                     continue;
                 };
                 let action =
